@@ -21,8 +21,8 @@ from ireports_spike_harness.gateway import DEFAULT_DSN, connect, init_schema
 
 CANDIDATES: dict[str, str] = {
     "hand-rolled": "spike_handrolled",
+    "strands": "spike_strands",
     # "langgraph": "spike_langgraph",
-    # "strands": "spike_strands",
 }
 
 

@@ -1,0 +1,20 @@
+[project]
+name = "spike-strands"
+version = "0.1.0"
+description = "Orchestration bake-off candidate: AWS Strands Agents SDK (ADR-012)"
+requires-python = ">=3.12"
+dependencies = [
+    "ireports-domain",
+    "ireports-spike-harness",
+    # Pinned to the version the Milestone 1b landscape scan read at tag python/v1.51.0, so the
+    # scan's source-level claims and this spike's measurements describe the same code.
+    "strands-agents>=1.51,<1.52",
+    "psycopg[binary]>=3.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spike_strands"]

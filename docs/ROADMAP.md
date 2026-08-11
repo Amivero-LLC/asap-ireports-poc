@@ -78,13 +78,35 @@ model call to PostgreSQL outside the framework so leg 1 is answerable, candidate
 across a real process boundary, and a permanently retained broken candidate proves leg 1 can
 actually fail something.
 
-**Hand-rolled result:** all four legs pass, 202 candidate-specific lines, 16,313-byte checkpoint
+**Hand-rolled result:** all four legs pass, ~200 candidate-specific lines, 16,379-byte checkpoint
 at the review interrupt, no dependencies beyond `psycopg`. That is the floor the frameworks are
 measured against — though a floor and not a total, since no-progress detection, cancellation,
-tool allowlists, and OTel spans are still owed.
+tool allowlists, and OTel spans are still owed. A follow-up probe added a further debit: it
+**re-executes a completed model call** when a crash lands mid-fan-out (see below).
 
-**Remaining:** the LangGraph and Strands candidates, the LangSmith egress-deny test if LangGraph
-is selected, the checkpoint-store threat model, and cold start under SAM local.
+**Strands result (2026-08-10): all four legs pass, and leg 1's open question is settled.** The
+landscape scan's unconfirmed third-party claim — that Strands restores *conversation* rather than
+resuming *execution* — **does not hold for `Graph` in `strands-agents` 1.51.0**. `serialize_state`
+carries `completed_nodes` and `next_nodes_to_execute`, state is synced after every node, and after
+a hard `os._exit(9)` no completed node re-executed. That was the single highest-value unknown in
+the milestone and it is now a measurement rather than a citation.
+
+The surprise runs the other way: **Strands is stronger than the hand-rolled baseline on
+mid-fan-out durability.** Crashing right after one specialist commits, the hand-rolled candidate
+re-runs a sibling that had already called the model but not yet committed; Strands, which makes
+each node durable as it finishes, does not. Leg 1 as written does not catch this because it
+asserts only on one specialist — a gap in the leg, recorded rather than quietly patched, since
+tightening it would fail a candidate whose result is already published.
+
+Costs measured, not asserted: 367 candidate-specific lines against ~200 (of which 159 are the
+PostgreSQL `SessionRepository` Strands does not ship), a 23,772-byte checkpoint against 16,379,
+and 39 added distributions / 34.1 MB — 20.1 MB of that `botocore`. State is also
+conversation-shaped: a node's durable result must be an `AgentResult`, which persists only
+`message` and `stop_reason`, so typed contracts are flattened into a message body and re-validated
+on the way out. Full write-up and the fair reading of the line counts: `spikes/README.md`.
+
+**Remaining:** the LangGraph candidate, the LangSmith egress-deny test if LangGraph is selected,
+the checkpoint-store threat model, and cold start under SAM local.
 
 **Exit:** a scorecard, a recommendation, and ADR-012 moved from `Open` to `Accepted`. Losing
 spikes are kept — a rejected candidate with a recorded reason is part of the handoff.

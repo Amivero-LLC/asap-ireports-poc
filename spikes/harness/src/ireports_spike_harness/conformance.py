@@ -142,17 +142,37 @@ def assert_leg1_durable_resume(module: str) -> LegResult:
     calls_after = observer.call_counts()
     all_pids = observer.distinct_processes()
 
+    calls_during_resume = sum(calls_after.values()) - sum(calls_before.values())
     measurements = {
         "calls_before_crash": calls_before,
         "calls_after_resume": calls_after,
         "distinct_processes": len(all_pids),
+        "model_calls_during_resume": calls_during_resume,
     }
 
-    if len(all_pids) < 2 or not (all_pids - crashed_pids):
+    # Did the resume genuinely happen in a new process? The model-call log answers that only
+    # when the resumed process actually called the gateway.
+    #
+    # **Amended 2026-08-10, and the amendment is the finding.** This guard used to demand a new
+    # pid unconditionally, which is a false negative for any candidate whose fan-out is fully
+    # durable at the crash point: it re-executes nothing, so it makes no model calls, so no new
+    # pid can appear. Strands hit exactly that — both specialists were durable before the kill
+    # and neither re-ran. Failing it for having *less* work left to redo would score durability
+    # backwards.
+    #
+    # The guard exists to catch an in-process `resume()` faking a restart. That cannot happen:
+    # `port.invoke` shells out through `subprocess.run` for every invocation, so the process
+    # boundary is structural. The pid check is corroboration, and it is enforced whenever there
+    # is anything to corroborate.
+    #
+    # Note what did **not** change: the `repeated != 1` assertion below, which is what actually
+    # measures execution-resume versus conversation-restore, and which `negative_control` must
+    # still fail.
+    if calls_during_resume > 0 and (len(all_pids) < 2 or not (all_pids - crashed_pids)):
         return LegResult(
             leg="1-durable-resume",
             passed=False,
-            detail="resume did not run in a new process; leg 1 was not actually exercised",
+            detail="resume re-called the gateway from the crashed process; not a real restart",
             measurements=measurements,
         )
 

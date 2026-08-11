@@ -93,9 +93,109 @@ accumulated copies, so this is a known inefficiency rather than an intrinsic cos
 comparison on this dimension must normalize on *what* is stored, or a framework that happens to
 store less will look better than it is.
 
-### LangGraph, Strands — not yet run
+### Strands Agents SDK — all four legs pass
 
-Add to `CANDIDATES` in `test_conformance.py` and they inherit the whole suite.
+`strands-agents` 1.51.0, the same tag the 1b scan read. Wired as a real
+`strands.multiagent.Graph`: Strands owns node scheduling, the parallel batch, the interrupt, and
+when state is written. What we supply is the PostgreSQL `SessionRepository` it does not ship, and
+the encode/decode of typed contracts into the only container it persists.
+
+| Measurement | Strands | hand-rolled |
+|---|---|---|
+| Candidate-specific code lines | **367** (session repo 159, orchestrator 148, nodes 54, entry 6) | 200 |
+| Serialized state at the review interrupt | **23,772 bytes** | 16,379 bytes |
+| Distributions beyond what the domain package already needs | **39 (34.1 MB)** — 20.1 MB of it `botocore` | 0 |
+| Framework advisory surface | to be tracked | none |
+
+#### Leg 1 settles the question the scan could not
+
+**The claim does not hold for `Graph` in 1.51.0.** §5.2 of the landscape scan records a
+third-party allegation that Strands restores *conversation* rather than resuming *execution* — an
+interested source, unconfirmed, and the highest-value unknown in the milestone. Measured:
+
+- `Graph.serialize_state()` persists `completed_nodes`, `node_results`, and
+  `next_nodes_to_execute`; `deserialize_state()` sets a resume flag and restarts from the computed
+  ready set rather than from the entry point.
+- State is synced after **every node**, via an `AfterNodeCallEvent` hook — not once at the end.
+- After a hard `os._exit(9)`, **no completed node re-executed.**
+
+This is execution resume, not conversation restore. The scan was right to mark the claim
+unverified rather than adopt it.
+
+#### And it is stronger than the baseline, in the one place that matters
+
+The crash could not be landed *mid*-fan-out: Strands makes each node durable as it finishes, so by
+the time the named specialist is durable its sibling already is too. Probing both crash targets
+against both candidates:
+
+| Crash after | Candidate | Model calls after resume | Verdict |
+|---|---|---|---|
+| `specialist_suitability` | hand-rolled | suitability=1, **national_security=2** | **re-ran a completed model call** |
+| `specialist_suitability` | strands | suitability=1, national_security=1 | no re-execution |
+| `specialist_national_security` | hand-rolled | suitability=1, national_security=1 | no re-execution |
+| `specialist_national_security` | strands | suitability=1, national_security=1 | no re-execution |
+
+The hand-rolled candidate commits fan-out results in completion order and dies immediately after
+the named node's commit — so a sibling that had already *called the model* but not yet committed
+is re-executed on resume. Correctness survives (still three findings), but a paid model call is
+spent twice. Strands' per-node sync does not have that window.
+
+**Leg 1 as written does not catch this**, because it asserts only on `specialist_suitability`.
+That is a gap in the leg, not a pass the hand-rolled candidate earned. Tightening it to assert
+every specialist ran exactly once would fail the hand-rolled candidate as it currently stands;
+whether to tighten it belongs with the ADR-012 resolution, not with a quiet edit here. Either way,
+the honest reading of the 200-line floor is that **it does not yet include durable handling of
+in-flight parallel work**, and adding that is real work.
+
+#### What Strands costs
+
+- **The `SessionRepository` is ours to build, and it is the single largest file in the candidate**
+  (159 of 367 lines). The scan predicted this. What the scan could not see is the ratio: a `Graph`
+  of deterministic nodes calls only `read/create/update_multi_agent`, yet the abstract base
+  requires session, agent, and message CRUD as well. Most of what we implement is never called.
+- **State is conversation-shaped.** A node's durable result must be an `AgentResult`, and
+  `AgentResult.to_dict` persists exactly `message` and `stop_reason` — `metrics` and `state` are
+  dropped. So typed Pydantic contracts have to be flattened into an assistant message body and
+  re-validated on the way out. This is the *defensible* core of the third-party claim: execution
+  genuinely resumes, but the container for state is a transcript, and a workflow carrying typed
+  records pays a serialize/parse tax at every node boundary. It also explains the larger
+  checkpoint: 23,772 bytes against 16,379 for the same three findings.
+- **`botocore` dominates the footprint** — 20.1 MB of the 34.1 MB added, pulled in whether or not
+  a run ever touches AWS. Relevant to a Lambda zip and to `pip-audit` surface, not to correctness.
+- **`Graph` owns run status**, so the domain state machine (`is_legal_transition`) is not enforced
+  in this candidate the way the hand-rolled one enforces it. Part of why 367 is not directly
+  comparable to 200 — see below.
+
+#### Reading the line counts fairly
+
+367 against 200 is not "Strands costs 167 lines". The two carry different things:
+
+- Strands **adds** a `SessionRepository` implementation (159 lines) that the hand-rolled candidate
+  does not need, because it writes its own two-table checkpoint (56 lines) instead.
+- Strands **omits** the domain run-status machine that the hand-rolled candidate enforces.
+- Strands **provides**, at no line cost to us, the per-node durability that the hand-rolled
+  candidate demonstrably lacks (table above), plus node scheduling and the interrupt primitive.
+
+The comparison ADR-012 actually needs is "each candidate's wiring **plus what it still owes**",
+and both still owe blueprint §8.5's no-progress and duplicate-query detectors, cancellation, tool
+allowlists, and OTel spans.
+
+### One harness amendment, recorded rather than quiet
+
+Leg 1's process-liveness guard used to require a new process id in the model-call log after every
+resume. Strands failed it for the wrong reason: it re-executed nothing, so it made no model calls,
+so no new pid could appear — the guard punished a candidate for having less work to redo.
+
+The guard now applies only when the resumed process actually called the gateway. It is
+corroboration, not the mechanism: `port.invoke` shells out through `subprocess.run` on every
+invocation, so the process boundary is structural and a candidate cannot fake an in-process
+resume. **Leg 1's actual assertion — that a completed specialist ran exactly once across the
+crash — is unchanged, and `negative_control` still fails it** with
+`specialist_suitability ran 2 times across the crash`.
+
+### LangGraph — not yet run
+
+Add to `CANDIDATES` in `test_conformance.py` and it inherits the whole suite.
 
 ---
 
