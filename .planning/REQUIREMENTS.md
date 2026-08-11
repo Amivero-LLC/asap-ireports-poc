@@ -9,8 +9,9 @@ the outstanding work items recorded in `docs/handoff/*`. Every requirement below
 document. The `REQ-{slug}` handles in the intel are carried in the *Traces* line of each requirement
 so the mapping back to the source is not lost.
 
-**Scope of v1:** close Milestone 1a, then deliver Milestone 2. Milestone 3 is deliberately not
-decomposed — see v2.
+**Scope of v1:** close Milestone 1a, deliver Milestone 2 behind an orchestration port with two
+adapters running it, then render the verdict on ADR-012 that Milestone 1c's *partial* spike could
+not. Milestone 3 is deliberately not decomposed — see v2.
 
 ---
 
@@ -28,19 +29,30 @@ decomposed — see v2.
       versions and the reason each dependency is there.
       *Acceptance:* every dependency has a recorded version and rationale. The orchestration layer is
       already covered by the 1b scan's footprint and version tables.
-      *Traces:* `REQ-library-inventory` · docs/ROADMAP.md §1a (partly covered).
-- [ ] **ARCH-03**: Cold start and packaging under SAM local are measured for all three retained
-      bake-off candidates, the figure is recorded, and ADR-012 is re-read against it.
-      *Acceptance:* a number exists per candidate; `spikes/test_scorecard.py` (which fails the moment
-      a figure is recorded) is updated; ADR-012 either stands with the number recorded or is
-      superseded.
-      *Traces:* `REQ-cold-start-measurement` · docs/ROADMAP.md §1c, scorecard §2. **The one number
-      most likely to reopen the framework choice — measured before nodes are written against it.**
+      *Traces:* `REQ-library-inventory` · docs/ROADMAP.md §1a (partly covered). **Moved from Phase 1
+      to Phase 9 on 2026-08-11** — the dependency set is not final until two orchestration adapters,
+      retrieval, and delivery are all in; inventorying it earlier means rewriting it every phase.
+- [ ] **ARCH-03**: Cold start and packaging under SAM local are measured for **both mission-carrying
+      adapters**, the figure is recorded, and ADR-012 is re-read against it.
+      *Acceptance:* a number exists per adapter, measured on the real seam-walk rather than on a
+      spike; `spikes/test_scorecard.py` (which fails the moment a figure is recorded) is updated.
+      *Traces:* `REQ-cold-start-measurement` · docs/ROADMAP.md §1c, scorecard §2. **Moved from Phase
+      1 to Phase 8 on 2026-08-11** — under a port-first build the port, not the measurement, is what
+      prevents lock-in, and by Phase 8 the number can be taken on real work with the alternative
+      adapter already running. The trade is recorded in ROADMAP.md § Phase 8.
 - [ ] **ARCH-04**: The repository's entry documents describe the actual current state.
       *Acceptance:* `CLAUDE.md` § Current state and `README.md` § Status no longer assert that
       application code does not exist or that the orchestration framework is undecided.
       *Traces:* INGEST-CONFLICTS.md WARNING 1 residue (the stack-table line was fixed 2026-08-11;
       the state narrative was not).
+- [ ] **ARCH-05**: The criteria that would supersede ADR-012 are recorded **before the build
+      starts**.
+      *Acceptance:* each criterion names the number or observation it turns on, and the record is
+      committed in Phase 1 — before either adapter carries mission logic. Phase 8 judges against
+      this list and may not substitute its own.
+      *Traces:* ADR-012 § conditions carried forward · scorecard §2 (the two qualifications riding
+      with the recommendation). **Rationale:** criteria invented after the effort is spent get
+      judged against the effort. Same instinct as `test_cold_start_is_null_and_stays_visible`.
 
 ### Contracts
 
@@ -102,6 +114,29 @@ decomposed — see v2.
       `api.smith.langchain.com` **and still succeeds**, because the failure is swallowed.
       *Traces:* `REQ-langsmith-egress-deny` (carried obligation) · ADR-012: "any future entry point
       inherits this obligation."
+- [ ] **ORCH-05**: A second adapter — hand-rolled — implements the same orchestration port, and one
+      conformance suite runs against both.
+      *Acceptance:* the suite is parameterized over adapters and both pass every leg; adding a third
+      adapter requires no change to any node; from Phase 3 onward, each phase's orchestration tests
+      run under both. The hand-rolled spike (195 lines, four legs passing) is the starting point —
+      what is new is satisfying the port the mission nodes call.
+      *Traces:* ADR-012 (hand-rolled is "the recorded runner-up and the fallback") · ORCH-01.
+      **Rationale:** a port with one implementation is an assertion, not an abstraction. An adapter
+      written later gets shaped, unnoticed, around whatever came first — which is why both land in
+      Phase 2 rather than the second one arriving at the end.
+
+### Orchestration verdict
+
+- [ ] **BAKE-01**: An outcome-level scorecard compares both adapters over the full seam-walk, and
+      ADR-012 stands on that evidence or is superseded.
+      *Acceptance:* the comparison is scored on the dimensions pre-registered under ARCH-05, not on
+      dimensions chosen after the results were in; ADR-012 either stands with the evidence recorded
+      or is superseded by a numbered entry; the scorecard states what it still does not measure, in
+      the same voice as its predecessor; the removal of Strands from the mission bake-off is recorded
+      as an amendment to ADR-012's candidate set, with `spikes/strands/` retained per ADR-001.
+      *Traces:* docs/ROADMAP.md §1c ("partial spike") · orchestration-scorecard.md §5 ("does not
+      measure real model behaviour... all four legs are about control flow"). **This runs what 1c
+      deferred; it does not redo what 1c did.**
 
 ### Checkpoint hardening
 
@@ -308,15 +343,15 @@ Turning them into phases would manufacture a plan the source refuses to make.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | ARCH-01 | Phase 1 | Pending |
-| ARCH-02 | Phase 1 | Pending |
-| ARCH-03 | Phase 1 | Pending |
 | ARCH-04 | Phase 1 | Pending |
+| ARCH-05 | Phase 1 | Pending |
 | CONT-01 | Phase 1 | Pending |
 | QUAL-01 | Phase 1 | Done (2026-08-11) |
 | ORCH-01 | Phase 2 | Pending |
 | ORCH-02 | Phase 2 | Pending |
 | ORCH-03 | Phase 2 | Pending |
 | ORCH-04 | Phase 2 | Pending |
+| ORCH-05 | Phase 2 | Pending |
 | QUAL-02 | Phase 2 | Pending |
 | CKPT-01 | Phase 3 | Pending |
 | CKPT-02 | Phase 3 | Pending |
@@ -334,15 +369,20 @@ Turning them into phases would manufacture a plan the source refuses to make.
 | REV-02 | Phase 7 | Pending |
 | DEL-01 | Phase 7 | Pending |
 | DEL-02 | Phase 7 | Pending |
-| HAND-01 | Phase 8 | Pending |
-| HAND-02 | Phase 8 | Blocked (GovCloud account access) |
-| HAND-03 | Phase 8 | Pending |
+| ARCH-03 | Phase 8 | Pending |
+| BAKE-01 | Phase 8 | Pending |
+| ARCH-02 | Phase 9 | Pending |
+| HAND-01 | Phase 9 | Pending |
+| HAND-02 | Phase 9 | Blocked (GovCloud account access) |
+| HAND-03 | Phase 9 | Pending |
 
 **Coverage:**
-- v1 requirements: 30 total
-- Mapped to phases: 30
+- v1 requirements: 33 total
+- Mapped to phases: 33
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-08-11*
-*Last updated: 2026-08-11 after the `/gsd-new-project` document ingest*
+*Last updated: 2026-08-11 — roadmap restructured to a port-first dual-adapter bake-off over the full
+seam-walk. Added ARCH-05, ORCH-05, BAKE-01; ARCH-03 moved Phase 1 → 8; ARCH-02 moved Phase 1 → 9.
+Nothing was removed and no acceptance criterion was weakened.*

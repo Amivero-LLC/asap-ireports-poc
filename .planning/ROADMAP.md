@@ -3,17 +3,33 @@
 ## Overview
 
 The project is sequenced so the riskiest architectural claims are settled first and every phase
-leaves behind an artifact the ASAP program team can act on (ADR-001). Milestones 1b and 1c are
-already complete; the orchestration framework is decided (LangGraph, ADR-012) on measured evidence.
+leaves behind an artifact the ASAP program team can act on (ADR-001).
 
-Phase 1 closes the last of Milestone 1a — the component-architecture write-up that program sign-off
-is waiting on — and takes the cold-start measurement **before** any node is written against
-LangGraph, because that is the one number most likely to reopen ADR-012. Phases 2 and 3 build the
-orchestration spine behind our own port and harden the checkpoint store that spine depends on.
+**The orchestration question is reopened deliberately, at a level the first bake-off did not
+reach.** Milestone 1c is complete and ADR-012 accepted LangGraph — but `docs/ROADMAP.md` §1c names
+that exercise a **partial spike**, and the scorecard says plainly what it did not measure: *"It does
+not measure real model behaviour... all four legs are about control flow."* It exercised checkpoint,
+interrupt, timeout, and fan-out against a deterministic stub. No routing, no retrieval, no finding,
+no validator, no delivery. ADR-012 is therefore treated here as the **provisional** answer that the
+real workload now tests, not as a settled matter being second-guessed.
+
+The test is structural rather than sequential. **Analysis logic is written once behind this
+project's own orchestration port, and two adapters run it: LangGraph and hand-rolled.** That is
+affordable only because ORCH-01 already forbids analysis nodes from importing LangGraph — the port
+was always the plan; building two adapters is what proves the port is real rather than a LangGraph
+tracing. Both land in Phase 2 and both stay in the conformance suite for every phase after, so the
+contest is continuous. An adapter written months later gets shaped, unnoticed, around whatever came
+first.
+
+Phase 1 closes Milestone 1a's sign-off obligation, publishes the one contract the build needs, and
+**pre-registers what would supersede ADR-012 — before anyone has a sunk cost in an adapter.**
+Phase 2 builds the port and both adapters. Phase 3 hardens the checkpoint store both depend on.
 Phases 4 through 7 walk the case through the system once: evidence in, authority routed, one
 specialist criterion analyzed, findings validated, a human disposition recorded, an envelope
-delivered to the ASAP mock. Phase 7 is the Milestone 2 exit. Phase 8 makes the handoff package
-current and confronts the GovCloud gate.
+delivered to the ASAP mock — adapter-agnostic by construction, tested under both. Phase 7 is the
+Milestone 2 exit. Phase 8 is the verdict: cold start and packaging measured on both adapters
+carrying real work, an outcome-level scorecard, and ADR-012 either standing with the evidence
+recorded or superseded. Phase 9 makes the handoff package current and confronts the GovCloud gate.
 
 Milestone 3 is a named placeholder with no phases. See § Milestone 3 below.
 
@@ -52,10 +68,10 @@ loudly on drift, and requires the handoff to record the coupling as unverified.
 ### Q-01 — Claude model availability in AWS GovCloud · OPEN · **refuses any working assumption**
 
 The one item this project declines to assume. All model evidence to date is commercial-partition
-only and says nothing about GovCloud. HAND-02 in Phase 8 closes it by re-running the live smoke
+only and says nothing about GovCloud. HAND-02 in Phase 9 closes it by re-running the live smoke
 check in the target account and **appending** the result to `compatibility-matrix.md` as a second
 run-of-record. It is externally blocked on GovCloud account access; if access does not arrive, Phase
-8 records the cost of not knowing rather than guessing.
+9 records the cost of not knowing rather than guessing.
 
 ---
 
@@ -65,10 +81,11 @@ run-of-record. It is externally blocked on GovCloud account access; if access do
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Close the architecture package** - Component-architecture write-up, library
-      inventory, cold-start measurement, and the last contract the framework decision was blocking
-- [ ] **Phase 2: Orchestration spine behind our own port** - LangGraph adapter, model-call
-      idempotency, budget enforcement, LangSmith pinned closed
+- [ ] **Phase 1: Close the architecture package** - Component-architecture write-up, the
+      `SpecialistResult` contract, entry-doc refresh, and ADR-012's reopen criteria written down
+      before the build
+- [ ] **Phase 2: The orchestration port and both adapters** - One port, two implementations,
+      one conformance suite; model-call idempotency, budget enforcement, LangSmith pinned closed
 - [ ] **Phase 3: Harden the checkpoint store** - Row integrity, least privilege, resume provenance
 - [ ] **Phase 4: Case evidence in, retrieval through the port** - One synthetic case indexed locally,
       every field name in one PROVISIONAL mapping module
@@ -77,56 +94,73 @@ run-of-record. It is externally blocked on GovCloud account access; if access do
 - [ ] **Phase 6: One specialist, validated** - Proposed findings against one criterion, rejected
       before a reviewer sees them if unsupported
 - [ ] **Phase 7: Human review gate and ASAP delivery** - The Milestone 2 exit: one command, synthetic
-      case to delivered human-approved iReport
-- [ ] **Phase 8: Handoff package and the GovCloud gate** - What the program team receives, and what
+      case to delivered human-approved iReport, under both adapters
+- [ ] **Phase 8: The verdict** - Cold start and packaging on real work, the outcome-level scorecard,
+      and ADR-012 either standing on evidence or superseded
+- [ ] **Phase 9: Handoff package and the GovCloud gate** - What the program team receives, and what
       Q-01 turns out to cost
 
 ## Phase Details
 
 ### Phase 1: Close the architecture package
-**Goal**: Program leadership can sign off on Milestone 1a, and the framework decision has been
-re-read against the one number that could reopen it.
+**Goal**: Program leadership can sign off on Milestone 1a's component boundaries, the build has the
+contract and the port boundary it needs, and what would reopen ADR-012 is written down before anyone
+has a sunk cost in an adapter.
 **Depends on**: Nothing (Milestones 1b and 1c are complete)
-**Requirements**: ARCH-01, ARCH-02, ARCH-03, ARCH-04, CONT-01, QUAL-01
+**Requirements**: ARCH-01, ARCH-04, ARCH-05, CONT-01
 **Success Criteria** (what must be TRUE):
   1. A reader of the component-architecture write-up can point to where our system ends and the AWS
      ingestion pipeline, ASAP, and the human reviewer begin — and program leadership signs off on
      those boundaries.
-  2. Every dependency in the project has a recorded version and a recorded reason it is there.
-  3. A cold-start and packaging figure exists under SAM local for all three retained bake-off
-     candidates, and ADR-012 has been re-read against it and either stands with the number recorded
-     or is superseded.
+  2. The write-up marks every component BUILT, PLANNED (naming the phase that delivers it), or NOT
+     OURS, and a test fails if a BUILT row does not resolve to a real path or a PLANNED row already
+     exists.
+  3. The orchestration port's boundary is specified precisely enough that two adapters can be
+     written against it without either one shaping it.
   4. `SpecialistResult` is published to `schemas/` with contract tests, carrying no aggregate score
      field.
-  5. `mypy --strict` is clean across the workspace, and no handoff document claims a quality gate
-     that does not hold.
+  5. The criteria that would supersede ADR-012 are recorded **before the build starts**, each naming
+     the number or observation it turns on.
+  6. `CLAUDE.md` § Current state and `README.md` § Status no longer assert that application code does
+     not exist or that the orchestration framework is undecided.
 **Plans**: TBD
 
-*Why cold start is here and not in Phase 2:* it can be measured today against the three retained
-spikes, before a single analysis node is written against LangGraph. `spikes/test_scorecard.py` fails
-the moment a figure is recorded, which forces the recommendation to be re-read rather than left
-standing. Measuring it after Phase 2 would mean discovering a framework problem after paying for it.
+*Diagrams are Mermaid fences inside the write-up*, canonical there rather than exported — the
+diagram and the prose stay one reviewable artifact, and it diffs. The build-state table is enforced
+by a test for the same reason ARCH-04 exists at all: `CLAUDE.md`'s state narrative went stale and
+nothing caught it.
 
-### Phase 2: Orchestration spine behind our own port
+*Why the reopen criteria are pre-registered:* the same instinct as
+`test_cold_start_is_null_and_stays_visible`. Criteria invented after the effort is spent are judged
+against the effort. Phase 8 is the verdict, and it should not get to choose its own rubric.
+
+### Phase 2: The orchestration port and both adapters
 **Goal**: A run can execute, checkpoint, crash, and resume in a different process — through this
-project's own orchestration port, with no analysis code aware of LangGraph.
+project's own orchestration port, under either of two adapters, with no analysis code aware of which
+one is underneath.
 **Depends on**: Phase 1
-**Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04, QUAL-02
+**Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04, ORCH-05, QUAL-02
 **Success Criteria** (what must be TRUE):
   1. A run survives a mid-node process kill and resumes in a separate process without re-executing
-     completed work.
-  2. No file outside the orchestration adapter imports LangGraph, and a test proves it.
-  3. A crash mid-fan-out does not re-run an in-flight model call — measured as 0 duplicate paid calls
-     over the same 24-trial harness that measured LangGraph at 11/24.
-  4. A node that hits a model-call, tool-call, token, or wall-clock ceiling emits
+     completed work — **under both adapters**.
+  2. No file outside an orchestration adapter imports LangGraph, and a test proves it.
+  3. One conformance suite is parameterized over adapters, both pass it, and adding a third adapter
+     requires no change to any node.
+  4. A crash mid-fan-out does not re-run an in-flight model call — measured as 0 duplicate paid calls
+     over the same 24-trial harness that measured LangGraph at 11/24 and hand-rolled at 12/24.
+  5. A node that hits a model-call, tool-call, token, or wall-clock ceiling emits
      `INCOMPLETE_DUE_TO_BUDGET` and routes to human review, not to failure.
-  5. LangSmith egress is proven closed at every production entry point by a fail-closed test, not
+  6. LangSmith egress is proven closed at every production entry point by a fail-closed test, not
      merely configured closed.
 **Plans**: TBD
 
 *Two LangGraph defaults are wrong here and invisible when reading a graph:* `durability` defaults to
 `async` rather than `sync`, and checkpoint deserialization defaults to permissive. Both must be set
 in code with tests — a reviewer cannot catch them by reading the graph.
+
+*The second adapter is not redundancy, it is the test of the port.* A port with one implementation
+is an assertion. The hand-rolled spike already passes the four legs in 195 lines, so the starting
+point exists; what is new is making it satisfy the same port the mission nodes call.
 
 ### Phase 3: Harden the checkpoint store
 **Goal**: A tampered or replayed checkpoint cannot alter a finding, skip the review gate, or execute
@@ -148,6 +182,9 @@ an execution problem. The controls implemented in the bake-off — plain JSON, s
 construction, never `pickle`, re-validation on load — are the floor, not the ceiling; strict mode
 fails *soft*, returning a refused value as a plain `dict` rather than raising, which is why
 re-validation is load-bearing rather than belt-and-braces.
+
+*Both adapters share this store*, so hardening it is adapter-independent — and a control that turns
+out to depend on `PostgresSaver`'s table shape is a finding about the port, recorded as one.
 
 ### Phase 4: Case evidence in, retrieval through the port
 **Goal**: One synthetic case is ingested and retrievable, with every OpenSearch detail contained in a
@@ -215,9 +252,12 @@ specialist returns `""`, which validates, yields no finding, and reaches a revie
 result. Refusals are expected in normal operation — adjudicative case files routinely discuss
 criminal conduct, substance use, and foreign contacts.
 
+*This is the first phase where the two adapters run real model calls*, so it is also the first
+honest read on whether either one gets in the way of a specialist query.
+
 ### Phase 7: Human review gate and ASAP delivery
 **Goal**: The Milestone 2 exit — one command takes a synthetic case to a delivered, human-approved
-iReport, with every seam exercised once.
+iReport, with every seam exercised once, under both adapters.
 **Depends on**: Phase 6
 **Requirements**: REV-01, REV-02, DEL-01, DEL-02
 **Success Criteria** (what must be TRUE):
@@ -230,18 +270,48 @@ iReport, with every seam exercised once.
   4. Delivery to the ASAP mock goes through the transactional outbox with an idempotency key; a
      replayed delivery does not double-deliver; a `DeliveryReceipt` is recorded.
   5. One command takes a synthetic case end to end — ingest, routing, specialist, validation, review
-     gate, outbox, receipt — and produces a delivered, human-approved iReport.
+     gate, outbox, receipt — and produces a delivered, human-approved iReport, **under both
+     adapters, from the same command**.
 **Plans**: TBD
 
 *No dev-mode auto-approve flag may be added to make this convenient.* That affordance is exactly the
 one that survives into production, which is why ADR-011 makes the gate a state transition rather than
 a configuration option.
 
-### Phase 8: Handoff package and the GovCloud gate
+### Phase 8: The verdict
+**Goal**: The framework choice has been re-read against the real workload rather than a partial
+spike, and either stands with the evidence recorded or is superseded.
+**Depends on**: Phase 7
+**Requirements**: ARCH-03, BAKE-01
+**Success Criteria** (what must be TRUE):
+  1. Cold start and packaging under SAM local are measured for **both adapters carrying the real
+     seam-walk**, the figures are recorded, and `spikes/test_scorecard.py` is updated.
+  2. An outcome-level scorecard compares both adapters over the full seam-walk on the dimensions
+     pre-registered in Phase 1 — not on dimensions chosen after the results were in.
+  3. ADR-012 either stands with the evidence recorded, or is superseded by a numbered entry stating
+     what changed and why.
+  4. The scorecard states what it still does not measure, in the same voice as its predecessor.
+**Plans**: TBD
+
+*Why cold start moved here from Phase 1.* The original roadmap measured it first, so it would land
+"before a single analysis node is written against LangGraph." Port-first weakens that reason: nodes
+are written against the port, and the port — not the measurement — is what prevents lock-in. The
+trade is real and stated plainly: **if LangGraph's cold start is disqualifying, that surfaces at
+Phase 8 rather than Phase 1.** What makes it acceptable is that by Phase 8 the hand-rolled adapter
+is already running the same seam-walk, so the escape hatch is open rather than theoretical — and the
+number is measured on real work instead of on a toy spike.
+
+*Strands does not carry mission logic.* It was last on every measured axis (373 lines against
+195/266, 42 distributions, +47.3 MB), and the scorecard already footnotes its 0/24 duplicate-call
+result as an artifact of synchronous node bodies rather than a durability property. This **amends
+ADR-012's candidate set and is recorded as such**; `spikes/strands/` stays in the repository and in
+the suite per ADR-001.
+
+### Phase 9: Handoff package and the GovCloud gate
 **Goal**: The ASAP program team receives something they can act on, and Q-01 is either closed or its
 cost is recorded rather than guessed.
-**Depends on**: Phase 7
-**Requirements**: HAND-01, HAND-02, HAND-03
+**Depends on**: Phase 8
+**Requirements**: HAND-01, HAND-02, HAND-03, ARCH-02
 **Success Criteria** (what must be TRUE):
   1. Decisions, open questions, contracts and schemas, deployment and packaging notes, and **known
      failure modes and things that did not work** are current as of the Milestone 2 exit, with every
@@ -252,11 +322,16 @@ cost is recorded rather than guessed.
      open.
   3. The `bedrock` adapter has been exercised against a real endpoint at least once, so the green
      test suite is no longer being read as connectivity.
+  4. Every dependency in the project has a recorded version and a recorded reason it is there.
 **Plans**: TBD
 
 *Q-01 refuses a working assumption and this phase does not supply one.* A commercial-partition result
 is not evidence about GovCloud: a model that answers here may be absent there, an endpoint that
 resolves here may not exist there, and a request shape accepted here may be rejected there.
+
+*The dependency inventory lands here rather than in Phase 1* because by this point the dependency
+set is the real one — two orchestration adapters, retrieval, and delivery are all in — instead of an
+inventory that would need rewriting after every phase.
 
 ---
 
@@ -272,29 +347,31 @@ both carry them verbatim.
 Decomposing that list into phases would invent scope and ordering the source deliberately withheld.
 The candidates are recorded in `.planning/REQUIREMENTS.md` § v2 as M3-a through M3-f, unordered.
 
-**To open Milestone 3:** complete Phase 7, read the M2 measurements, and run a fresh roadmapping pass
-that sequences from those measurements. Do not linearize the candidate list.
+**To open Milestone 3:** complete Phase 8, read the M2 measurements and the verdict, and run a fresh
+roadmapping pass that sequences from those measurements. Do not linearize the candidate list.
 
 ---
 
 ## Progress
 
-**Execution Order:** Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
+**Execution Order:** Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Close the architecture package | 0/TBD | Not started | - |
-| 2. Orchestration spine behind our own port | 0/TBD | Not started | - |
+| 2. The orchestration port and both adapters | 0/TBD | Not started | - |
 | 3. Harden the checkpoint store | 0/TBD | Not started | - |
 | 4. Case evidence in, retrieval through the port | 0/TBD | Not started | - |
 | 5. Authority routing selects the policy pack | 0/TBD | Not started | - |
 | 6. One specialist, validated | 0/TBD | Not started | - |
 | 7. Human review gate and ASAP delivery | 0/TBD | Not started | - |
-| 8. Handoff package and the GovCloud gate | 0/TBD | Not started | - |
+| 8. The verdict | 0/TBD | Not started | - |
+| 9. Handoff package and the GovCloud gate | 0/TBD | Not started | - |
 
 **Milestone mapping:** Phase 1 closes Milestone 1a. Phases 2–7 deliver Milestone 2 (Phase 7 is its
-verbatim exit). Phase 8 is the Continuous handoff obligation brought to a checkpoint. Milestone 3 is
-a placeholder above.
+verbatim exit). Phase 8 completes what `docs/ROADMAP.md` §1c calls the *partial* spike — the full
+bake-off, at outcome level. Phase 9 is the Continuous handoff obligation brought to a checkpoint.
+Milestone 3 is a placeholder above.
 
 ---
 
@@ -306,10 +383,17 @@ Recorded here so a cold session does not re-derive it.
 |---|---|---|
 | 1a · Data contracts | Complete 2026-08-10 | 13 Pydantic v2 contracts in `packages/domain/`, `schemas/`, `docs/handoff/contracts.md` |
 | 1a · Model gateway | Complete 2026-08-10 | `packages/gateway/`, `docs/handoff/model-gateway.md`, `docs/handoff/compatibility-matrix.md` |
-| 1a · Remainder | **Outstanding** | → Phase 1 |
+| 1a · Remainder | **Outstanding** | → Phase 1 (sign-off + contract), Phase 9 (dependency inventory) |
 | 1b · Orchestration landscape scan | Complete 2026-08-10 | `docs/handoff/orchestration-landscape.md` |
-| 1c · Orchestration bake-off | Complete 2026-08-11 | ADR-012 Accepted (LangGraph); `spikes/`, `docs/handoff/orchestration-scorecard.md`, `orchestration-scorecard.json`, `docs/handoff/checkpoint-threat-model.md` |
+| 1c · Orchestration bake-off (**partial spike**) | Complete 2026-08-11 | ADR-012 Accepted (LangGraph); `spikes/`, `docs/handoff/orchestration-scorecard.md`, `orchestration-scorecard.json`, `docs/handoff/checkpoint-threat-model.md` |
+
+**1c is complete and its result stands as the provisional answer.** It is reopened at outcome level
+by Phases 2–8 because it was scoped as a partial spike against a deterministic stub — its own
+scorecard §5 records that it measured no real model behaviour, no retrieval, no findings, and no
+delivery. Nothing in 1c is being redone; what it deferred is being run.
 
 ---
 *Roadmap created: 2026-08-11 from `.planning/intel/SYNTHESIS.md` (12 source documents, 19 LOCKED
 ADRs, 0 ingest blockers).*
+*Restructured: 2026-08-11 — port-first dual-adapter bake-off over the full seam-walk. 8 phases → 9.
+ARCH-03 moved Phase 1 → 8; ARCH-02 moved Phase 1 → 9; ARCH-05, ORCH-05, BAKE-01 added.*

@@ -39,16 +39,21 @@ exercised once and every claim in the handoff package either cited or explicitly
 
 Full list with IDs and acceptance in `.planning/REQUIREMENTS.md`. Summary:
 
-- [ ] Close Milestone 1a — component-architecture write-up, library inventory, cold-start
-      measurement, `SpecialistResult`, `mypy --strict` clean (ARCH-01..04, CONT-01, QUAL-01)
-- [ ] Orchestration spine on LangGraph behind our own port, with model-call idempotency, budget
-      enforcement, and LangSmith pinned closed at every entry point (ORCH-01..04, QUAL-02)
+- [ ] Close Milestone 1a's sign-off obligation — component-architecture write-up, entry-doc refresh,
+      `SpecialistResult`, and ADR-012's reopen criteria pre-registered (ARCH-01, ARCH-04, ARCH-05,
+      CONT-01; QUAL-01 done)
+- [ ] Orchestration port with **two** adapters behind it — LangGraph and hand-rolled, one
+      conformance suite over both — with model-call idempotency, budget enforcement, and LangSmith
+      pinned closed at every entry point (ORCH-01..05, QUAL-02)
 - [ ] Checkpoint hardening — row integrity, least privilege, resume provenance (CKPT-01..03)
 - [ ] Case evidence in and retrieval through the port, PROVISIONAL under Q-02 (RETR-01..03, CONT-02)
 - [ ] Authority routing selects the policy pack, explicit decision per authority (ROUT-01..02)
 - [ ] One specialist produces validated proposed findings against one criterion (SPEC-01, VAL-01..02)
 - [ ] Human review gate and ASAP delivery through the outbox (REV-01..02, DEL-01..02)
-- [ ] Handoff package current, and the Q-01 GovCloud gate closed or its cost recorded (HAND-01..03)
+- [ ] The verdict — cold start and packaging measured on both adapters carrying the real seam-walk,
+      an outcome-level scorecard, and ADR-012 standing on evidence or superseded (ARCH-03, BAKE-01)
+- [ ] Handoff package current, dependency inventory recorded, and the Q-01 GovCloud gate closed or
+      its cost recorded (HAND-01..03, ARCH-02)
 
 ### Out of Scope
 
@@ -89,13 +94,23 @@ started. Milestone 3 is an explicit placeholder.
 `IREPORTS_LIVE_SMOKE=1`). `ruff` clean. `mypy --strict` **clean across 48 source files** — the 15 pre-existing `tests/contract/` errors were cleared 2026-08-11 (QUAL-01 done). `pip-audit` reports no
 known vulnerabilities over the pinned set.
 
-**The orchestration decision is settled and the reasoning matters.** All three bake-off candidates
-passed all four legs, so ADR-012 turned on cost, not correctness: durable checkpointing over
-PostgreSQL cost two lines with LangGraph's first-party `PostgresSaver`, against 56 hand-rolled and
-166 for a `SessionRepository` Strands does not ship. Hand-rolled is the recorded runner-up and the
-fallback if the dependency surface is refused. Both losing spikes are retained and still run in the
-suite. Cold start under SAM local was never measured for any candidate and is the one number most
-likely to reopen the choice — `spikes/test_scorecard.py` fails the moment a figure is recorded.
+**The orchestration decision is provisional, and is being re-tested at outcome level.** All three
+bake-off candidates passed all four legs, so ADR-012 turned on cost, not correctness: durable
+checkpointing over PostgreSQL cost two lines with LangGraph's first-party `PostgresSaver`, against 56
+hand-rolled and 166 for a `SessionRepository` Strands does not ship. But `docs/ROADMAP.md` §1c names
+that exercise a **partial spike**, and its scorecard §5 records what it did not measure: *"It does
+not measure real model behaviour... all four legs are about control flow."* No routing, no retrieval,
+no finding, no validator, no delivery.
+
+So the roadmap now writes analysis logic **once behind this project's orchestration port and runs it
+under two adapters** — LangGraph and hand-rolled — both landing in Phase 2 and both staying in one
+conformance suite thereafter. That is affordable only because ORCH-01 already forbids nodes from
+importing LangGraph; the second adapter is what proves the port is an abstraction rather than a
+LangGraph tracing. Strands no longer carries mission logic (last on every measured axis) — an
+amendment to ADR-012's candidate set, with `spikes/strands/` retained per ADR-001. Cold start under
+SAM local is still unmeasured; `spikes/test_scorecard.py` fails the moment a figure is recorded, and
+it is now taken in Phase 8 on both adapters carrying real work. **What would supersede ADR-012 is
+written down in Phase 1, before either adapter carries mission logic.**
 
 **`blueprint.md` is the project's INPUT, not its output.** It is deliberately lowest precedence.
 Wherever it conflicts with `docs/DECISIONS.md`, DECISIONS.md wins, and the divergence is recorded
@@ -248,5 +263,6 @@ it before building on an assumption. Q-01, Q-02, and Q-03 are GATE items — see
 `.planning/ROADMAP.md` § Gates for how each is being handled.
 
 ---
-*Last updated: 2026-08-11 after `/gsd-new-project` ingest of 12 source documents
+*Last updated: 2026-08-11 — roadmap restructured to a port-first dual-adapter bake-off over the full
+seam-walk. Originally created from the `/gsd-new-project` ingest of 12 source documents
 (`.planning/intel/SYNTHESIS.md`, `.planning/INGEST-CONFLICTS.md`).*
