@@ -1,0 +1,431 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/specialist-result.schema.json",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "Confidence": {
+      "enum": [
+        "low",
+        "moderate",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "DecisionDomain": {
+      "description": "The distinct legal authorities this system analyses against.\n\nADR-003 and blueprint \u00a72.1: suitability, fitness, PIV credentialing, and national-security\neligibility are distinct authorities with distinct criteria. Collapsing them produces\nanalysis that is wrong in a way that is hard to detect, so every finding names exactly one.",
+      "enum": [
+        "suitability",
+        "fitness",
+        "national_security_eligibility",
+        "piv_credentialing"
+      ],
+      "title": "DecisionDomain",
+      "type": "string"
+    },
+    "FindingAuthority": {
+      "additionalProperties": false,
+      "description": "The single authority and criterion this finding is analysed under.\n\nOne authority per finding, always. Blueprint \u00a72.1: collapsing distinct authorities produces\nanalysis that is wrong in a way that is hard to detect. If the same conduct is relevant under\nboth 5 CFR 731 and SEAD-4, that is two findings with two criteria, joined at synthesis by\nde-duplication that preserves both \u2014 not one finding with a merged rationale.",
+      "properties": {
+        "decision_domain": {
+          "$ref": "#/$defs/DecisionDomain"
+        },
+        "policy_pack_id": {
+          "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+          "title": "Policy Pack Id",
+          "type": "string"
+        },
+        "policy_id": {
+          "minLength": 1,
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "criterion_id": {
+          "minLength": 1,
+          "title": "Criterion Id",
+          "type": "string"
+        },
+        "policy_citations": {
+          "description": "At least one. A policy-relevance claim with no resolvable policy citation is exactly what the deterministic validator exists to reject.",
+          "items": {
+            "pattern": "^pol_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Policy Citations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "decision_domain",
+        "policy_pack_id",
+        "policy_id",
+        "criterion_id",
+        "policy_citations"
+      ],
+      "title": "FindingAuthority",
+      "type": "object"
+    },
+    "FindingClassification": {
+      "description": "What kind of thing this finding is.\n\nEvery member is a statement about the *record*, not about the person. There is deliberately\nno member meaning \"adverse\", \"disqualifying\", or \"cleared\" \u2014 those are determinations.",
+      "enum": [
+        "potential_issue",
+        "mitigating_information",
+        "contradiction",
+        "information_gap",
+        "no_issue_identified"
+      ],
+      "title": "FindingClassification",
+      "type": "string"
+    },
+    "FindingValidation": {
+      "additionalProperties": false,
+      "description": "Results of the deterministic validators (blueprint \u00a78.1, \u00a710.4).\n\nThe model does not decide whether its own output is valid \u2014 `CLAUDE.md`, \"deterministic\nshell around probabilistic reasoning\". These outcomes are written by validator code.",
+      "properties": {
+        "schema_check": {
+          "$ref": "#/$defs/ValidationOutcome",
+          "description": "Named `schema_check` rather than blueprint \u00a710.4's `schema`, which would shadow a BaseModel attribute. Divergence is cosmetic."
+        },
+        "citations": {
+          "$ref": "#/$defs/ValidationOutcome",
+          "description": "Every cited evidence and policy id resolved against the run's snapshots."
+        },
+        "policy_effective_date": {
+          "$ref": "#/$defs/ValidationOutcome"
+        },
+        "protected_attribute_check": {
+          "$ref": "#/$defs/ValidationOutcome"
+        },
+        "prohibited_language_check": {
+          "$ref": "#/$defs/ValidationOutcome"
+        }
+      },
+      "required": [
+        "schema_check",
+        "citations",
+        "policy_effective_date",
+        "protected_attribute_check",
+        "prohibited_language_check"
+      ],
+      "title": "FindingValidation",
+      "type": "object"
+    },
+    "GeneratedBy": {
+      "additionalProperties": false,
+      "description": "Provenance of the machine proposal.\n\n`model_alias` is an alias, never a model ID (ADR-008). Blueprint \u00a710.4's example carries a\nconcrete model name; this is a deliberate divergence so that a partition or model-generation\nchange stays a LiteLLM config change.",
+      "properties": {
+        "node": {
+          "minLength": 1,
+          "title": "Node",
+          "type": "string"
+        },
+        "model_alias": {
+          "$ref": "#/$defs/ModelAlias"
+        },
+        "prompt_version": {
+          "minLength": 1,
+          "title": "Prompt Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "model_alias",
+        "prompt_version"
+      ],
+      "title": "GeneratedBy",
+      "type": "object"
+    },
+    "InformationGap": {
+      "additionalProperties": false,
+      "description": "A question for the reviewer.\n\nBlueprint \u00a78.4: the `propose_information_gap` tool records a question \u2014 it does not authorize\nexternal investigation or contact. Nothing in this contract carries an action to take.",
+      "properties": {
+        "gap_id": {
+          "pattern": "^gap_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Gap Id",
+          "type": "string"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "why_it_matters": {
+          "minLength": 1,
+          "title": "Why It Matters",
+          "type": "string"
+        },
+        "related_evidence_ids": {
+          "items": {
+            "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "title": "Related Evidence Ids",
+          "type": "array"
+        },
+        "blocking": {
+          "default": false,
+          "description": "True when analysis under this criterion cannot be completed without an answer.",
+          "title": "Blocking",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "gap_id",
+        "question",
+        "why_it_matters"
+      ],
+      "title": "InformationGap",
+      "type": "object"
+    },
+    "ModelAlias": {
+      "description": "The only model references application code and contracts may carry.\n\nADR-008: concrete Bedrock model IDs, inference-profile IDs, and regions live in LiteLLM\nconfig. A partition change must be a config change, so a model ID must never reach a\ncontract. Blueprint \u00a710.3's example run manifest names a concrete model\n(`case-analysis-sonnet`); that is a divergence this enum deliberately closes.",
+      "enum": [
+        "ireports-orchestrator",
+        "ireports-thinking",
+        "ireports-fast"
+      ],
+      "title": "ModelAlias",
+      "type": "string"
+    },
+    "ProposedFinding": {
+      "additionalProperties": false,
+      "description": "A machine-proposed finding, pending human disposition.\n\nImmutable by construction (`ContractModel` is frozen). ADR-011 requires that both the machine\nproposal and the human-approved version are retained, which only works if the proposal cannot\nbe edited in place.",
+      "properties": {
+        "schema_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "finding_id": {
+          "pattern": "^fnd_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "case_id": {
+          "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "authority": {
+          "$ref": "#/$defs/FindingAuthority"
+        },
+        "classification": {
+          "$ref": "#/$defs/FindingClassification"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "observation": {
+          "description": "What the record indicates. Descriptive, and fully supported by cited evidence.",
+          "minLength": 1,
+          "title": "Observation",
+          "type": "string"
+        },
+        "policy_relevance": {
+          "description": "Why this may be relevant under the cited criterion. 'May be relevant' is the ceiling \u2014 relevance is proposed, applicability is the officer's call.",
+          "minLength": 1,
+          "title": "Policy Relevance",
+          "type": "string"
+        },
+        "supporting_evidence": {
+          "items": {
+            "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "title": "Supporting Evidence",
+          "type": "array"
+        },
+        "mitigating_evidence": {
+          "items": {
+            "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "title": "Mitigating Evidence",
+          "type": "array"
+        },
+        "contradicting_evidence": {
+          "items": {
+            "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "title": "Contradicting Evidence",
+          "type": "array"
+        },
+        "aggravating_factors": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Aggravating Factors",
+          "type": "array"
+        },
+        "mitigating_factors": {
+          "description": "Whole-person and mitigation analysis is required, not optional (blueprint \u00a78.3.6). A finding that records only aggravating factors is a red flag in evaluation.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Mitigating Factors",
+          "type": "array"
+        },
+        "information_gaps": {
+          "items": {
+            "$ref": "#/$defs/InformationGap"
+          },
+          "title": "Information Gaps",
+          "type": "array"
+        },
+        "evidence_confidence": {
+          "$ref": "#/$defs/Confidence",
+          "description": "How solid the underlying record is \u2014 source reliability and corroboration."
+        },
+        "analysis_confidence": {
+          "$ref": "#/$defs/Confidence",
+          "description": "How confident the analysis is that the criterion is implicated at all."
+        },
+        "urgency": {
+          "$ref": "#/$defs/ReviewUrgency",
+          "default": "normal_review"
+        },
+        "recommended_officer_action": {
+          "description": "What the officer should *review*, never what they should decide. 'Review the cited records and resolve the gaps' is in bounds; any recommended adjudicative outcome is rejected by the language guard.",
+          "minLength": 1,
+          "title": "Recommended Officer Action",
+          "type": "string"
+        },
+        "generated_by": {
+          "$ref": "#/$defs/GeneratedBy"
+        },
+        "validation": {
+          "$ref": "#/$defs/FindingValidation"
+        },
+        "proposed_at": {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "title": "Proposed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding_id",
+        "run_id",
+        "case_id",
+        "authority",
+        "classification",
+        "title",
+        "observation",
+        "policy_relevance",
+        "evidence_confidence",
+        "analysis_confidence",
+        "recommended_officer_action",
+        "generated_by",
+        "validation",
+        "proposed_at"
+      ],
+      "title": "ProposedFinding",
+      "type": "object"
+    },
+    "ReviewUrgency": {
+      "description": "Sequencing hint for the reviewer's queue.\n\nThis is not a severity score and must not become one. It says how soon a human should look,\nnot how serious the underlying conduct is \u2014 the latter is an adjudicative judgment. It is\nper-finding and is never aggregated across findings or across a person (ADR-014).",
+      "enum": [
+        "routine",
+        "normal_review",
+        "prompt_review"
+      ],
+      "title": "ReviewUrgency",
+      "type": "string"
+    },
+    "SpecialistCriterion": {
+      "additionalProperties": false,
+      "description": "The criterion a specialist sub-call was pointed at.\n\nA sibling to the per-finding authority type used elsewhere in this package \u2014 it shares the\nsame four identifying fields (`decision_domain`, `policy_pack_id`, `policy_id`,\n`criterion_id`) but deliberately omits that type's fifth field, the list of policy citation\nids required to have at least one entry (D-04). A query does not cite; a finding does. Policy\ncitations belong to the proposed findings this criterion produces, not to the act of asking\nthe question. Not a subclass of that type, and it is not imported here.",
+      "properties": {
+        "decision_domain": {
+          "$ref": "#/$defs/DecisionDomain"
+        },
+        "policy_pack_id": {
+          "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+          "title": "Policy Pack Id",
+          "type": "string"
+        },
+        "policy_id": {
+          "minLength": 1,
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "criterion_id": {
+          "minLength": 1,
+          "title": "Criterion Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_domain",
+        "policy_pack_id",
+        "policy_id",
+        "criterion_id"
+      ],
+      "title": "SpecialistCriterion",
+      "type": "object"
+    },
+    "ValidationOutcome": {
+      "enum": [
+        "passed",
+        "failed",
+        "not_applicable"
+      ],
+      "title": "ValidationOutcome",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The return value of one specialist sub-agent call.\n\nRequired, not `Optional` (D-05): `criterion` is populated even when `findings` is empty, so a\nresult with zero findings still says what was checked. This is the whole reason the wrapper\nexists rather than returning a bare `list[ProposedFinding]`.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "criterion": {
+      "$ref": "#/$defs/SpecialistCriterion"
+    },
+    "generated_by": {
+      "$ref": "#/$defs/GeneratedBy"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/ProposedFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "case_id",
+    "criterion",
+    "generated_by"
+  ],
+  "title": "SpecialistResult",
+  "type": "object"
+}

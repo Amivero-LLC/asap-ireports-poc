@@ -97,6 +97,10 @@ from .run import (
     RunStatus,
     is_legal_transition,
 )
+from .specialist import (
+    SpecialistCriterion,
+    SpecialistResult,
+)
 
 ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "case": CaseManifest,
@@ -112,6 +116,7 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "asap-envelope": ASAPEnvelope,
     "outbox-message": OutboxMessage,
     "delivery-receipt": DeliveryReceipt,
+    "specialist-result": SpecialistResult,
 }
 """Contracts published to `schemas/` as JSON Schema. Keys are the schema file stems."""
 
@@ -181,6 +186,8 @@ __all__ = [
     "RunStatus",
     "ServiceType",
     "SourceReliability",
+    "SpecialistCriterion",
+    "SpecialistResult",
     "Subject",
     "ValidationOutcome",
     "is_legal_transition",
