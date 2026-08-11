@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-08-11T19:11:52.168Z"
+last_updated: "2026-08-11T21:08:16.212Z"
 last_activity: 2026-08-11
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -41,7 +41,7 @@ acceptance intact, each owed a designed-not-built entry under HAND-01. ADR-011 (
 ADR-014 (no aggregate score) were considered for the cut and **explicitly kept** — already structural
 in the shipped contracts, so retaining them costs nothing.
 
-Progress: [███░░░░░░░] 33%
+Progress: [███████░░░] 67%
 
 **Next action:** resume `/gsd-discuss-phase 1` against the new, smaller Phase 1 (ARCH-01, ARCH-04,
 CONT-01), then `/gsd-plan-phase 1`. The highest-priority item remains **ARCH-01, the
@@ -96,6 +96,7 @@ pinned set.
 ## Accumulated Context
 
 | Phase 01 P01 | 14m | 3 tasks | 6 files |
+| Phase 01 P02 | 20min | 3 tasks | 2 files |
 
 ### Decisions
 
@@ -126,6 +127,9 @@ rather than diverging silently. Most load-bearing for current work:
   development only; all field mappings in one module.
 
 - [Phase 01]: CONT-01: SpecialistResult/SpecialistCriterion published; SpecialistCriterion kept as the criterion-descriptor name, CONTRACT_VERSION not bumped since a new root contract changes no existing contract's shape
+- [Phase 01]: P02: six build-state tables (one per subsystem grouping) rather than one large table, all sharing the identical header row the D-11 test parses on
+- [Phase 01]: P02: packages/retrieval/ used as the shared PLANNED path for both RETR-01 and RETR-02, deferring the workers/ vs packages/ ingestion split to Phase 2 planning
+- [Phase 01]: P02: Row in test_build_state_table.py is a plain tuple type alias, not a dataclass/NamedTuple, to keep the module's imports confined to stdlib + pytest
 
 ### Pending Todos
 
@@ -185,8 +189,8 @@ into them is not being built. That narrows what the project claims; it does not 
 
 ## Session Continuity
 
-Last session: 2026-08-11T19:11:52.161Z
-Stopped at: Completed 01-01-PLAN.md (SpecialistResult contract, CONT-01); proceeding to 01-02
+Last session: 2026-08-11T21:08:16.206Z
+Stopped at: Completed 01-02-PLAN.md (component-architecture write-up, ARCH-01); proceeding to 01-03
 `.planning/ROADMAP.md` and `REQUIREMENTS.md` are updated. **Two follow-on writes are owed and not
 yet done:** a numbered ADR entry recording the outcome-level re-test and the Strands amendment, and
 `docs/ROADMAP.md` (which still describes the old milestone shape). No implementation work has

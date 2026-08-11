@@ -108,7 +108,7 @@ Plans:
 - [x] 01-01-PLAN.md — `SpecialistResult` contract (CONT-01): the Pydantic v2 model, generated JSON
       Schema, contract tests, and the lifted deferral in `docs/handoff/contracts.md`
 
-- [ ] 01-02-PLAN.md — The component-architecture write-up (ARCH-01): two Mermaid levels, the
+- [x] 01-02-PLAN.md — The component-architecture write-up (ARCH-01): two Mermaid levels, the
       four-marker build-state tables, the designed-not-built account, and the test that enforces them
 
 - [ ] 01-03-PLAN.md — Entry documents made true (ARCH-04): `CLAUDE.md` § Current state and
@@ -261,7 +261,7 @@ roadmapping pass that sequences from those measurements. Do not linearize the ca
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Close the architecture package | 1/3 | In Progress|  |
+| 1. Close the architecture package | 2/3 | In Progress|  |
 | 2. Bounded sub-calls that survive a crash | 0/TBD | Not started | - |
 | 3. Human gate, typed output, and the handoff | 0/TBD | Not started | - |
 

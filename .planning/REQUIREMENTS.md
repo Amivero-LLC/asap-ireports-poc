@@ -26,7 +26,7 @@ is the failure ADR-001 is written against.
 
 ### Architecture package (Milestone 1a close-out)
 
-- [ ] **ARCH-01**: A component-architecture write-up marks the boundaries that matter — what is
+- [x] **ARCH-01**: A component-architecture write-up marks the boundaries that matter — what is
       ours, what the AWS ingestion pipeline owns, what ASAP owns, and where the human review gate
       sits — **and separately marks what ADR-020 designed and did not build.**
       *Acceptance:* program leadership can sign off on the component boundaries. Every component is
@@ -259,7 +259,7 @@ originals below. Recorded **unordered and unscoped**.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ARCH-01 | Phase 1 | Pending |
+| ARCH-01 | Phase 1 | Complete |
 | ARCH-04 | Phase 1 | Pending |
 | CONT-01 | Phase 1 | Complete |
 | QUAL-01 | — | Done (2026-08-11) |
