@@ -25,12 +25,18 @@ Milestone 1 in progress.
 - **1a — contracts: done.** Thirteen data contracts as Pydantic v2 models with generated JSON
   Schema, in `packages/domain/`. The component-architecture write-up is still outstanding.
 - **1b — orchestration landscape scan: done.** ADR-012's candidate set amended on evidence.
-- **1c — orchestration bake-off: not started.** ADR-012 remains `Open`.
+- **1c — orchestration bake-off: in progress.** Shared harness and the hand-rolled baseline
+  pass all four legs (202 lines, no framework). LangGraph and Strands still to run; ADR-012
+  remains `Open`. See [`spikes/README.md`](spikes/README.md).
 
 ```bash
 uv sync
-uv run pytest -q                                   # 56 contract tests
+uv run pytest tests -q                             # 56 contract tests
 uv run python scripts/generate_schemas.py --check  # schemas/ current with the models
+
+# bake-off (needs Docker)
+docker compose -f infrastructure/docker/compose.yaml up -d
+uv run pytest spikes -v -s
 ```
 
 ## Start here

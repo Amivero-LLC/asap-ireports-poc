@@ -71,6 +71,21 @@ egress-deny test** if LangGraph is selected, since `langsmith` is a mandatory tr
 of `langchain-core`; and a **checkpoint-store threat model** treating the checkpoint blob as a
 deserialization trust boundary in every design, hand-rolled included.
 
+**In progress (2026-08-10).** Shared harness and the hand-rolled baseline are built and passing;
+see `spikes/README.md`. The harness is deliberately opinionated: node bodies are shared so that
+"framework-specific lines of code" measures wiring and nothing else, the stub gateway logs every
+model call to PostgreSQL outside the framework so leg 1 is answerable, candidates are driven
+across a real process boundary, and a permanently retained broken candidate proves leg 1 can
+actually fail something.
+
+**Hand-rolled result:** all four legs pass, 202 candidate-specific lines, 16,313-byte checkpoint
+at the review interrupt, no dependencies beyond `psycopg`. That is the floor the frameworks are
+measured against — though a floor and not a total, since no-progress detection, cancellation,
+tool allowlists, and OTel spans are still owed.
+
+**Remaining:** the LangGraph and Strands candidates, the LangSmith egress-deny test if LangGraph
+is selected, the checkpoint-store threat model, and cold start under SAM local.
+
 **Exit:** a scorecard, a recommendation, and ADR-012 moved from `Open` to `Accepted`. Losing
 spikes are kept — a rejected candidate with a recorded reason is part of the handoff.
 
