@@ -1,8 +1,10 @@
 # Data Contracts
 
-**Milestone 1a** · **Date: 2026-08-10** · **Contract version 1.0.0** · **Envelope version 1.0.0**
+**Milestone 1a** · **Date: 2026-08-10, updated 2026-08-11 (CONT-01)** · **Contract version 1.0.0**
+(unchanged by CONT-01 — adding a root contract changes no existing contract's shape) ·
+**Envelope version 1.0.0**
 
-Thirteen contracts as Pydantic v2 models with generated JSON Schema. They come before the
+Fourteen contracts as Pydantic v2 models with generated JSON Schema. They come before the
 orchestration bake-off on purpose: **the contracts are the interface the orchestration decision
 has to satisfy** (ROADMAP 1a). A framework that cannot carry this state cheaply through a
 checkpoint, or cannot pause between a proposal and its disposition, is disqualified by these
@@ -13,13 +15,13 @@ types rather than by opinion.
 | `packages/domain/src/ireports_domain/` | The models. Source of truth. |
 | `schemas/*.schema.json` | Generated JSON Schema, for non-Python consumers. |
 | `scripts/generate_schemas.py` | Regenerates. `--check` fails on drift; run it in CI. |
-| `tests/contract/` | The rules, asserted. 56 tests. |
+| `tests/contract/` | The rules, asserted. 91 tests. |
 
 ```bash
 uv sync
 uv run python scripts/generate_schemas.py          # regenerate schemas/
 uv run python scripts/generate_schemas.py --check  # CI: fail if schemas/ drifted
-uv run pytest -q                                   # 56 passed
+uv run pytest tests/contract -q                    # 91 passed
 ```
 
 ---
@@ -35,6 +37,7 @@ uv run pytest -q                                   # 56 passed
 | `ContradictionRecord` | `contradiction` | Two case assertions that cannot both be true |
 | `AuthorityRoutingResult` | `authority-routing` | Which authorities apply, and why |
 | `ProposedFinding` | `finding` | A machine proposal, pending disposition |
+| `SpecialistResult` | `specialist-result` | The typed return value of one specialist sub-call |
 | `RunManifest` | `run` | Everything needed to explain a past run |
 | `HumanDisposition` | `human-disposition` | One officer decision about one finding |
 | `ReviewSummary` | `review-summary` | The run-level review record |
@@ -43,8 +46,8 @@ uv run pytest -q                                   # 56 passed
 | `DeliveryReceipt` | `delivery-receipt` | What ASAP said, for reconciliation |
 
 Supporting types (`Subject`, `CaseContext`, `EvidenceSpan`, `AuthorityRoute`, `FindingAuthority`,
-`InformationGap`, `Budgets`, `DispositionedFinding`, `EvidenceExcerpt`, …) are nested inside these
-and appear in the generated `$defs`.
+`InformationGap`, `Budgets`, `DispositionedFinding`, `EvidenceExcerpt`, `SpecialistCriterion`, …)
+are nested inside these and appear in the generated `$defs`.
 
 ---
 
@@ -154,10 +157,18 @@ Stated plainly, because this package will be read as authoritative.
   excerpts or only references are all unknown.
 - **`MAX_EXCERPT_CHARS = 2000` is a starting value, not a researched threshold.** ADR-010 says
   "bounded," which needs a number to be a constraint. Revisit against real ASAP payload limits.
-- **Retrieval-side contracts are not here yet.** `ChunkRecord`, `EntityCandidate`, `TimelineEvent`,
-  `PolicyRecord`, and `SpecialistResult` from blueprint §10.1 are deferred. The first three depend
-  on Q-02 (the AWS collection's real schema); `SpecialistResult` is deliberately deferred until
-  ADR-012 resolves, since its shape is the one most likely to be influenced by the framework.
+- **Retrieval-side contracts are not here yet.** `ChunkRecord` and `PolicyRecord` from blueprint
+  §10.1 stay cut (CONT-02): ADR-020 cut them and ADR-021 Consequence 3 keeps them cut, because the
+  indexed record shape lives inside the retrieval package rather than being published against an
+  unconfirmed collection. `EntityCandidate` and `TimelineEvent` remain blocked on Q-02 (the AWS
+  collection's real schema is unconfirmed) and have no consumer yet.
+- **An empty `findings` list is indistinguishable from a criterion that came back clean.**
+  `SpecialistResult` deliberately carries no completion status (ADR-021 Decision 2), so a refused
+  or budget-truncated specialist sub-call and a criterion with genuinely nothing to report produce
+  the same artifact shape. The distinction lives in the log (`run_id`, `case_id`, the criterion),
+  not in the contract (ADR-021 Consequence 2). This is the weakest point in the spine, stated
+  plainly here because a handoff reader who assumes an empty list means "clean" would be wrong
+  without warning.
 - **`ReviewerRole` has one member.** ADR-011 specifies a single authorized reviewer role. Widening
   it is a contract change reviewed against Q-07 (policy ownership), not an incidental string.
 - **The language guard is regex-based.** It will not catch a determination phrased in a way we did
@@ -170,13 +181,13 @@ Stated plainly, because this package will be read as authoritative.
 
 ## 6. Verification, as run
 
-macOS arm64, Python 3.13.x via `uv`, 2026-08-10.
+macOS arm64, Python 3.13.x via `uv`, 2026-08-10; re-verified 2026-08-11 for CONT-01.
 
 | Gate | Result |
 |---|---|
 | `ruff check` | All checks passed |
 | `ruff format --check` | 20 files already formatted |
 | `mypy --strict` | Success: no issues found in 11 source files |
-| `pytest` | 56 passed |
-| `generate_schemas.py --check` | schemas/ is current (13 contracts) |
+| `pytest tests/contract` | 91 passed |
+| `generate_schemas.py --check` | schemas/ is current (14 contracts) |
 | `bandit` | 0 high, 0 medium severity (3 low-severity false positives, §5) |

@@ -215,7 +215,7 @@ def test_an_unknown_field_is_rejected() -> None:
 def test_a_constructed_result_cannot_be_mutated() -> None:
     result = _result()
     with pytest.raises(ValidationError):
-        result.case_id = "AMI-SYN-MIX-999"
+        result.case_id = "AMI-SYN-MIX-999"  # type: ignore[misc]
 
 
 def test_a_result_round_trips_through_json_without_loss() -> None:
