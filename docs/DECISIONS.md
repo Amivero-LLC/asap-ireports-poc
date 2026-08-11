@@ -228,10 +228,14 @@ unattended. That friction is the point.
 
 ---
 
-## ADR-012 — Orchestration framework is undecided pending a bake-off
+## ADR-012 — Orchestration framework: LangGraph
 
-**Date:** 2026-08-10 · **Status:** Open — candidate set settled by the 1b scan (2026-08-10);
-framework choice still open, resolved by the 1c bake-off
+**Date:** 2026-08-10 · **Resolved:** 2026-08-11 · **Status:** Accepted
+
+**Decision: LangGraph**, on the evidence in `docs/handoff/orchestration-scorecard.md` and the
+retained spikes under `spikes/`. The entry below is the original text, which set the method and
+the candidate set; §"Resolution" at the end records the outcome. Nothing above it was edited —
+the reasoning that led to a bake-off is as much a handoff artifact as its result.
 
 **Context.** This is the project's central risk. The blueprint recommends LangGraph (§9.3) but
 supports the recommendation with a criteria comparison rather than a demonstration. Choosing wrong
@@ -313,6 +317,82 @@ orchestration package is defined by a port so nodes depend on our interface, not
 The losing spikes are retained — a rejected candidate with a recorded reason is a handoff artifact.
 PydanticAI was rejected before the spike rather than during it; the reasoning above is its recorded
 entry, and the evidence sits in `docs/handoff/orchestration-landscape.md` §5.3.
+
+### Resolution — 2026-08-11
+
+**All three candidates pass all four legs.** The decision is therefore not about correctness but
+about which costs the program carries for the life of the system. Full scorecard, with the fair
+reading of every number: `docs/handoff/orchestration-scorecard.md` and
+`orchestration-scorecard.json` (a validated `Scorecard` contract, not a hand-typed table).
+
+| | hand-rolled | **LangGraph** | Strands |
+|---|---|---|---|
+| Candidate-specific lines | 195 | 266 (~192 net of spike-only instrumentation) | 373 |
+| State at the review interrupt | 16,346 B | 16,115 B (37,033 B retained per run) | 23,739 B |
+| Distributions / size beyond baseline | 0 / 0.0 MB | 31 / 18.0 MB | 42 / 47.3 MB |
+| `pip-audit` advisories, pinned set | 0 | 0 | 0 |
+| Cold start under SAM local | not run | not run | not run |
+
+**Why LangGraph.** The capability this ADR named as load-bearing — durable checkpointing over
+PostgreSQL — cost **two lines**, against 56 for the hand-rolled store and 166 for the
+`SessionRepository` Strands does not ship, and its durability is per-task inside a super-step
+rather than per-super-step. Net of instrumentation its wiring is ~192 lines, *below* the
+hand-rolled floor of 195, while additionally providing scheduling, a native interrupt, and
+declarative retry. It is the only candidate with a written semver commitment, which is the
+property a version-pinning, ATO-bound program most needs. And the conditions this ADR attached to
+selecting it are met rather than deferred.
+
+**Why not hand-rolled.** Not rejected on its measurements, which are excellent. Rejected on the
+ledger behind them: no-progress and duplicate-query detection, cancellation, tool allowlists,
+budget accounting, OTel spans, replay, and a scheduler are all absent, all needed, and all work
+this program would own forever rather than inherit. 195 is a floor that grows. Retained as the
+fallback if the dependency surface is refused.
+
+**Why not Strands.** Dominated on every measured dimension — 373 lines to 266, a 47% larger
+checkpoint for identical content, 42 distributions / 47.3 MB to 31 / 18.0 MB. Its real asset is
+AWS alignment and first-class Lambda packaging, which does not offset that spread, and AWS
+publishes prescriptive Lambda guidance for LangGraph as well. The structural objection is that its
+state container is a transcript, so typed contract records pay a serialize/parse tax at every node
+boundary — a poor fit for an architecture whose discipline is typed, citable, validated records.
+
+**Three findings that outlive the choice.**
+
+1. **The duplicate-model-call window is universal.** A crash mid-fan-out re-runs a sibling
+   specialist whose model call was in flight but uncommitted: hand-rolled 12/24, LangGraph 11/24,
+   Strands 0/24 — and Strands' zero is an artifact of our synchronous node bodies, confirmed by
+   LangGraph, which genuinely interleaves and shows the window. **Model-call-level idempotency
+   (blueprint §8.5 duplicate-query detection) is owed by all three and built by none.** It is a
+   Milestone 2 requirement regardless of this decision.
+2. **Two LangGraph defaults are wrong for this architecture and invisible in the code.**
+   `durability` defaults to `async` rather than `sync`; checkpoint deserialization defaults to
+   permissive, where the library's own source states that *"any Python callable stored in
+   checkpoint data will be imported and executed on load"*. Both are now set in code, with tests.
+   A graph reads identically either way, so a reviewer cannot catch these by reading it.
+3. **The scan's highest-value unknown is settled.** The third-party claim that Strands restores
+   conversation rather than resuming execution **does not hold** for `Graph` in 1.51.0. Asserted,
+   not assumed, for LangGraph too.
+
+**Conditions carried forward, not closed.**
+
+- **Cold start and packaging under SAM local were not measured for any candidate.** This is the
+  one outstanding number most likely to reopen the choice, and ADR-004 commits to exercising that
+  adapter. `spikes/test_scorecard.py` fails the moment a cold-start figure is recorded, which
+  forces the recommendation to be re-read against it rather than left standing by default.
+- **LangSmith stays pinned closed and proven closed.** `langsmith` is a mandatory transitive
+  dependency of `langchain-core`. The control is `langsmith.configure(enabled=False)` at the entry
+  point, verified and fail-closed, with a negative control showing that an *unpinned* run `POST`s
+  roughly 90 KB of graph state — including finding text — to `api.smith.langchain.com` **and still
+  succeeds**, because the failure is swallowed. Any future entry point inherits this obligation.
+- **The checkpoint blob remains a deserialization trust boundary**, in this and any design.
+  `docs/handoff/checkpoint-threat-model.md`, including §6's list of controls not built — row-level
+  integrity being the largest.
+- **Nodes depend on our port, never on LangGraph directly.** The original consequence stands
+  unchanged and is Milestone 2's first obligation. This decision selects an implementation behind
+  the port; it does not license `from langgraph import ...` in analysis code.
+
+**The losing spikes are retained** under `spikes/handrolled/` and `spikes/strands/`, passing the
+same suite, and `spikes/harness/negative_control.py` stays permanently so leg 1 keeps being a test
+that can fail.
 
 ---
 

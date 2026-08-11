@@ -5,13 +5,18 @@ Agents SDK** — implement the same four legs against the same substrate and are
 dimensions. Set confirmed by the 2026-08-10 landscape scan
 (`docs/handoff/orchestration-landscape.md`); PydanticAI was dropped there, with reasons.
 
-**Status: complete as of 2026-08-11.** All three candidates pass all four legs. Two of the three
-questions the landscape scan could not answer by reading are now measurements rather than
-citations — Strands resumes execution rather than restoring conversation, and the
+**Status: complete as of 2026-08-11. ADR-012 is Accepted — the framework is LangGraph.**
+Scorecard and recommendation: `docs/handoff/orchestration-scorecard.md`, generated from
+`spikes/bakeoff_scorecard.py` as a validated contract. All three candidates pass all four legs,
+so the decision turns on cost rather than correctness; both losing spikes are retained here and
+keep running in the suite.
+
+Two of the three questions the landscape scan could not answer by reading are now measurements
+rather than citations — Strands resumes execution rather than restoring conversation, and the
 duplicate-model-call window is universal rather than an artifact of one candidate. The remaining
 scan deliverables are done: the LangSmith egress-deny test (with a negative control) and the
-framework-independent `docs/handoff/checkpoint-threat-model.md`. Cold start under SAM local is
-still not run.
+framework-independent `docs/handoff/checkpoint-threat-model.md`. **Cold start under SAM local is
+still not run**, for any candidate, and it is the one measurement that could reopen the choice.
 
 ```bash
 docker compose -f infrastructure/docker/compose.yaml up -d
