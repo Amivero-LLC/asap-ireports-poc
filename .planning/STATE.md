@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-08-11T17:44:38.196Z"
-last_activity: 2026-08-11 -- Phase 01 planning complete
+last_updated: "2026-08-11T19:11:52.168Z"
+last_activity: 2026-08-11
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -22,16 +22,16 @@ See: `.planning/PROJECT.md` (updated 2026-08-11)
 **Core value:** One command takes a synthetic case to a **human-approved**, validated typed envelope,
 with the orchestrator's hard parts exercised and every handoff claim cited or explicitly marked
 unverified.
-**Current focus:** Phase 1 — Close the architecture package.
+**Current focus:** Phase 01 — close-the-architecture-package
 **The deliverable is a proven architecture and a handoff package, not a product** (ADR-001).
 **Scope is the orchestrator spine — 3 phases, not 9 (ADR-020).**
 
 ## Current Position
 
-Phase: 1 of 3 (Close the architecture package)
-Plan: — of — (no plans yet)
+Phase: 01 (close-the-architecture-package) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-08-11 -- Phase 01 planning complete
+Last activity: 2026-08-11
 requirements → 15.** Cut: the second orchestration adapter and the outcome-level bake-off
 (ORCH-05, BAKE-01, ARCH-03, ARCH-05), checkpoint hardening (CKPT-01..03), retrieval and local ingest
 (RETR-01..03, CONT-02), authority routing and policy packs (ROUT-01..02), citation validators
@@ -41,7 +41,7 @@ acceptance intact, each owed a designed-not-built entry under HAND-01. ADR-011 (
 ADR-014 (no aggregate score) were considered for the cut and **explicitly kept** — already structural
 in the shipped contracts, so retaining them costs nothing.
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33%
 
 **Next action:** resume `/gsd-discuss-phase 1` against the new, smaller Phase 1 (ARCH-01, ARCH-04,
 CONT-01), then `/gsd-plan-phase 1`. The highest-priority item remains **ARCH-01, the
@@ -95,6 +95,8 @@ pinned set.
 
 ## Accumulated Context
 
+| Phase 01 P01 | 14m | 3 tasks | 6 files |
+
 ### Decisions
 
 21 LOCKED ADRs in `docs/DECISIONS.md`, mirrored into `.planning/PROJECT.md` § Key Decisions.
@@ -122,6 +124,8 @@ rather than diverging silently. Most load-bearing for current work:
 
 - **ADR-007** — iReports consumes an AWS-owned vector collection; local ingest/embedding is
   development only; all field mappings in one module.
+
+- [Phase 01]: CONT-01: SpecialistResult/SpecialistCriterion published; SpecialistCriterion kept as the criterion-descriptor name, CONTRACT_VERSION not bumped since a new root contract changes no existing contract's shape
 
 ### Pending Todos
 
@@ -181,13 +185,13 @@ into them is not being built. That narrows what the project claims; it does not 
 
 ## Session Continuity
 
-Last session: 2026-08-11T17:12:56.767Z
-Stopped at: Phase 1 context gathered. ADR-020 pared the project to the orchestrator spine (9 phases -> 3); ADR-021 restored retrieval to the spine, dropped SpecialistResult's status field, and reduced VAL-02 to logging. Phase 1 is now ARCH-01, ARCH-04, CONT-01.
+Last session: 2026-08-11T19:11:52.161Z
+Stopped at: Completed 01-01-PLAN.md (SpecialistResult contract, CONT-01); proceeding to 01-02
 `.planning/ROADMAP.md` and `REQUIREMENTS.md` are updated. **Two follow-on writes are owed and not
 yet done:** a numbered ADR entry recording the outcome-level re-test and the Strands amendment, and
 `docs/ROADMAP.md` (which still describes the old milestone shape). No implementation work has
 started under GSD; the repo's own prior work is inventoried above.
-Resume file: .planning/phases/01-close-the-architecture-package/01-CONTEXT.md
+Resume file: None
 
 **Cold-start reading order:** this file → `.planning/ROADMAP.md` § Gates → `docs/DECISIONS.md` →
 `docs/OPEN-QUESTIONS.md`. `blueprint.md` is the project's **input**, lowest precedence; where it

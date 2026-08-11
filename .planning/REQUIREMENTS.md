@@ -43,7 +43,7 @@ is the failure ADR-001 is written against.
 
 ### Contracts
 
-- [ ] **CONT-01**: The `SpecialistResult` contract is defined, published to `schemas/`, and
+- [x] **CONT-01**: The `SpecialistResult` contract is defined, published to `schemas/`, and
       documented.
       *Acceptance:* Pydantic v2 model in `packages/domain/`, generated JSON Schema, contract tests,
       `docs/handoff/contracts.md` updated. `extra="forbid"`, `frozen=True`, no aggregate score field.
@@ -261,7 +261,7 @@ originals below. Recorded **unordered and unscoped**.
 |-------------|-------|--------|
 | ARCH-01 | Phase 1 | Pending |
 | ARCH-04 | Phase 1 | Pending |
-| CONT-01 | Phase 1 | Pending |
+| CONT-01 | Phase 1 | Complete |
 | QUAL-01 | — | Done (2026-08-11) |
 | ORCH-01 | Phase 2 | Pending |
 | ORCH-02 | Phase 2 | Pending |

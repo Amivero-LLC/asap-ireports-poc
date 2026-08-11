@@ -105,7 +105,7 @@ true.
 **Plans**: 3 plans, in 3 waves
 Plans:
 
-- [ ] 01-01-PLAN.md — `SpecialistResult` contract (CONT-01): the Pydantic v2 model, generated JSON
+- [x] 01-01-PLAN.md — `SpecialistResult` contract (CONT-01): the Pydantic v2 model, generated JSON
       Schema, contract tests, and the lifted deferral in `docs/handoff/contracts.md`
 
 - [ ] 01-02-PLAN.md — The component-architecture write-up (ARCH-01): two Mermaid levels, the
@@ -261,7 +261,7 @@ roadmapping pass that sequences from those measurements. Do not linearize the ca
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Close the architecture package | 0/3 | Planned | - |
+| 1. Close the architecture package | 1/3 | In Progress|  |
 | 2. Bounded sub-calls that survive a crash | 0/TBD | Not started | - |
 | 3. Human gate, typed output, and the handoff | 0/TBD | Not started | - |
 
