@@ -77,6 +77,35 @@ whether ASAP stores evidence excerpts or only references and findings.
 built regardless, so a volume surprise means adding a batch queue rather than reworking the run
 model. Needed: average and 95th-percentile case sizes, page counts, document counts, daily volumes.
 
+### Q-14 · Is Amazon Bedrock AgentCore an approved deployment target?
+
+**Raised by:** the Milestone 1b orchestration landscape scan, 2026-08-10.
+**Assumption:** no — ADR-004 stands, and we build and exercise the Lambda/SAM adapter.
+**Blast radius:** low for Milestone 1, medium for deployment. AgentCore is a managed agent runtime,
+not a Python orchestration library, so it does not change the M1 bake-off. It changes what the
+Lambda adapter is *for*.
+
+Amazon Bedrock AgentCore reached AWS GovCloud (US-West) on 2026-05-05 — after `blueprint.md` was
+written, which is why neither the blueprint nor ADR-004 considers it. AWS documents specific
+GovCloud gaps: no semantic search in AgentCore Gateway; AWS Agent Registry (Preview), Bedrock
+Guardrails Policy, and Temporal Policy unavailable; and six CloudFormation resource types absent,
+including `Policy`, `PolicyEngine`, and `Evaluator`.
+
+**Read alongside Q-01, not as an answer to it.** This is adjacent evidence about the Bedrock service
+family in the target partition. Q-01 asks about Claude model availability, concrete model and
+inference-profile IDs, and cross-region inference rules, and remains fully open.
+
+**To resolve:** ask the program whether AgentCore Runtime is approved, preferred, or excluded for
+this workload. Whoever resolves Q-01 should also read AgentCore's GovCloud export-control section —
+it states that AgentCore metadata may not contain export-controlled data and enumerates the
+customer-initiated configurations under which data-plane traffic leaves the GovCloud partition. For
+a system carrying CUI and personnel-security information that is a design constraint, not
+boilerplate.
+
+**Source:** `https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-bedrock-agentcore.html`
+and `https://aws.amazon.com/about-aws/whats-new/2026/05/bedrock-agentcore-launch-aws-govcloud-us/`.
+Detail in `docs/handoff/orchestration-landscape.md` §7.
+
 ### Q-06 · Agency supplemental fitness factors and precedent material
 
 **Assumption:** federal-core policy pack only (5 CFR 731 factors, SEAD-4 guidelines).

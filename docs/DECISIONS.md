@@ -230,7 +230,8 @@ unattended. That friction is the point.
 
 ## ADR-012 — Orchestration framework is undecided pending a bake-off
 
-**Date:** 2026-08-10 · **Status:** Open — resolved by Milestone 1
+**Date:** 2026-08-10 · **Status:** Open — candidate set settled by the 1b scan (2026-08-10);
+framework choice still open, resolved by the 1c bake-off
 
 **Context.** This is the project's central risk. The blueprint recommends LangGraph (§9.3) but
 supports the recommendation with a criteria comparison rather than a demonstration. Choosing wrong
@@ -238,17 +239,42 @@ is expensive: orchestration touches checkpointing, human-in-the-loop, error hand
 testing, and observability, and the choice is difficult to reverse once analysis nodes are written
 against it.
 
-**Decision.** No framework is adopted until a spike produces a scorecard. Candidates:
+**Decision.** No framework is adopted until a spike produces a scorecard. Candidates, **as amended
+by the Milestone 1b landscape scan on 2026-08-10** (`docs/handoff/orchestration-landscape.md`):
 
 | Candidate | Why it is in the set |
 |---|---|
-| **LangGraph** | The blueprint's recommendation and the incumbent to beat. Explicit state graph, durable checkpoints, interrupt-based human-in-the-loop |
-| **Strands Agents SDK** | AWS-aligned, documented Lambda packaging — relevant to a GovCloud target and an AWS-standardizing program |
-| **PydanticAI / Pydantic Graph** | Typed agents and graphs on Pydantic v2, which we use for contracts regardless. Direct Bedrock support |
-| **Hand-rolled Python** | The honest baseline. If a bounded, checkpointed state machine over PostgreSQL is a few hundred lines, that is the finding — and it carries no framework lifecycle risk |
+| **LangGraph** | The blueprint's recommendation and the incumbent to beat. Explicit state graph, durable checkpoints, interrupt-based human-in-the-loop. Scan confirmed: the only candidate where a PostgreSQL checkpointer is a first-party package, and the only one with a written semver stability commitment |
+| **Strands Agents SDK** | AWS-aligned, documented Lambda packaging — relevant to a GovCloud target and an AWS-standardizing program. Scan confirmed a real first-class interrupt primitive; also found session storage is file/S3 only, so a PostgreSQL `SessionRepository` is ours to build |
+| **Hand-rolled Python** | The honest baseline. If a bounded, checkpointed state machine over PostgreSQL is a few hundred lines, that is the finding — and it carries no framework lifecycle risk. Scan weighted this up: 17 distributions / 28 MB against 42–47 / 46–62 MB for every framework measured |
 
-Also considered, not in the M1 set: Claude Agent SDK, Haystack, AutoGen, CrewAI, LlamaIndex
-Workflows, Semantic Kernel. A landscape scan (M1 task) may add candidates before the spike starts.
+**Dropped by the scan — PydanticAI / Pydantic Graph.** Originally in the set for typed agents and
+graphs on Pydantic v2. Removed because Pydantic Graph 2.x **has no state-persistence API at all**
+(verified in source at tag `v2.27.0`), 1.x had only file and in-memory backends — never PostgreSQL —
+and durability is delegated to Temporal, DBOS, or Prefect via `pydantic_ai/durable_exec/`. It
+therefore cannot attempt spike leg 1 without either becoming the hand-rolled baseline plus a
+dependency, or importing a workflow engine this project has not decided to adopt. A near-daily minor
+release cadence alongside a concurrent 1.x line compounds the API-stability risk. **This does not
+affect Pydantic v2 for contracts**, which stands; PydanticAI also remains available as a typed
+agent-and-tool layer *inside* whichever orchestrator wins.
+
+The scan reduced the set from four candidates to three deliberately. The freed effort goes into the
+spike legs where the answer is genuinely unknown, rather than into a fourth scorecard row that would
+read as a comparison without being one.
+
+Also considered, not in the M1 set: Microsoft Agent Framework (closest human-in-the-loop semantics
+in the field and the lightest core measured, but Azure-oriented against a GovCloud/Bedrock program),
+DBOS and Temporal and Restate (durable-execution substrates, not agent orchestrators; DBOS requires
+a long-running process, conflicting with the ADR-004 Lambda adapter), Claude Agent SDK, Haystack,
+CrewAI, LlamaIndex Workflows, Burr. **AutoGen and Semantic Kernel are removed from consideration
+entirely** — both moved to maintenance mode in April 2026 and merged into Microsoft Agent Framework,
+so blueprint §9.2 evaluates them as live options when they are not.
+
+Amazon Bedrock AgentCore reached AWS GovCloud (US-West) on 2026-05-05, after the blueprint was
+written. It is a managed runtime rather than a Python orchestration library, so it is not a bake-off
+candidate, but it is a live alternative to the Lambda adapter for production deployment and its
+documented GovCloud feature gaps and export-control language bear on ADR-004 and Q-01. The scan
+proposes a new open question (Q-14) covering whether it is an approved deployment target.
 
 **Method — partial spike, not the full §9.4 scenario.** Each candidate implements only the legs
 where frameworks actually differ:
@@ -263,9 +289,30 @@ resume correctness, ability to enforce budgets and tool allowlists, ease of insp
 replaying state, test determinism, dependency and vulnerability footprint, cold-start and image
 size, and developer comprehension after a short onboarding exercise.
 
+**Added to the spike by the 1b scan.** Three measurements the scan could not make by reading, which
+the bake-off must produce:
+
+1. **Resume semantics under a mid-node process kill** — for every candidate, assert on whether
+   completed work re-executes. A third party alleges Strands restores *conversation* rather than
+   resuming *execution*; the source sells a competing product and the claim is unconfirmed, so it is
+   a measurement, not a finding. Assert it for LangGraph too rather than assuming it.
+2. **LangSmith egress-deny test.** `langsmith` is a mandatory transitive dependency of
+   `langchain-core`, so it is in the tree whether or not we use it. Tracing is opt-in and the
+   default is not egress, but a client library capable of exporting run content out of a system that
+   may carry CUI must be *pinned closed and proven closed*, not trusted. Required deliverable if
+   LangGraph is selected.
+3. **Checkpoint-store threat model**, framework-independent. Four deserialization advisories landed
+   on LangGraph's checkpoint path between November 2025 and June 2026 — all fixed in versions at or
+   below what we would use. The finding is not that a framework is insecure; it is that the
+   checkpoint blob is a deserialization trust boundary in any design, including a hand-rolled one,
+   and must be integrity-controlled, access-controlled, and never fed from outside our own
+   PostgreSQL.
+
 **Consequences.** No analysis-node code is written against any framework until this resolves. The
 orchestration package is defined by a port so nodes depend on our interface, not the framework's.
 The losing spikes are retained — a rejected candidate with a recorded reason is a handoff artifact.
+PydanticAI was rejected before the spike rather than during it; the reasoning above is its recorded
+entry, and the evidence sits in `docs/handoff/orchestration-landscape.md` §5.3.
 
 ---
 
