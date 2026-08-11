@@ -12,6 +12,7 @@ exact assumption `docs/OPEN-QUESTIONS.md` refuses to make.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,6 +52,16 @@ REQUEST = ModelRequest(
 class _Block:
     text: str
     type: str = "text"
+
+
+@dataclass
+class _ToolUse:
+    """A `tool_use` content block — how a structured response actually arrives (ADR-019)."""
+
+    input: dict[str, Any]
+    name: str = "emit_structured_output"
+    type: str = "tool_use"
+    id: str = "toolu_spike"
 
 
 @dataclass
@@ -145,10 +156,16 @@ def test_effort_comes_from_the_tier() -> None:
     assert adapter2._client.messages.captured["output_config"]["effort"] == "low"  # type: ignore[attr-defined]
 
 
-def test_a_response_schema_does_not_clobber_effort() -> None:
-    """Structured outputs and effort share `output_config` — a naive assignment loses one."""
-    adapter = _adapter(_Message(content=[_Block("{}")], usage=_Usage()))
+def test_structured_output_is_a_single_tool_not_a_response_format() -> None:
+    """ADR-019, and every clause of it is a measurement rather than a preference.
+
+    `output_config.format` was the obvious mechanism and it does not work on this path: 6 of 8
+    on Opus 4.8, 0 of 8 on Sonnet 5, Sonnet 4.6, and Haiku 4.5. A lone tool returned validated
+    input 20 of 20 on all four. The three absences below are each a tier that breaks if the
+    field is sent — see `docs/handoff/compatibility-matrix.md`.
+    """
     schema = {"type": "object", "properties": {"finding": {"type": "string"}}}
+    adapter = _adapter(_Message(content=[_ToolUse({"finding": "ok"})], usage=_Usage()))
     adapter.complete(
         ModelRequest(
             alias=ModelAlias.THINKING,
@@ -156,9 +173,33 @@ def test_a_response_schema_does_not_clobber_effort() -> None:
             response_schema=schema,
         )
     )
-    output_config = adapter._client.messages.captured["output_config"]  # type: ignore[attr-defined]
-    assert output_config["effort"] == "high"
-    assert output_config["format"] == {"type": "json_schema", "schema": schema}
+    sent = adapter._client.messages.captured  # type: ignore[attr-defined]
+
+    assert sent["tools"][0]["input_schema"] == schema
+    assert len(sent["tools"]) == 1, "one tool means there is nothing to choose between"
+
+    # Bedrock rejects `strict` outright: "tools.0.custom.strict: Extra inputs are not permitted".
+    assert "strict" not in sent["tools"][0]
+    # Forcing the tool 400s with adaptive thinking on Sonnet 4.6 and Haiku 4.5 — the two tiers
+    # this project most wants to use.
+    assert "tool_choice" not in sent
+    # Two mechanisms competing to shape one response is worse than the one that works.
+    assert "format" not in sent["output_config"]
+    # And effort survives, which was the point of the test this one replaces.
+    assert sent["output_config"]["effort"] == "high"
+
+
+def test_structured_output_is_returned_as_json_text() -> None:
+    """The port's contract is unchanged: `text` is the JSON a caller parses."""
+    adapter = _adapter(_Message(content=[_ToolUse({"finding": "ok"})], usage=_Usage()))
+    response = adapter.complete(
+        ModelRequest(
+            alias=ModelAlias.FAST,
+            messages=(Message(role="user", content="Extract."),),
+            response_schema={"type": "object"},
+        )
+    )
+    assert json.loads(response.text) == {"finding": "ok"}
 
 
 def test_a_request_must_start_with_a_user_message() -> None:
@@ -207,24 +248,17 @@ def test_max_tokens_with_no_text_is_an_error_not_an_empty_answer() -> None:
         _adapter(truncated).complete(REQUEST)
 
 
-def test_an_unenforced_schema_raises_rather_than_returning_prose() -> None:
-    """The second silent-degradation path, found by actually calling a model.
+def test_prose_instead_of_a_tool_call_raises_rather_than_returning() -> None:
+    """The silent-degradation path this guard exists to close.
 
-    Measured 2026-08-10 against a live Bedrock-backed LiteLLM proxy: `output_config.format` is
-    accepted with HTTP 200 and **not enforced** on several model groups, which answer with a
-    Markdown-fenced code block. There is no error, no warning, and nothing in the response that
-    distinguishes it from a group where the schema is guaranteed.
-
-    Left alone, a specialist asked for a structured finding returns prose that fails somewhere
-    downstream — or worse, gets "fixed" by a lenient parser that strips fences and then one day
-    accepts something that is not a finding at all.
+    `tool_choice` is left to the model, so a turn that answers in prose instead of calling the
+    tool is possible in principle. It did not occur in 20 of 20 live trials — but "did not
+    occur" is not "cannot occur", and prose reaching a validator as though it were a finding is
+    exactly the failure ADR-018 names.
     """
-    fenced = _Message(
-        content=[_Block('```json\n{"acknowledged": true}\n```')],
-        usage=_Usage(),
-    )
-    with pytest.raises(StructuredOutputError, match="fenced=True"):
-        _adapter(fenced).complete(
+    prose = _Message(content=[_Block('```json\n{"acknowledged": true}\n```')], usage=_Usage())
+    with pytest.raises(StructuredOutputError, match="emit_structured_output"):
+        _adapter(prose).complete(
             ModelRequest(
                 alias=ModelAlias.FAST,
                 messages=(Message(role="user", content="Extract."),),
@@ -234,12 +268,12 @@ def test_an_unenforced_schema_raises_rather_than_returning_prose() -> None:
         )
 
 
-def test_the_schema_check_carries_no_model_text() -> None:
+def test_the_structured_output_check_carries_no_model_text() -> None:
     """`CLAUDE.md`: raw case text never reaches logs or traces.
 
     The error travels into both. A model asked to structure a finding was, by construction,
-    looking at case evidence — so the diagnostic reports shape (length, fenced) and never the
-    string itself.
+    looking at case evidence — so the diagnostic reports shape (stop reason, length) and never
+    the string itself.
     """
     secret = '```json\n{"subject": "SYNTHETIC-PII-MARKER"}\n```'
     with pytest.raises(StructuredOutputError) as exc:

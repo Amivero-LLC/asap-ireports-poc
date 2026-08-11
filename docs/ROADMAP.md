@@ -91,12 +91,16 @@ carries `completed_nodes` and `next_nodes_to_execute`, state is synced after eve
 a hard `os._exit(9)` no completed node re-executed. That was the single highest-value unknown in
 the milestone and it is now a measurement rather than a citation.
 
-The surprise runs the other way: **Strands is stronger than the hand-rolled baseline on
-mid-fan-out durability.** Crashing right after one specialist commits, the hand-rolled candidate
-re-runs a sibling that had already called the model but not yet committed; Strands, which makes
-each node durable as it finishes, does not. Leg 1 as written does not catch this because it
-asserts only on one specialist — a gap in the leg, recorded rather than quietly patched, since
-tightening it would fail a candidate whose result is already published.
+A follow-up probe found a **duplicate-model-call window on a mid-fan-out crash**: a sibling
+specialist whose call is in flight when the process dies runs again on resume. The hand-rolled
+candidate hits it 8 times in 12; Strands 0 in 12 — but that 0 is an artifact of our synchronous
+node bodies, which stop Strands' `asyncio` tasks from ever interleaving, and it should not be read
+as a durability property of the framework. The real mitigation is model-call-level idempotency
+(blueprint §8.5 duplicate-query detection), which **neither candidate has** and which belongs on
+both sides of the "still owes" ledger. Leg 1 was tightened to assert on every specialist and then
+reverted — re-running work the orchestrator never observed completing is correct at-least-once
+behaviour, so the stricter assertion is flaky rather than strict; the duplicate count is recorded
+as a measurement instead.
 
 Costs measured, not asserted: 367 candidate-specific lines against ~200 (of which 159 are the
 PostgreSQL `SessionRepository` Strands does not ship), a 23,772-byte checkpoint against 16,379,

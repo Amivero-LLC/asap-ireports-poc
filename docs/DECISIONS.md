@@ -530,3 +530,59 @@ output is valid.
 4. **Two request shapes documented as rejected were accepted** on this path (`temperature`,
    `thinking.budget_tokens`). Nothing in this system may rely on the endpoint rejecting a
    malformed request — the guard rails are ours.
+
+**Partly superseded by ADR-019.** ADR-018's *mechanism* diagnosis was wrong — enforcement is not a
+per-model-group property. Its *guard* stands and is now load-bearing for a different reason.
+
+---
+
+## ADR-019 — Structured output is a single tool call, and no tier needs Opus
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Supersedes the mechanism in ADR-015 and the
+diagnosis in ADR-018**
+
+**Context.** ADR-018 concluded that `output_config.format` was enforced by some model groups and
+not others, and that the tier mapping therefore had to prefer Opus for anything structured. That
+conclusion came from one trial per model. Repeated eight times per group, it does not survive:
+`output_config.format` is unreliable **everywhere**, including Opus 4.8 (6 of 8). Sonnet 5,
+Sonnet 4.6, and Haiku 4.5 were 0 of 8. Full tables: `docs/handoff/compatibility-matrix.md` §5.
+
+The schema does reach the model — adding it raises `input_tokens` — so this is not the proxy
+dropping a field. The mechanism simply is not binding on this path.
+
+**Decision.** A `ModelRequest` carrying a `response_schema` is sent as **one tool**, and the
+gateway returns that tool call's validated input as `ModelResponse.text`. `output_config.format`
+is removed rather than kept alongside — two mechanisms competing to shape one response is worse
+than the one that works.
+
+Three fields are deliberately **not** sent, each because sending it breaks a tier we want:
+
+| Not sent | Why |
+|---|---|
+| `strict: true` | Bedrock rejects it: `tools.0.custom.strict: Extra inputs are not permitted` |
+| `tool_choice` (forced) | 400s with adaptive thinking on Sonnet 4.6 and Haiku 4.5: *"Thinking may not be enabled when tool_choice forces a specific tool"*. ADR-015 keeps thinking on for every tier, so forcing is unavailable |
+| `output_config.format` | Measured unreliable on every group |
+
+What remains is the least-specified configuration — one tool, model's choice, thinking on — and it
+returned the exact expected input **20 of 20** across Opus 4.8, Sonnet 5, Sonnet 4.6, and Haiku 4.5.
+
+**Consequences.**
+
+1. **No tier requires an Opus-class model.** This was the practical blocker and it is gone. The
+   development mapping is Sonnet 4.6 (orchestrator), Sonnet 5 (thinking), Haiku 4.5 (fast) — all
+   three verified end to end. Opus 4.8 remains an escalation for the thinking tier if Milestone 3
+   evaluation demands it, on evidence rather than by default.
+2. **ADR-018's guard survives and matters more.** With `tool_choice` left to the model, a turn
+   *could* answer in prose. It did not in 20 of 20 trials, but the gateway raises
+   `StructuredOutputError` if no tool call comes back. "Did not occur" is not "cannot occur".
+3. **We do not get the documented hard guarantee.** `strict: true` would make tool input
+   schema-valid by construction; Bedrock refuses it. So tool input is best-effort and must still be
+   validated through the Pydantic contracts downstream — which the architecture already does. Worth
+   stating plainly rather than implying the tool path is airtight.
+4. **The prompt now carries part of the contract.** The tool's description tells the model to call
+   it exactly once and not to answer in prose. That is a prompt-shaped dependency in a system that
+   otherwise keeps its guarantees in code, and it is the price of not being allowed to force the
+   call.
+5. **This is a per-endpoint finding.** A first-party Anthropic endpoint may well enforce
+   `output_config.format` correctly. The decision is scoped to what was measured; re-run the live
+   smoke check before assuming it transfers.

@@ -122,30 +122,43 @@ interested source, unconfirmed, and the highest-value unknown in the milestone. 
 This is execution resume, not conversation restore. The scan was right to mark the claim
 unverified rather than adopt it.
 
-#### And it is stronger than the baseline, in the one place that matters
+#### A duplicate-model-call window that neither candidate closes
 
-The crash could not be landed *mid*-fan-out: Strands makes each node durable as it finishes, so by
-the time the named specialist is durable its sibling already is too. Probing both crash targets
-against both candidates:
+Probing crash targets across both candidates surfaced something leg 1 does not assert on. Twelve
+trials each, crashing after `specialist_suitability`:
 
-| Crash after | Candidate | Model calls after resume | Verdict |
-|---|---|---|---|
-| `specialist_suitability` | hand-rolled | suitability=1, **national_security=2** | **re-ran a completed model call** |
-| `specialist_suitability` | strands | suitability=1, national_security=1 | no re-execution |
-| `specialist_national_security` | hand-rolled | suitability=1, national_security=1 | no re-execution |
-| `specialist_national_security` | strands | suitability=1, national_security=1 | no re-execution |
+| Candidate | Sibling re-executed | Sibling's call already issued at crash time |
+|---|---|---|
+| hand-rolled | **8 / 12** | 12 / 12 |
+| strands | 0 / 12 | 7 / 12 |
 
-The hand-rolled candidate commits fan-out results in completion order and dies immediately after
-the named node's commit — so a sibling that had already *called the model* but not yet committed
-is re-executed on resume. Correctness survives (still three findings), but a paid model call is
-spent twice. Strands' per-node sync does not have that window.
+A crash lands while the sibling specialist's model call is **in flight** — issued and logged, not
+yet committed. On resume it runs again. Correctness survives (still three findings); a paid model
+call is spent twice.
 
-**Leg 1 as written does not catch this**, because it asserts only on `specialist_suitability`.
-That is a gap in the leg, not a pass the hand-rolled candidate earned. Tightening it to assert
-every specialist ran exactly once would fail the hand-rolled candidate as it currently stands;
-whether to tighten it belongs with the ADR-012 resolution, not with a quiet edit here. Either way,
-the honest reading of the 200-line floor is that **it does not yet include durable handling of
-in-flight parallel work**, and adding that is real work.
+**Do not read the 0/12 as Strands solving this.** It is an artifact of the harness. Our node bodies
+are synchronous, so Strands' `asyncio` tasks never actually interleave: each node runs, syncs, and
+only then does the next begin. In 5 of the 12 trials the sibling had not even been *called* at
+crash time. The hand-rolled candidate uses a real `ThreadPoolExecutor`, so its two specialists
+genuinely overlap and it genuinely has the window. **With real async model calls, Strands would
+interleave too and would very likely show the same behaviour.** This is a measurement about our
+scenario, not a durability property of the framework, and it should not go in the scorecard as one.
+
+**What was changed, and what was tried and reverted:**
+
+- The hand-rolled candidate now commits with `as_completed` rather than iterating futures in
+  submission order. Strictly better — a specialist that finishes first is committed first — but it
+  **does not close the window**, and the 8/12 above is measured *after* that fix.
+- Leg 1 was tightened to assert every specialist ran exactly once, then **reverted**. Re-running a
+  sibling whose call the orchestrator never observed completing is at-least-once behaviour, which
+  is correct: nothing durable said that work was done. The stricter assertion is therefore flaky by
+  construction — it fails on thread timing, not on a defect. Leg 1 asserts on the node named by
+  `--crash-after`, which the candidate is contractually required to have committed, and duplicate
+  sibling calls are recorded as a measurement (`duplicated_specialist_calls`) instead.
+
+**The real mitigation is owed by both candidates**: model-call-level idempotency, i.e. blueprint
+§8.5's duplicate-query detection. Neither has it. That belongs on the "what each candidate still
+owes" side of the scorecard, not against either one's line count.
 
 #### What Strands costs
 

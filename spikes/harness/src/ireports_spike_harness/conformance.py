@@ -143,11 +143,21 @@ def assert_leg1_durable_resume(module: str) -> LegResult:
     all_pids = observer.distinct_processes()
 
     calls_during_resume = sum(calls_after.values()) - sum(calls_before.values())
+    # Siblings of the crashed node whose in-flight model call was redone on resume. Not a
+    # durability failure (see the assertion below) but a real cost, and a scored dimension:
+    # eliminating it needs model-call-level idempotency — blueprint §8.5's duplicate-query
+    # detection — which no candidate in this bake-off has.
+    duplicated = {
+        node: count
+        for node, count in calls_after.items()
+        if node.startswith("specialist_") and count > 1
+    }
     measurements = {
         "calls_before_crash": calls_before,
         "calls_after_resume": calls_after,
         "distinct_processes": len(all_pids),
         "model_calls_during_resume": calls_during_resume,
+        "duplicated_specialist_calls": duplicated,
     }
 
     # Did the resume genuinely happen in a new process? The model-call log answers that only
@@ -176,13 +186,31 @@ def assert_leg1_durable_resume(module: str) -> LegResult:
             measurements=measurements,
         )
 
-    repeated = calls_after.get("specialist_suitability", 0)
+    # The assertion is scoped to the node named by `--crash-after`, and that scope is load-bearing
+    # rather than lazy.
+    #
+    # **Tried and reverted, 2026-08-10.** Asserting on *every* specialist looks stricter and is
+    # actually incoherent. A crash lands while a sibling's model call is in flight — issued, logged,
+    # not yet committed. Re-running it on resume is at-least-once behaviour, which is correct: the
+    # orchestrator never observed that work completing, so it cannot know not to redo it. Measured
+    # over 12 trials the hand-rolled candidate re-ran the sibling 8 times and did not 4 times,
+    # purely on thread timing, which makes the stricter assertion **flaky by construction** rather
+    # than strict.
+    #
+    # The node named by `--crash-after` is different: the candidate is contractually required to
+    # have committed it before dying, so it *is* completed work, and re-running it is a genuine
+    # durability failure. That is the question leg 1 asks.
+    #
+    # Duplicate calls on the siblings are still worth knowing — they are money — so they are
+    # recorded as a measurement below and scored separately, not asserted here.
+    crashed_node = "specialist_suitability"
+    repeated = calls_after.get(crashed_node, 0)
     if repeated != 1:
         return LegResult(
             leg="1-durable-resume",
             passed=False,
             detail=(
-                f"specialist_suitability ran {repeated} times across the crash. "
+                f"{crashed_node} ran {repeated} times across the crash. "
                 "Completed work was re-executed: this is conversation restore, not execution "
                 "resume."
             ),

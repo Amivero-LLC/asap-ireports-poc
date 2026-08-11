@@ -36,27 +36,54 @@ offline, so before this the gateway was verified as *correctly constructed*, not
 
 ---
 
-## 2. Tier mapping used for this run
+## 2. Tier mapping
 
-**Local development only. Not a recommendation, and not an answer to Q-01.** The three tiers were
-mapped onto model groups the shared proxy happens to expose, chosen to exercise three *different*
-code paths rather than to propose a production configuration.
+**A development mapping against a commercial-partition proxy, not an answer to Q-01.** The models
+a GovCloud deployment may use are unknown; what follows is the reasoning, so that whoever answers
+Q-01 can re-apply it to whatever is actually available there.
 
-| Alias | Model group | Effort | Why this one |
-|---|---|---|---|
-| `ireports-orchestrator` | `anthropic.claude-sonnet-5` | `medium` | Current-generation Sonnet; native Bedrock request path |
-| `ireports-thinking` | `anthropic.claude-opus-4-8` | `high` | Highest-capability group available; native Bedrock request path |
-| `ireports-fast` | `bedrock/anthropic.claude-haiku-4-5-20251001` | `low` | Natural fast tier, **and** it routes through LiteLLM's translation layer rather than natively — see §5 |
+**No Opus tier.** Once §5 established that structured output does not depend on an Opus-class
+model, nothing else required one either.
+
+| Alias | Official model | First-party ID | Bedrock ID | Group on this proxy | Effort | List price (in/out per MTok) |
+|---|---|---|---|---|---|---|
+| `ireports-orchestrator` | **Claude Sonnet 4.6** | `claude-sonnet-4-6` | `anthropic.claude-sonnet-4-6` | `anthropic.claude-sonnet-4-6` | `medium` | $3 / $15 |
+| `ireports-thinking` | **Claude Sonnet 5** | `claude-sonnet-5` | `anthropic.claude-sonnet-5` | `anthropic.claude-sonnet-5` | `high` | $3 / $15 (intro $2 / $10 to 2026-08-31) |
+| `ireports-fast` | **Claude Haiku 4.5** | `claude-haiku-4-5` (dated: `claude-haiku-4-5-20251001`) | `anthropic.claude-haiku-4-5` | `bedrock/anthropic.claude-haiku-4-5-20251001` | `low` | $1 / $5 |
+
+**Why each one.**
+
+- **`ireports-fast` → Haiku 4.5.** Classification, extraction, and mechanical tasks (ADR-008), at a
+  fifth the input cost of the Sonnet tiers. It produces validated structured input through the
+  §5.2 mechanism, which was the only thing that had been in doubt. Low effort with thinking still
+  on, per ADR-015.
+- **`ireports-thinking` → Sonnet 5.** This is the tier that produces findings a reviewer reads, so
+  it gets the strongest non-Opus model available. Note the cost reasoning: **Sonnet 5 and Sonnet
+  4.6 carry the same list price**, and Sonnet 5 is currently cheaper under introductory pricing. So
+  there is no cost argument for putting the quality-critical tier on the older model — preferring
+  Sonnet 4.6 here would trade capability for nothing.
+- **`ireports-orchestrator` → Sonnet 4.6.** The lightest of the three jobs: `CLAUDE.md` is explicit
+  that the model does not decide control flow, so this tier does sequencing and planning support,
+  not adjudication. Keeping it on a different model generation from the thinking tier also means a
+  route-level or generation-level regression shows up on one tier rather than silently on both.
+
+**Escalation, if evaluation demands it.** `anthropic.claude-opus-4-8` is available on this proxy
+and is the obvious escalation for the thinking tier. That should be a decision made on measured
+finding quality in Milestone 3, not a default taken now — which is exactly what this mapping
+avoids.
 
 ---
 
 ## 3. Results
 
-| Alias | Outcome | Resolved model | `stop_reason` | in/out tokens | Schema enforced |
+| Alias | Outcome | Resolved model | `stop_reason` | in/out tokens | Structured output |
 |---|---|---|---|---|---|
-| `ireports-orchestrator` | answered | `anthropic.claude-sonnet-5` | `end_turn` | 19 / 5 | **no** |
-| `ireports-thinking` | answered | `anthropic.claude-opus-4-8` | `end_turn` | 19 / 5 | yes |
-| `ireports-fast` | answered | `bedrock/anthropic.claude-haiku-4-5-20251001` | `end_turn` | 44 / 42 | **no** |
+| `ireports-orchestrator` | answered | `anthropic.claude-sonnet-4-6` | `end_turn` | 15 / 5 | enforced |
+| `ireports-thinking` | answered | `anthropic.claude-sonnet-5` | `end_turn` | 19 / 5 | enforced |
+| `ireports-fast` | answered | `bedrock/anthropic.claude-haiku-4-5-20251001` | `end_turn` | 44 / 44 | enforced |
+
+All three tiers, no Opus. "Enforced" here means the §5.2 mechanism returned validated structured
+input; the gateway raises rather than returning prose if it does not.
 
 No refusals occurred on this run. A refusal would have been recorded as a **pass** for
 connectivity purposes and reported in its own column — refusals are expected traffic for an
@@ -84,44 +111,74 @@ rejecting a malformed request is relying on something that did not happen here.
 
 ---
 
-## 5. Structured outputs are not a guarantee on this path
+## 5. Structured output: `output_config.format` is unusable; a single tool works everywhere
 
-This is the finding with the largest blast radius, and it was not visible from any documentation.
+This is the finding with the largest blast radius, and it took three rounds of probing to get
+right. **An earlier revision of this page concluded that enforcement was a per-model-group
+property, with the Opus groups enforcing and Sonnet/Haiku not. That was wrong** — a sample-size-1
+artifact. Recorded rather than deleted, because the corrected result is the opposite of the
+intuitive one and the wrong version is the version a reader would otherwise reach on their own.
 
-`output_config.format` is accepted with **HTTP 200** by every model group tested. It is **not
-enforced** by several of them. When it is not enforced, the schema is neither applied nor
-rejected — the model simply answers in prose, wrapping the JSON in a Markdown fence.
+### 5.1 `output_config.format` is unreliable on every group, including Opus
 
-| Model group | `output_config.format` | Returned |
+Eight trials per group, identical request each time:
+
+| Model group | bare JSON | fenced prose |
 |---|---|---|
-| `anthropic.claude-opus-4-8` | **enforced** | `{"acknowledged": true}` |
-| `anthropic.claude-opus-4-6` | **enforced** | `{"acknowledged": true}` |
-| `anthropic.claude-sonnet-5` | not enforced | ` ```json\n{"acknowledged": true}\n``` ` |
-| `anthropic.claude-sonnet-4-6` | not enforced | ` ```json\n{\n  "acknowledged": true\n}\n``` ` |
-| `bedrock/anthropic.claude-haiku-4-5-20251001` | not enforced | ` ```json\n{\n  "acknowledged": true\n}\n``` ` |
+| `anthropic.claude-opus-4-8` | 6 | **2** |
+| `anthropic.claude-sonnet-5` | 0 | **8** |
+| `anthropic.claude-sonnet-4-6` | 0 | **8** |
+| `bedrock/anthropic.claude-haiku-4-5-20251001` | 0 | **8** |
 
-**The split does not follow documented model support.** Anthropic documents structured outputs as
-supported on Claude Sonnet 5 and Haiku 4.5, both of which did not enforce here, and the two groups
-that did enforce include Opus 4.6. So the determining factor is something about how each entry is
-registered and routed on this particular proxy — **not** the model's advertised capability.
-We could not establish the root cause from outside the proxy, and we are not guessing at it.
-**Unverified: whether this is a LiteLLM routing property, a Bedrock endpoint property, or a
-per-entry configuration choice on this specific proxy.**
+It is accepted with HTTP 200 everywhere and enforced nowhere reliably. **The schema does reach the
+model** — adding it raises `input_tokens` from 12→44 (Sonnet 4.6, Haiku) and 16→69 (Opus 4.8, Sonnet
+5) — so this is not the proxy silently dropping the field. The model receives the schema and does
+not treat it as binding.
 
-Two observations support "routing, not model": an invalid `effort` value on the
-`anthropic.claude-*` groups is rejected by *Bedrock* (`unknown variant ... expected one of low,
-medium, high, xhigh, max`), while the same value on the `bedrock/`-prefixed group is rejected by
-*LiteLLM* (`litellm.BadRequestError: Unmapped reasoning effort`). Those are two different code
-paths inside the proxy for the same field.
+The two input-token clusters (12/44 and 16/69) line up exactly with the two error-message sources
+seen in §4, confirming the proxy runs two distinct routes; but **both routes fail this mechanism**,
+so the route is not the explanation for the failure.
 
-**What this changes.** Every deterministic validator downstream assumes a finding arrives as
-parseable JSON. On this path that assumption is false for three of five groups, and false
-*silently*. ADR-018 makes the gateway verify it: when a response schema was requested and the text
-does not parse, the gateway raises `StructuredOutputError` rather than returning prose.
+### 5.2 A single tool call works on every group, every time
 
-Deliberately **not** done: stripping the fence. A lenient parser would hide from the program team
-that schema enforcement is a per-model-group property rather than a platform guarantee, and it
-would eventually accept something that is not a finding at all.
+| Mechanism | Opus 4.8 | Sonnet 5 | Sonnet 4.6 | Haiku 4.5 |
+|---|---|---|---|---|
+| `output_config.format` | 6/8 | 0/8 | 0/8 | 0/8 |
+| One tool, `tool_choice` omitted, adaptive thinking | **5/5** | **5/5** | **5/5** | **5/5** |
+| One tool, `tool_choice` forced, adaptive thinking | 5/5 | 5/5 | **400** | **400** |
+| Tool with `strict: true` | **400** | **400** | ok | ok |
+
+Every cell returned the exact expected input (`{"acknowledged": true}`) or an error; there were no
+partial or malformed results.
+
+Two constraints fall out, and they pull in opposite directions — which is why the working
+configuration is the *least* specified one:
+
+- **`strict: true` is rejected by Bedrock** on the native routes:
+  `tools.0.custom.strict: Extra inputs are not permitted`. So the documented hard guarantee of
+  schema-valid tool input is not available here.
+- **Forcing `tool_choice` 400s with adaptive thinking** on exactly the two models this project most
+  wants to use: `Thinking may not be enabled when tool_choice forces a specific tool`. Since
+  ADR-015 keeps thinking on for every tier including `fast`, forcing the tool is not available
+  either.
+
+Omitting both leaves one tool and an instruction to call it, which every group did in every trial.
+
+### 5.3 What this changes
+
+ADR-019 moves the gateway onto the tool mechanism and deletes `output_config.format`. The
+`StructuredOutputError` guard from ADR-018 stays and gains a sharper job: with `tool_choice` left
+to the model, a turn *could* answer in prose instead of calling the tool. It did not in 20 of 20
+trials — but "did not occur" is not "cannot occur", and prose reaching a validator as though it
+were a finding is the failure this system cannot have.
+
+**The practical consequence is the good one:** structured output does not require an Opus tier.
+Sonnet 4.6 and Haiku 4.5 both produce validated structured input through this mechanism, so the
+tier mapping in §2 is free to prefer them on cost and latency grounds.
+
+Deliberately **not** done: stripping the Markdown fence off a prose answer. It is two lines and it
+would make the system appear to work, while installing a lenient parser that eventually accepts
+something that is not a finding at all.
 
 ---
 

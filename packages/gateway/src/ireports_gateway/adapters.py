@@ -63,10 +63,22 @@ def _usage_from(raw: Any) -> ModelUsage:
     )
 
 
+STRUCTURED_OUTPUT_TOOL = "emit_structured_output"
+"""The single tool a structured request offers. One tool, so there is nothing to choose between."""
+
+
 def _text_from(content: Any) -> str:
     return "".join(
         block.text for block in (content or []) if getattr(block, "type", None) == "text"
     )
+
+
+def _structured_input_from(content: Any) -> dict[str, Any] | None:
+    """The validated input of the structured-output tool call, or None if it was never called."""
+    for block in content or []:
+        if getattr(block, "type", None) == "tool_use" and block.name == STRUCTURED_OUTPUT_TOOL:
+            return dict(block.input)
+    return None
 
 
 class _AnthropicAdapterBase:
@@ -100,12 +112,30 @@ class _AnthropicAdapterBase:
         if request.system is not None:
             kwargs["system"] = request.system
         if request.response_schema is not None:
-            # Structured outputs replace the assistant-prefill trick, which now returns a 400
-            # on current models. `output_config` already exists, so merge rather than overwrite.
-            kwargs["output_config"]["format"] = {
-                "type": "json_schema",
-                "schema": request.response_schema,
-            }
+            # Structured output as a **single-tool call**, not `output_config.format` (ADR-019).
+            # Measured against a live Bedrock-backed proxy: `output_config.format` is unreliable
+            # on every model group tested — best case 6 of 8 on Opus 4.8, 0 of 8 on Sonnet and
+            # Haiku — while a lone tool returns validated input 20 of 20 across all four.
+            #
+            # Three things are deliberately absent, each because sending it breaks a tier:
+            #   * `strict: true`  — Bedrock rejects it outright ("Extra inputs are not permitted")
+            #   * `tool_choice`   — forcing the tool 400s with adaptive thinking on Sonnet 4.6 and
+            #                       Haiku 4.5 ("Thinking may not be enabled..."). Leaving it to the
+            #                       model costs nothing: with one tool and an instruction to use
+            #                       it, every group called it every time, and a turn that answers
+            #                       in prose anyway is caught in `_to_response`.
+            #   * `output_config.format` — removed, not merged. Sending both is two mechanisms
+            #                       competing to shape one response.
+            kwargs["tools"] = [
+                {
+                    "name": STRUCTURED_OUTPUT_TOOL,
+                    "description": (
+                        "Return your result as structured data matching the schema. "
+                        "Call this tool exactly once. Do not answer in prose."
+                    ),
+                    "input_schema": request.response_schema,
+                }
+            ]
         # Deliberately absent: temperature, top_p, top_k. Current Claude models reject them
         # with a 400, and this system steers behaviour through prompts and validators anyway.
         return kwargs
@@ -152,21 +182,21 @@ class _AnthropicAdapterBase:
                 "raise max_tokens or lower effort"
             )
 
-        # A requested schema is checked, never trusted. Measured 2026-08-10: several model
-        # groups accept `output_config.format` with HTTP 200 and do not enforce it, answering
-        # with a Markdown-fenced block. Nothing in the response distinguishes that from a model
-        # group where the schema is guaranteed, so the only way to know is to parse.
+        # A requested schema is checked, never trusted. `tool_choice` is left to the model
+        # (see `_build_kwargs`), so a turn that answers in prose instead of calling the tool is
+        # possible in principle — it did not occur in 20 of 20 trials, but "did not occur" is not
+        # "cannot occur", and prose reaching a validator as though it were a finding is the whole
+        # failure class ADR-018 exists to close.
         if request.response_schema is not None:
-            try:
-                json.loads(text)
-            except ValueError as exc:
+            emitted = _structured_input_from(getattr(message, "content", None))
+            if emitted is None:
                 raise StructuredOutputError(
-                    f"node {request.node_id!r} requested a response schema and the endpoint "
-                    f"returned text that is not JSON "
-                    f"(length={len(text)}, fenced={text.lstrip().startswith('```')}). "
-                    "Schema enforcement is a per-model-group property on this path, not a "
-                    "guarantee — see docs/handoff/compatibility-matrix.md."
-                ) from exc
+                    f"node {request.node_id!r} requested structured output and the model "
+                    f"answered without calling {STRUCTURED_OUTPUT_TOOL!r} "
+                    f"(stop_reason={stop_reason!r}, text_length={len(text)}). "
+                    "See docs/handoff/compatibility-matrix.md."
+                )
+            text = json.dumps(emitted)
 
         return ModelResponse(
             text=text,

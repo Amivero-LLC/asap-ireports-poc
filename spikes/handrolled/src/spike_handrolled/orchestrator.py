@@ -18,7 +18,7 @@ line count below is a floor, not a finished orchestrator.
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 
 from ireports_domain import (
@@ -108,7 +108,18 @@ class HandRolledOrchestrator:
                     pool.submit(self._run_specialist, node, run_id, gateway): node
                     for node in pending
                 }
-                for future in futures:
+                # `as_completed`, not submission order. Iterating `futures` directly walks the
+                # dict in submission order and blocks on `future.result()`, so a specialist that
+                # finished *second in the dict but first in wall-clock* stays uncommitted while
+                # we wait on the one ahead of it. Crash in that window and its model call — paid
+                # for, completed — is re-executed on resume.
+                #
+                # This is not hypothetical: it is what the 1c bake-off measured the hand-rolled
+                # candidate doing, and it is why leg 1 now asserts on every specialist rather
+                # than only the one named by `--crash-after`. Correctness survived it (the run
+                # still produced three findings), which is precisely why it needed the durable
+                # call log to surface.
+                for future in as_completed(futures):
                     node = futures[future]
                     findings = future.result()
                     # Commit as each completes, not after all complete. This is the line that
