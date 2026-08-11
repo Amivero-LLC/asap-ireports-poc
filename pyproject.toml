@@ -27,6 +27,10 @@ dev = [
     "mypy>=1.15",
     "bandit>=1.8",
     "pip-audit>=2.9",
+    # Dev-only, and permanently so (ADR-016). `.env` is a developer convenience; deployed
+    # environments get their variables injected by the platform (Compose `env_file`, SAM,
+    # a task definition), so nothing in a shipped artifact ever reads a `.env` file.
+    "python-dotenv>=1.0",
 ]
 
 [tool.ruff]
@@ -40,9 +44,16 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N", "RUF"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
+# Two files are legitimately named `conftest.py` (repo root and tests/contract), which mypy
+# reports as a duplicate module. The root one is four lines of `load_dotenv` glue with no types
+# worth checking; the contract one stays checked. Adding `__init__.py` to the test tree is the
+# other documented fix, but it changes module resolution for every existing test file and
+# surfaces a pile of unrelated errors — a worse trade for the same outcome.
+exclude = ["^conftest\\.py$"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "spikes"]
 markers = [
     "requires_postgres: needs the compose stack in infrastructure/docker",
+    "live: calls a real model endpoint; opt-in via IREPORTS_LIVE_SMOKE=1, never in CI",
 ]

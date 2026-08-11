@@ -38,6 +38,7 @@ from .port import (
     ModelTimeoutError,
     ModelUnavailableError,
     ModelUsage,
+    StructuredOutputError,
 )
 
 __all__ = [
@@ -57,6 +58,7 @@ __all__ = [
     "ModelTimeoutError",
     "ModelUnavailableError",
     "ModelUsage",
+    "StructuredOutputError",
     "StubGateway",
     "build_gateway",
 ]

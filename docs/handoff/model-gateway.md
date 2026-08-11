@@ -9,12 +9,14 @@ The only component in this system permitted to call a model. Application code de
 from ireports_domain import ModelAlias
 from ireports_gateway import Message, ModelRequest, build_gateway
 
-gateway = build_gateway()                       # adapter chosen by configuration
-response = gateway.complete(ModelRequest(
-    alias=ModelAlias.THINKING,                  # a tier, never a model
-    messages=(Message(role="user", content=prompt),),
-    node_id="foreign_influence_specialist",
-))
+gateway = build_gateway()  # adapter chosen by configuration
+response = gateway.complete(
+    ModelRequest(
+        alias=ModelAlias.THINKING,  # a tier, never a model
+        messages=(Message(role="user", content=prompt),),
+        node_id="foreign_influence_specialist",
+    )
+)
 ```
 
 ---
@@ -23,7 +25,7 @@ response = gateway.complete(ModelRequest(
 
 | Adapter | Transport | Alias → model mapping lives | Use when |
 |---|---|---|---|
-| **`litellm`** (default) | Official Anthropic SDK → LiteLLM's Anthropic passthrough (`{base}/anthropic`) | **LiteLLM's config — outside our repo entirely** | Default. A partition or model-generation change never touches our code *or* our environment. |
+| **`litellm`** (default) | Official Anthropic SDK → LiteLLM's **native Anthropic-format endpoint** (`{base}/v1/messages`) | **LiteLLM's config — outside our repo entirely**, unless the proxy is shared (ADR-017) | Default. A partition or model-generation change never touches our code *or* our environment. |
 | **`bedrock`** | `anthropic.AnthropicBedrockMantle`, standard AWS credential chain, no proxy | Our environment (`IREPORTS_BEDROCK_MODEL_*`) | A proxy is not permitted, or you need to isolate whether a problem is LiteLLM's. |
 | **`stub`** | none — offline | n/a | Contract tests only. Never in a profile producing reviewer-visible findings. |
 
@@ -44,8 +46,17 @@ architecture is built on:
 - **structured outputs** — which replaced assistant-prefill, now a 400
 - **thinking blocks**
 
-LiteLLM also exposes an **Anthropic-native passthrough**, so we get the gateway *and* the real API
-by pointing `anthropic.Anthropic` at `{base}/anthropic` via `base_url`. There is no trade to make.
+LiteLLM also serves a **native Anthropic-format endpoint** at `{base}/v1/messages`, so we get the
+gateway *and* the real API by pointing `anthropic.Anthropic` at `{base}` via `base_url`. There is
+no trade to make. Verified against a live Bedrock-backed proxy on 2026-08-10: effort and adaptive
+thinking are forwarded and honoured, not silently dropped (`compatibility-matrix.md` §4).
+
+> ⚠️ **`{base}/anthropic` is a different route and it is usually the wrong one.** That is
+> LiteLLM's *passthrough to `api.anthropic.com`*, which needs the proxy to hold a first-party
+> Anthropic credential. A Bedrock-backed proxy has none, forwards your virtual key upstream, and
+> Anthropic answers `401 invalid x-api-key` — an error that reads like a bad key and is actually a
+> wrong URL. The gateway uses `IREPORTS_LITELLM_BASE_URL` **verbatim** and appends nothing, so
+> what you configure is what is called (ADR-017).
 
 The Bedrock adapter uses the SDK's Messages-API Bedrock client rather than a raw `bedrock-runtime`
 `converse` call for the same reason: one request shape, one refusal path, one place where the
@@ -64,6 +75,7 @@ Each row is enforced in `_AnthropicAdapterBase` and asserted in
 |---|---|---|
 | **A model is named by alias, never by id** (ADR-008) | A partition change must be config, not code | `test_litellm_passes_the_alias_through_as_the_model` |
 | **A refusal raises, never returns** | §3 — the highest-stakes error path in this system | `test_a_refusal_raises_rather_than_returning_empty` |
+| **An unenforced schema raises, never returns prose** | §3.1 — measured, not hypothetical (ADR-018) | `test_an_unenforced_schema_raises_rather_than_returning_prose` |
 | **No sampling parameters, ever** | `temperature`/`top_p`/`top_k` are rejected with a 400 on current models | `test_no_sampling_parameters_are_ever_sent` |
 | **Adaptive thinking, not a token budget** | `budget_tokens` was removed and 400s | `test_thinking_is_adaptive_not_a_token_budget` |
 | **Effort comes from the tier** | The three ADR-008 roles map to reasoning depth | `test_effort_comes_from_the_tier` |
@@ -97,6 +109,29 @@ foreign contacts. **Refusals should be expected in normal operation**, not treat
 ("analysis under this criterion could not be completed"), not as an absent finding. The contracts
 support it (`InformationGap`, `blocking=True`); wiring it is Milestone 2.
 
+### 3.1 The same failure, one layer out: an unenforced schema
+
+Found by actually calling a model rather than by reading documentation. `output_config.format` is
+accepted with **HTTP 200** by every model group tested against a live Bedrock-backed proxy, and
+**enforced by only some of them**. Where it is not enforced, the schema is neither applied nor
+rejected — the model answers in prose, wrapping the JSON in a Markdown fence. The split does not
+follow Anthropic's documented model support, so it cannot be predicted from a model name.
+Per-group results: `compatibility-matrix.md` §5.
+
+This is the refusal problem again. A refusal must not become an empty finding; an unenforced schema
+must not become a prose finding. Both validate cleanly on a careless path and reach a reviewer
+looking finished.
+
+So the gateway parses the text whenever a schema was requested and raises `StructuredOutputError`
+otherwise (ADR-018). The diagnostic reports **shape only** — length, and whether the text is fenced
+— never the text, because a model asked to structure a finding was by construction looking at case
+evidence, and the error travels into logs and traces.
+
+**Deliberately not done: stripping the fence.** Two lines, and it would make the system appear to
+work while hiding that schema enforcement is a per-model-group property rather than a platform
+guarantee. It would also install a lenient parser that eventually accepts something that is not a
+finding at all.
+
 ---
 
 ## 4. Configuration
@@ -118,7 +153,12 @@ internal `<thinking>` tags can leak into the response. For a system whose determ
 depend on structured output, a silently-skipped tool call is not survivable. Low effort captures
 most of the cost and latency saving without either risk.
 
-For LiteLLM, name the models after the aliases in `model_list` so no model id exists on our side:
+`IREPORTS_LITELLM_BASE_URL` is used **verbatim** — the gateway appends nothing (ADR-017). Point it
+at the proxy root; the Anthropic SDK adds `/v1/messages`. See the warning in §1 before adding
+`/anthropic`.
+
+**Preferred: name the models after the aliases in LiteLLM's `model_list`**, so no model id exists
+on our side at all.
 
 ```yaml
 model_list:
@@ -126,13 +166,34 @@ model_list:
     litellm_params: { model: bedrock/<CONFIRM VIA Q-01>, aws_region_name: <region> }
 ```
 
+**Fallback for a proxy you do not own (ADR-017).** An organisation-shared LiteLLM fronting dozens
+of models for many teams will not carry `ireports-thinking`, and adding it is someone else's
+change-control ticket. A per-tier override maps each alias onto a model group that proxy does
+expose:
+
+```bash
+IREPORTS_LITELLM_MODEL_THINKING=anthropic.claude-opus-4-8
+```
+
+Per-tier, not all-or-nothing: a tier without an override still sends its alias. **ADR-008 is
+untouched either way — a node still names `ModelAlias.THINKING`.** What moves is where the tier is
+resolved, into the same place the `bedrock` adapter already keeps it.
+
 ---
 
 ## 5. Known gaps and unverified claims
 
-- **Neither adapter has been run against a real endpoint.** Every test is offline. The gateway is
-  verified as *correctly constructed*, not as *working against Bedrock* — that is Q-01 and cannot
-  be answered without account access. Do not read the green test suite as connectivity.
+- **The `litellm` adapter has been run against a real endpoint — once, in the wrong partition.**
+  On 2026-08-10 all three tiers reached a model through an organisation-shared LiteLLM proxy over
+  **commercial** AWS Bedrock. Results, and the two corrections that run forced (ADR-017, ADR-018),
+  are in `compatibility-matrix.md`. It says nothing about GovCloud, and Q-01 is not narrowed by it.
+  Reproduce with `IREPORTS_LIVE_SMOKE=1 uv run pytest tests/live -v -s`.
+- **The `bedrock` adapter has never been run at all**, in any partition. It is verified as
+  *correctly constructed* and nothing more. Do not read the green test suite as connectivity.
+- **This path is more permissive than the first-party API.** `temperature` and
+  `thinking.budget_tokens` — both documented as rejected on current models — were **accepted** with
+  HTTP 200. Our gateway never sends either, so this is informational; but nothing in this system
+  may rely on the endpoint rejecting a malformed request. The guard rails are ours.
 - **The Mantle endpoint's GovCloud availability is unverified.** It is
   `bedrock-mantle.{region}.api.aws`; GovCloud endpoints do not generally follow the commercial
   pattern. `IREPORTS_BEDROCK_BASE_URL` is the escape hatch; if the endpoint is absent, the fallback
@@ -161,5 +222,14 @@ macOS arm64, Python 3.13.x, `anthropic` 0.121.0, 2026-08-10.
 | Gate | Result |
 |---|---|
 | `ruff check` / `ruff format --check` | clean |
-| `mypy --strict` | no issues, 26 source files |
-| `pytest tests` | 76 passed (20 new gateway tests) |
+| `pytest` (offline) | 87 passed, 8 skipped — the 8 are the opt-in live checks |
+| `pytest tests/live` (opt-in, live) | 8 passed against a commercial-partition Bedrock proxy |
+| `mypy --strict` | **13 pre-existing errors in three test modules** — see below |
+
+**On mypy.** An earlier revision of this page recorded `mypy --strict` as clean at 26 source files.
+It is not, and was not: `uv run mypy .` reports 13 errors, all in `tests/contract/`, all present on
+the commit that made the claim. Nine are unused `# type: ignore` comments; four are missing
+annotations in `test_decision_support_boundary.py`. No package under `packages/` is affected.
+Recorded here rather than quietly fixed, because a handoff document that overstates a quality gate
+is exactly the failure ADR-001 is written against. Fixing them is a small, contained job and is not
+yet done.

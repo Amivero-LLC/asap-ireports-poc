@@ -403,3 +403,130 @@ drift.
    commercial pattern. `IREPORTS_BEDROCK_BASE_URL` is the escape hatch; if the endpoint is absent
    there, the fallback is a `bedrock-runtime` adapter — real work to scope, not a flag. Folded
    into Q-01.
+
+**Amended 2026-08-10 by ADR-017 and ADR-018**, both on evidence from the first live model call.
+The decision stands; two of its implementation details were wrong.
+
+---
+
+## ADR-016 — `.env` reaches a process at entry points, never through a library
+
+**Date:** 2026-08-10 · **Status:** Accepted
+
+**Context.** `.env` was populated with working LiteLLM settings and the gateway still failed with
+`adapter 'litellm' requires IREPORTS_LITELLM_BASE_URL`. Nothing in the repository loaded the file:
+`GatewayConfig.from_env()` reads `os.environ`, `python-dotenv` was not a dependency, and `uv run`
+does not read `.env` unless told to. The variable was set in a file nobody read.
+
+**Decision.** Library code stays a pure consumer of `os.environ`. The file is loaded **explicitly,
+at process entry points**. Two exist today:
+
+| Entry point | Mechanism |
+|---|---|
+| The pytest session | `conftest.py` at the repository root calls `load_dotenv(..., override=False)` |
+| Any other command | `uv run --env-file .env <command>` — first-class in the toolchain already in use |
+
+When `apps/api` lands it becomes the third, loading in its own `main` rather than in a package
+anything else imports. Docker Compose uses `env_file` for containers.
+
+**Rejected: calling `load_dotenv()` inside `GatewayConfig.from_env()`.** It is the shortest fix and
+the worst one. A library that reads a file relative to the current working directory acquires a
+hidden dependency on where the process was started, and in Lambda there is no `.env` at all — so
+local and deployed behaviour would diverge for reasons having nothing to do with configuration.
+The gateway would also start behaving differently depending on which directory a test runner
+happened to be invoked from.
+
+**Rejected as the *only* mechanism: `set -a; source .env`.** Zero dependencies and perfectly
+explicit, but it does not reach an IDE test runner, a pre-commit hook, or a CI step — which
+reproduces exactly the failure above, silently. It remains fine as an ad hoc shell convenience.
+
+**Consequences.**
+
+1. `python-dotenv` is a **dev dependency, permanently.** Deployed environments (Lambda, ECS,
+   Compose) get variables injected by the platform. Nothing in a shipped artifact reads a `.env`
+   file, so the dependency never reaches a deployment.
+2. **`override=False`.** A variable already present in the real environment beats the file. CI, a
+   container, and a deployed function cannot be silently overridden by a `.env` on disk.
+3. **Contract tests are isolated from it.** `tests/contract/conftest.py` strips every `IREPORTS_*`
+   variable. A contract test whose result depends on an untracked local file is not evidence of
+   anything, which is the one thing ADR-001 cannot tolerate.
+4. `mypy` is configured to skip the root `conftest.py` — two files legitimately named `conftest.py`
+   are a duplicate module to mypy, and the alternative fix (adding `__init__.py` across the test
+   tree) changes module resolution for every existing test file.
+
+---
+
+## ADR-017 — LiteLLM's native Messages endpoint, and a per-tier override for shared proxies
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Amends ADR-015**
+
+**Context.** The first live call against a real Bedrock-backed LiteLLM proxy failed two ways that
+offline tests could not have caught. Evidence: `docs/handoff/compatibility-matrix.md` §6.
+
+**Decision 1 — `IREPORTS_LITELLM_BASE_URL` is used verbatim; the gateway appends nothing.**
+
+ADR-015 had the gateway append `/anthropic`, reaching for LiteLLM's *passthrough* route. LiteLLM
+serves two routes that look interchangeable and are not:
+
+| Route | What it is |
+|---|---|
+| `{base}/v1/messages` | LiteLLM's **native Anthropic-format endpoint** — accepts a Messages API request and routes it to any `model_list` entry, Bedrock included. What this architecture needs. |
+| `{base}/anthropic/v1/messages` | **Passthrough to `api.anthropic.com`**, requiring the proxy to hold a first-party Anthropic credential. A Bedrock-backed proxy has none, so it forwards the caller's virtual key upstream and Anthropic returns `401 invalid x-api-key`. |
+
+The failure presents as a bad key and is in fact a wrong route — and a gateway that rewrites the
+operator's URL underneath them makes that near-undiagnosable. Passthrough remains reachable by
+configuring `…/anthropic` deliberately.
+
+**Decision 2 — an optional per-tier alias→model override for the LiteLLM adapter**
+(`IREPORTS_LITELLM_MODEL_ORCHESTRATOR|THINKING|FAST`), defaulting to the identity mapping.
+
+ADR-008 assumed LiteLLM's config is ours to write. The realistic case is a LiteLLM instance owned
+by the organisation, fronting dozens of models for many teams, that does not carry
+`ireports-thinking` and will not without a change-control ticket. Blocking the architecture on
+another team's config file is not a design.
+
+**ADR-008's invariant is untouched.** *Application code* names a tier; a node still writes
+`ModelAlias.THINKING`. Only the place the tier is resolved moves — into our environment, exactly
+where the `bedrock` adapter already keeps it. The identity mapping remains **preferred** and
+remains the default: when the proxy carries our three names, no model identifier exists on our
+side at all, and that is still the better arrangement.
+
+**Consequences.** The ADR-015 claim "with the LiteLLM adapter no model id reaches our repository at
+all" is now conditional on the proxy carrying our aliases. `docs/handoff/model-gateway.md` says so.
+
+---
+
+## ADR-018 — A requested schema is verified, not trusted
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Amends ADR-015**
+
+**Context.** Measured against a live endpoint: `output_config.format` is accepted with **HTTP 200**
+by every model group tested and **silently not enforced** by three of five. Where it is not
+enforced the schema is neither applied nor rejected — the model answers in prose, wrapping the JSON
+in a Markdown fence. The split does not follow Anthropic's documented model support, so it cannot
+be predicted from a model name. Detail and the per-group table: `compatibility-matrix.md` §5.
+
+**Decision.** When a `ModelRequest` carries a `response_schema`, the gateway parses the returned
+text and raises `StructuredOutputError` if it is not JSON. The diagnostic reports shape — length,
+and whether the text is fenced — and never the text itself, because a model asked to structure a
+finding was by construction looking at case evidence and the error travels into logs and traces.
+
+**Rejected: stripping the fence.** It is two lines and it would make the system appear to work. It
+would also hide from the program team that schema enforcement is a per-model-group property rather
+than a platform guarantee, and it would install a lenient parser that eventually accepts something
+that is not a finding at all. `CLAUDE.md`: the model reasons; it does not decide whether its own
+output is valid.
+
+**Consequences.**
+
+1. A tier mapped to a non-enforcing model group **fails loudly** on any structured request. That
+   is the correct signal: choose an enforcing group, or make a recorded decision to repair.
+2. This is the same failure class as ADR-015's refusal path, one layer out. A refusal must not
+   become an empty finding; an unenforced schema must not become a prose finding. Both are silent
+   under-analysis that validates cleanly and reaches a reviewer looking like a clean result.
+3. Milestone 2 should surface a `StructuredOutputError` to the reviewer as an information gap,
+   exactly as a refusal is meant to. The contracts already support it (`InformationGap`,
+   `blocking=True`); wiring both is one job.
+4. **Two request shapes documented as rejected were accepted** on this path (`temperature`,
+   `thinking.budget_tokens`). Nothing in this system may rely on the endpoint rejecting a
+   malformed request — the guard rails are ours.

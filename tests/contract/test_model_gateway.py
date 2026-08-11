@@ -28,6 +28,7 @@ from ireports_gateway import (
     ModelRefusalError,
     ModelRequest,
     ModelTimeoutError,
+    StructuredOutputError,
     StubGateway,
     build_gateway,
 )
@@ -206,6 +207,60 @@ def test_max_tokens_with_no_text_is_an_error_not_an_empty_answer() -> None:
         _adapter(truncated).complete(REQUEST)
 
 
+def test_an_unenforced_schema_raises_rather_than_returning_prose() -> None:
+    """The second silent-degradation path, found by actually calling a model.
+
+    Measured 2026-08-10 against a live Bedrock-backed LiteLLM proxy: `output_config.format` is
+    accepted with HTTP 200 and **not enforced** on several model groups, which answer with a
+    Markdown-fenced code block. There is no error, no warning, and nothing in the response that
+    distinguishes it from a group where the schema is guaranteed.
+
+    Left alone, a specialist asked for a structured finding returns prose that fails somewhere
+    downstream — or worse, gets "fixed" by a lenient parser that strips fences and then one day
+    accepts something that is not a finding at all.
+    """
+    fenced = _Message(
+        content=[_Block('```json\n{"acknowledged": true}\n```')],
+        usage=_Usage(),
+    )
+    with pytest.raises(StructuredOutputError, match="fenced=True"):
+        _adapter(fenced).complete(
+            ModelRequest(
+                alias=ModelAlias.FAST,
+                messages=(Message(role="user", content="Extract."),),
+                response_schema={"type": "object"},
+                node_id="extractor",
+            )
+        )
+
+
+def test_the_schema_check_carries_no_model_text() -> None:
+    """`CLAUDE.md`: raw case text never reaches logs or traces.
+
+    The error travels into both. A model asked to structure a finding was, by construction,
+    looking at case evidence — so the diagnostic reports shape (length, fenced) and never the
+    string itself.
+    """
+    secret = '```json\n{"subject": "SYNTHETIC-PII-MARKER"}\n```'
+    with pytest.raises(StructuredOutputError) as exc:
+        _adapter(_Message(content=[_Block(secret)], usage=_Usage())).complete(
+            ModelRequest(
+                alias=ModelAlias.FAST,
+                messages=(Message(role="user", content="Extract."),),
+                response_schema={"type": "object"},
+            )
+        )
+    assert "SYNTHETIC-PII-MARKER" not in str(exc.value)
+
+
+def test_a_schema_is_only_checked_when_one_was_requested() -> None:
+    """Ordinary prose responses are untouched — the check is opt-in with the schema."""
+    response = _adapter(_Message(content=[_Block("not json at all")], usage=_Usage())).complete(
+        REQUEST
+    )
+    assert response.text == "not json at all"
+
+
 def test_usage_is_returned_for_budget_accounting() -> None:
     response = _adapter(_Message(content=[_Block("ok")], usage=_Usage())).complete(REQUEST)
     assert response.usage.input_tokens == 120
@@ -259,23 +314,61 @@ def test_litellm_requires_a_base_url() -> None:
 
 
 def test_litellm_passes_the_alias_through_as_the_model() -> None:
-    """With LiteLLM, no model id exists on our side at all — the proxy owns the mapping."""
+    """The preferred configuration: no model id exists on our side at all."""
     gateway = LiteLLMGateway(
         GatewayConfig(adapter=AdapterKind.LITELLM, litellm_base_url="http://localhost:4000")
     )
     assert gateway._resolve_model(ModelAlias.THINKING) == "ireports-thinking"
 
 
-def test_litellm_targets_the_anthropic_passthrough_not_an_openai_shim() -> None:
+def test_litellm_uses_the_configured_base_url_verbatim() -> None:
+    """No silent URL rewriting — the regression that cost an afternoon (ADR-017).
+
+    An earlier version appended `/anthropic`, reaching for LiteLLM's passthrough-to-Anthropic
+    route. Against a Bedrock-backed proxy that route has no first-party credential to swap in, so
+    it forwards the virtual key upstream and Anthropic answers `401 invalid x-api-key` — an error
+    that reads like a bad key and is in fact a wrong route. An operator who can see the URL they
+    configured can debug that in a minute; one whose URL is rewritten underneath them cannot.
+    """
+    gateway = LiteLLMGateway(
+        GatewayConfig(adapter=AdapterKind.LITELLM, litellm_base_url="http://localhost:4000/")
+    )
+    assert str(gateway._client.base_url).rstrip("/") == "http://localhost:4000"
+
+
+def test_litellm_is_the_anthropic_sdk_not_an_openai_shim() -> None:
     """The design decision, asserted.
 
     Pointing an OpenAI-compatible client at LiteLLM would silently cost adaptive thinking,
     effort, structured outputs, and the refusal stop reason — the whole basis of this package.
     """
+    import anthropic
+
     gateway = LiteLLMGateway(
-        GatewayConfig(adapter=AdapterKind.LITELLM, litellm_base_url="http://localhost:4000/")
+        GatewayConfig(adapter=AdapterKind.LITELLM, litellm_base_url="http://localhost:4000")
     )
-    assert str(gateway._client.base_url).rstrip("/").endswith("/anthropic")
+    assert isinstance(gateway._client, anthropic.Anthropic)
+
+
+def test_a_litellm_model_override_still_keeps_model_ids_out_of_application_code() -> None:
+    """ADR-017's accommodation for a shared proxy, and its limit.
+
+    A LiteLLM instance owned by the whole organisation will not carry `ireports-thinking` in its
+    `model_list`, and adding it is someone else's change-control ticket. The override moves the
+    alias→model table into our environment — exactly where the `bedrock` adapter already keeps
+    it. What must not move is the *request*: it still names a tier.
+    """
+    config = GatewayConfig(
+        adapter=AdapterKind.LITELLM,
+        litellm_base_url="http://localhost:4000",
+        litellm_models={ModelAlias.THINKING: "anthropic.claude-opus-4-8"},
+    )
+    gateway = LiteLLMGateway(config)
+    assert gateway._resolve_model(ModelAlias.THINKING) == "anthropic.claude-opus-4-8"
+    # Tiers without an override still send the alias — the map is per-tier, not all-or-nothing.
+    assert gateway._resolve_model(ModelAlias.FAST) == "ireports-fast"
+    # And the contract a node writes is unchanged.
+    assert REQUEST.alias is ModelAlias.THINKING
 
 
 def test_effort_defaults_are_per_tier_and_overridable(monkeypatch: pytest.MonkeyPatch) -> None:

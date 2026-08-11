@@ -138,6 +138,26 @@ class ModelRefusalError(GatewayError):
         super().__init__(f"model declined the request (category={category or 'unspecified'})")
 
 
+class StructuredOutputError(GatewayError):
+    """A response schema was requested and the returned text is not JSON.
+
+    Distinct from a transport failure and **not** retriable in the naive sense: on some endpoints
+    it is a permanent property of the model group, not a transient fault.
+
+    This exists because of a measured behaviour, not a hypothetical one. Against a live
+    Bedrock-backed LiteLLM proxy on 2026-08-10, `output_config.format` was accepted with HTTP 200
+    and **silently not enforced** on several model groups — the schema is neither applied nor
+    rejected, and the model answers with a Markdown-fenced code block instead of bare JSON
+    (`docs/handoff/compatibility-matrix.md`).
+
+    The tempting fix is to strip the fence. That would be wrong twice over: it hides from the
+    program team that schema enforcement is a per-model-group property rather than a guarantee,
+    and it converts a detectable fault into a lenient parser that will one day accept something
+    that is not a finding at all. `CLAUDE.md`: the model reasons; it does not decide whether its
+    own output is valid.
+    """
+
+
 class ModelTimeoutError(GatewayError):
     """The call did not complete in time. Retriable."""
 

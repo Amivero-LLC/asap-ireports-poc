@@ -33,9 +33,35 @@ whether a LiteLLM proxy is permitted in the approved environment. If the first i
 fallback is a `bedrock-runtime` adapter (scoped work); if the second is refused, the `bedrock`
 adapter becomes the only path and the alias→model mapping moves into our environment.
 
+**Partial evidence added 2026-08-10 — Q-01 remains OPEN.** The project made its first real model
+calls, against a **commercial-partition** Bedrock deployment via an organisation-shared LiteLLM
+proxy. Recorded as a compatibility matrix entry in `docs/handoff/compatibility-matrix.md`, and
+reproducible with `IREPORTS_LIVE_SMOKE=1 uv run pytest tests/live -v -s`.
+
+What it establishes — **for the commercial partition only**:
+
+- All three ADR-008 tiers reach a model and return usage, a resolved model id, and a stop reason.
+- `output_config.effort` and adaptive thinking are forwarded and genuinely honoured, not dropped.
+  This was ADR-015's central bet and it holds on this path.
+- `output_config.format` is accepted by every group tested and **enforced by only some of them**,
+  with the split not following documented model support (ADR-018).
+- LiteLLM's native `/v1/messages` route works; the `/anthropic` passthrough route 401s against a
+  Bedrock-backed proxy (ADR-017).
+- `temperature` and `thinking.budget_tokens` — both documented as rejected on current models —
+  were **accepted**. This path is more permissive than the first-party API.
+
+**What it does not establish, and why the gate stays shut.** A commercial-partition result is not
+evidence about GovCloud: not model availability, not concrete model or inference-profile IDs, not
+cross-region inference restrictions, not data-routing behaviour. A model that answers here may be
+absent there; an endpoint that resolves here may not exist there. The `bedrock` adapter has still
+never been run in any partition, so `bedrock-mantle.{region}.api.aws` remains unverified. Whether
+LiteLLM is permitted in the approved environment remains unknown.
+
 **To resolve:** confirm against current AWS GovCloud Bedrock documentation and an actual API call
-in the target account and region — not from a general availability page. Record the answer as a
-compatibility matrix entry (blueprint §15.3), not prose.
+in the target account and region — not from a general availability page. The live smoke check is
+the instrument: point it at the target endpoint and paste the resulting matrix into
+`docs/handoff/compatibility-matrix.md` as a second run-of-record, alongside the commercial one
+rather than replacing it.
 
 **Related:** Bedrock's feature surface differs from the first-party Claude API in ways that affect
 design — check per feature rather than assuming parity.

@@ -73,6 +73,18 @@ class GatewayConfig:
     # LiteLLM adapter
     litellm_base_url: str | None = None
     litellm_api_key: str | None = None
+    litellm_models: dict[ModelAlias, str] | None = None
+    """Optional alias → LiteLLM model-group override. Empty means "send the alias" (ADR-017).
+
+    The preferred configuration is still an empty map: LiteLLM's `model_list` carries entries
+    literally named `ireports-thinking` and friends, and no model identifier exists on our side
+    at all. This override exists because a **shared** proxy is the realistic case — an
+    organisation-wide LiteLLM fronting dozens of models for many teams will not carry our three
+    names, and getting them added is an organisational change rather than a code change.
+
+    ADR-008's invariant is untouched either way: *application code* names a tier. This only moves
+    where the tier is resolved, exactly as the `bedrock` adapter already does.
+    """
 
     # Bedrock adapter
     aws_region: str | None = None
@@ -111,20 +123,22 @@ class GatewayConfig:
             max_retries=int(_env("MODEL_MAX_RETRIES", "2") or 2),
             litellm_base_url=_env("LITELLM_BASE_URL"),
             litellm_api_key=_env("LITELLM_API_KEY"),
+            litellm_models=cls._models_from_env("LITELLM_MODEL_"),
             aws_region=_env("AWS_REGION") or os.environ.get("AWS_REGION"),
             aws_profile=_env("AWS_PROFILE") or os.environ.get("AWS_PROFILE"),
             bedrock_base_url=_env("BEDROCK_BASE_URL"),
-            bedrock_models=cls._bedrock_models_from_env(),
+            bedrock_models=cls._models_from_env("BEDROCK_MODEL_"),
             effort=effort,
         )
         config.validate()
         return config
 
     @staticmethod
-    def _bedrock_models_from_env() -> dict[ModelAlias, str]:
+    def _models_from_env(prefix: str) -> dict[ModelAlias, str]:
+        """Read a per-tier model map, e.g. `IREPORTS_BEDROCK_MODEL_THINKING`."""
         resolved: dict[ModelAlias, str] = {}
         for alias, suffix in _ALIAS_ENV_SUFFIX.items():
-            value = _env(f"BEDROCK_MODEL_{suffix}")
+            value = _env(f"{prefix}{suffix}")
             if value:
                 resolved[alias] = value
         return resolved
@@ -171,6 +185,10 @@ class GatewayConfig:
 
     def effort_for(self, alias: ModelAlias) -> Effort:
         return (self.effort or DEFAULT_EFFORT)[alias]
+
+    def litellm_model_for(self, alias: ModelAlias) -> str:
+        """The alias itself unless an override names a model group on the proxy (ADR-017)."""
+        return (self.litellm_models or {}).get(alias) or alias.value
 
     def bedrock_model_for(self, alias: ModelAlias) -> str:
         model_id = (self.bedrock_models or {}).get(alias)

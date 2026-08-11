@@ -5,13 +5,18 @@ worth stating up front, because the obvious alternative is wrong in a way that i
 LiteLLM's best-known surface is OpenAI-compatible, so "point an OpenAI client at the proxy" looks
 like the natural LiteLLM integration. It costs the Anthropic request surface — adaptive thinking,
 `output_config.effort`, the `refusal` stop reason, structured outputs, thinking blocks — all of
-which this architecture depends on. LiteLLM also exposes an **Anthropic-native passthrough**, so
-we get the gateway *and* the real API by pointing `anthropic.Anthropic` at it via `base_url`.
+which this architecture depends on. LiteLLM also serves a **native Anthropic-format endpoint** at
+`{base}/v1/messages`, so we get the gateway *and* the real API by pointing `anthropic.Anthropic`
+at it via `base_url`. Verified against a live Bedrock-backed proxy: an invalid `effort` value is
+rejected by Bedrock itself with the real enum, and `effort` demonstrably changes whether a
+thinking block comes back — the parameters are forwarded and honoured, not quietly dropped
+(`docs/handoff/compatibility-matrix.md`).
 
 The two adapters differ in exactly one thing: how a `ModelAlias` becomes something concrete.
 
-- `litellm` — `anthropic.Anthropic(base_url=…)`. The alias **is** the model name; LiteLLM's
-  own config maps it to something concrete.
+- `litellm` — `anthropic.Anthropic(base_url=…)`. The alias **is** the model name by default;
+  LiteLLM's own config maps it to something concrete. On a shared proxy that cannot carry our
+  three names, `IREPORTS_LITELLM_MODEL_*` supplies the model group instead (ADR-017).
 - `bedrock` — `anthropic.AnthropicBedrockMantle(aws_region=…)`. Our config maps the alias to an
   `anthropic.`-prefixed Bedrock model id.
 
@@ -22,6 +27,7 @@ gateway's config and application code never learns a model id. With Bedrock, the
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import anthropic
@@ -38,6 +44,7 @@ from .port import (
     ModelTimeoutError,
     ModelUnavailableError,
     ModelUsage,
+    StructuredOutputError,
 )
 
 
@@ -145,6 +152,22 @@ class _AnthropicAdapterBase:
                 "raise max_tokens or lower effort"
             )
 
+        # A requested schema is checked, never trusted. Measured 2026-08-10: several model
+        # groups accept `output_config.format` with HTTP 200 and do not enforce it, answering
+        # with a Markdown-fenced block. Nothing in the response distinguishes that from a model
+        # group where the schema is guaranteed, so the only way to know is to parse.
+        if request.response_schema is not None:
+            try:
+                json.loads(text)
+            except ValueError as exc:
+                raise StructuredOutputError(
+                    f"node {request.node_id!r} requested a response schema and the endpoint "
+                    f"returned text that is not JSON "
+                    f"(length={len(text)}, fenced={text.lstrip().startswith('```')}). "
+                    "Schema enforcement is a per-model-group property on this path, not a "
+                    "guarantee — see docs/handoff/compatibility-matrix.md."
+                ) from exc
+
         return ModelResponse(
             text=text,
             alias=request.alias,
@@ -157,14 +180,28 @@ class _AnthropicAdapterBase:
 class LiteLLMGateway(_AnthropicAdapterBase):
     """Calls Claude through a LiteLLM proxy, in Anthropic's own request format.
 
-    Points the official SDK at LiteLLM's **Anthropic passthrough** (`{base}/anthropic`), so the
-    proxy forwards a native Messages API request rather than translating an OpenAI-shaped one.
-    Everything the architecture needs — adaptive thinking, effort, structured outputs, the
-    `refusal` stop reason — survives the hop.
+    **`base_url` is used exactly as configured.** An earlier version appended `/anthropic` on the
+    operator's behalf, reaching for LiteLLM's *passthrough* route. That was wrong often enough to
+    be worth spelling out, because the two LiteLLM routes look interchangeable and are not:
 
-    This is the ADR-008 default: application code names `ireports-thinking`, LiteLLM's config
-    decides what that is, and a partition or model-generation change never reaches our code or
-    even our environment.
+    - `{base}/v1/messages` — LiteLLM's **native Anthropic-format endpoint**. It accepts a Messages
+      API request and routes it to any entry in `model_list`, including Bedrock ones. This is the
+      route a Bedrock-backed proxy needs, and therefore the route this architecture needs.
+    - `{base}/anthropic/v1/messages` — the **passthrough** to `api.anthropic.com`. It requires the
+      proxy to hold a first-party Anthropic credential. A proxy that fronts Bedrock has no such
+      credential, so it forwards the caller's virtual key upstream and Anthropic returns
+      `401 invalid x-api-key` — an error that reads like a bad key rather than a wrong route.
+
+    Measured against a live Bedrock-backed proxy on 2026-08-10; see
+    `docs/handoff/compatibility-matrix.md`. Silently rewriting a URL the operator supplied made
+    that failure much harder to read than it needed to be, so the gateway no longer does it. Set
+    `IREPORTS_LITELLM_BASE_URL` to `…/anthropic` yourself if passthrough is genuinely what you
+    want.
+
+    Either way the Anthropic request surface is what travels: adaptive thinking, `effort`,
+    structured outputs, and the `refusal` stop reason all survive the native route (verified, same
+    source). That is the whole reason this adapter drives the official Anthropic SDK rather than
+    LiteLLM's better-known OpenAI-compatible surface.
     """
 
     name = "litellm"
@@ -172,9 +209,8 @@ class LiteLLMGateway(_AnthropicAdapterBase):
     def __init__(self, config: GatewayConfig) -> None:
         if not config.litellm_base_url:
             raise GatewayConfigurationError("LiteLLMGateway requires litellm_base_url")
-        base = config.litellm_base_url.rstrip("/")
         client = anthropic.Anthropic(
-            base_url=f"{base}/anthropic",
+            base_url=config.litellm_base_url.rstrip("/"),
             # LiteLLM authenticates with a virtual key. A placeholder keeps the SDK from
             # searching the ambient environment for a real Anthropic key, which must never be
             # what authenticates a request in this architecture.
@@ -185,9 +221,11 @@ class LiteLLMGateway(_AnthropicAdapterBase):
         super().__init__(client, config)
 
     def _resolve_model(self, alias: ModelAlias) -> str:
-        # The alias goes over the wire unchanged: LiteLLM's `model_list` maps
-        # `ireports-thinking` to a concrete Bedrock model. No model id exists on our side.
-        return alias.value
+        # By default the alias goes over the wire unchanged and LiteLLM's `model_list` maps
+        # `ireports-thinking` to something concrete — no model id exists on our side at all.
+        # On a shared proxy that does not carry our three names, an override supplies the model
+        # group instead (ADR-017). Application code names a tier in both cases.
+        return self._config.litellm_model_for(alias)
 
 
 class BedrockGateway(_AnthropicAdapterBase):
