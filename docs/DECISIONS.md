@@ -677,3 +677,89 @@ returned the exact expected input **20 of 20** across Opus 4.8, Sonnet 5, Sonnet
 5. **This is a per-endpoint finding.** A first-party Anthropic endpoint may well enforce
    `output_config.format` correctly. The decision is scoped to what was measured; re-run the live
    smoke check before assuming it transfers.
+
+---
+
+## ADR-020 — The buildable scope is an orchestrator spine; breadth moves to the handoff
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Amends the scope of ADR-003, ADR-007, ADR-010, and
+ADR-012's carried conditions. Does not touch ADR-011 or ADR-014.**
+
+**Context.** The roadmap that preceded this entry carried thirty-three requirements across nine
+phases: a dual-adapter orchestration bake-off re-run at outcome level, checkpoint MAC hardening
+with least-privilege database roles, local OpenSearch ingestion with embedding provenance,
+authority routing across two approved policy packs, deterministic citation validators, a
+transactional outbox against an ASAP mock, a dependency inventory, and a GovCloud gate.
+
+Every one of those is defensible on its own terms. Together they answer a question the project was
+not asked. ADR-001 fixes the deliverable as *a proven architecture and a handoff package*, and
+`CLAUDE.md` names the risk that deliverable exists to retire: **the agentic orchestrator is harder
+than it looks.** Breadth across authorities, retrieval infrastructure, and delivery plumbing does
+not retire that risk — it spends the budget that would have.
+
+The dual-adapter bake-off is the clearest case. It was added to re-test ADR-012 at outcome level
+because Milestone 1c was a partial spike against a deterministic stub. But it multiplies every
+downstream phase by two, and it re-opens a decision that was already made on measured evidence and
+already protected structurally: nodes depend on our port, never on LangGraph, so the escape hatch
+is the port, not a second implementation maintained in parallel.
+
+**Decision.** The buildable scope is the orchestrator spine and nothing else:
+
+> One command loads a synthetic case, fans out to bounded specialist sub-calls through the
+> `ModelGateway` port on tier aliases, enforces budgets and loop limits in the deterministic shell,
+> survives a crash mid-fan-out and resumes in a separate process without double-paying for an
+> in-flight model call, pauses for a recorded human disposition, and emits a validated typed
+> envelope.
+
+Nine phases become three. What is cut is **not abandoned** — it is designed in the handoff package
+and explicitly marked unbuilt, with the reason, per ADR-001's standing requirement that every claim
+be cited or marked unverified.
+
+| Cut | Requirements | Where it lives now |
+|---|---|---|
+| Second orchestration adapter and the outcome-level bake-off | ORCH-05, BAKE-01, ARCH-03, ARCH-05 | ADR-012 stands as decided; the port is the escape hatch |
+| Checkpoint row integrity, least privilege, resume provenance | CKPT-01..03 | `docs/handoff/checkpoint-threat-model.md` §6, already written |
+| OpenSearch retrieval, local ingest, embedding provenance | RETR-01..03, CONT-02 | Handoff; evidence is handed to the specialist from a synthetic fixture |
+| Authority routing, two approved policy packs | ROUT-01..02 | Handoff; ADR-003's coverage decision is unchanged, its *implementation* is deferred |
+| Evidence-citation validators | VAL-01 | Handoff; the finding contract still requires citations structurally |
+| Transactional outbox, ASAP mock | DEL-01 | Handoff; ADR-010's envelope contract stands, its transport does not ship |
+| Dependency inventory, GovCloud gate, `bedrock` live run | ARCH-02, HAND-02..03 | Handoff; Q-01 stays open and its cost is stated |
+
+**What is explicitly retained, and why.**
+
+1. **The human disposition gate (ADR-011) and the no-aggregate-score rule (ADR-014) are untouched.**
+   Both were considered for the cut and both were kept. They are already structural in the thirteen
+   shipped contracts with passing tests, so retaining them costs nothing — and cutting them would
+   mean deleting working guardrails, which is not a simplification. Both remain NON-NEGOTIABLE.
+2. **Crash and resume across a genuine process boundary.** Named non-negotiable. "Bounded-agentic"
+   is a word rather than a claim if the run cannot survive a process death.
+3. **Model-call idempotency (ORCH-02).** The most expensive retained item, and retained
+   deliberately. A crash mid-fan-out currently re-runs an in-flight model call — measured 11 of 24
+   trials under LangGraph, 12 of 24 hand-rolled, and owed by all three bake-off candidates while
+   built by none. Durable orchestration of paid sub-calls is not proven if resuming double-pays.
+4. **A refusal never becomes an empty result (VAL-02).** Nearly free — the gateway already raises
+   `ModelRefusalError` — and it defends against the failure mode the project names as its worst:
+   silent under-analysis that looks like a completed analysis.
+
+**Consequences.**
+
+1. **ADR-012 stands as decided and is no longer under re-test.** The outcome-level bake-off that
+   would have judged it does not happen. The conditions ADR-012 carried forward are re-homed: nodes
+   still depend on our port; LangSmith is still pinned closed and proven closed; the checkpoint blob
+   is still a deserialization trust boundary. **Cold start under SAM local remains unmeasured, and
+   now has no scheduled phase** — `spikes/test_scorecard.py` continues to fail the moment a figure
+   is recorded, which keeps the gap visible rather than closing it by omission.
+2. **The Strands amendment is moot.** Removing Strands from a mission bake-off that no longer exists
+   needs no amendment. `spikes/` is retained in full per ADR-001 — all three candidates, all four
+   legs, still running.
+3. **Q-02 and Q-03 stop being build gates and become documented unknowns.** No local retrieval means
+   no mapping module to mark PROVISIONAL and no embedding parity to check. Their blast radius is
+   unchanged for whoever builds retrieval; what changes is that this project no longer proceeds
+   under a working assumption about them. That is a smaller claim, honestly made.
+4. **The handoff package carries more weight and less evidence.** More of it is design rather than
+   demonstrated architecture. ADR-001's rule — a decision that cannot be demonstrated is a decision
+   that has not been made — now applies to a larger share of the package, so the unbuilt sections
+   must say plainly that they are unbuilt. This is the real cost of this decision and it is not
+   hedged.
+5. **Milestone 3 is unaffected.** It was already a placeholder gated on measurements, and the
+   measurements it was gated on have narrowed.

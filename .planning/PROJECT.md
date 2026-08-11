@@ -14,8 +14,14 @@ demonstrated is a decision that has not been made.
 
 ## Core Value
 
-One command takes a synthetic case to a delivered, **human-approved** iReport, with every seam
-exercised once and every claim in the handoff package either cited or explicitly marked unverified.
+One command takes a synthetic case to a **human-approved**, validated typed envelope, with the
+orchestrator's hard parts exercised and every claim in the handoff package either cited or
+explicitly marked unverified.
+
+**Scope is the orchestrator spine (ADR-020).** Three phases, not nine. The one risk this deliverable
+exists to retire is that *the agentic orchestrator is harder than it looks*; breadth across
+authorities, retrieval infrastructure, and delivery plumbing is designed in the handoff and marked
+unbuilt rather than built thin.
 
 ## Requirements
 
@@ -39,21 +45,23 @@ exercised once and every claim in the handoff package either cited or explicitly
 
 Full list with IDs and acceptance in `.planning/REQUIREMENTS.md`. Summary:
 
-- [ ] Close Milestone 1a's sign-off obligation — component-architecture write-up, entry-doc refresh,
-      `SpecialistResult`, and ADR-012's reopen criteria pre-registered (ARCH-01, ARCH-04, ARCH-05,
-      CONT-01; QUAL-01 done)
-- [ ] Orchestration port with **two** adapters behind it — LangGraph and hand-rolled, one
-      conformance suite over both — with model-call idempotency, budget enforcement, and LangSmith
-      pinned closed at every entry point (ORCH-01..05, QUAL-02)
-- [ ] Checkpoint hardening — row integrity, least privilege, resume provenance (CKPT-01..03)
-- [ ] Case evidence in and retrieval through the port, PROVISIONAL under Q-02 (RETR-01..03, CONT-02)
-- [ ] Authority routing selects the policy pack, explicit decision per authority (ROUT-01..02)
-- [ ] One specialist produces validated proposed findings against one criterion (SPEC-01, VAL-01..02)
-- [ ] Human review gate and ASAP delivery through the outbox (REV-01..02, DEL-01..02)
-- [ ] The verdict — cold start and packaging measured on both adapters carrying the real seam-walk,
-      an outcome-level scorecard, and ADR-012 standing on evidence or superseded (ARCH-03, BAKE-01)
-- [ ] Handoff package current, dependency inventory recorded, and the Q-01 GovCloud gate closed or
-      its cost recorded (HAND-01..03, ARCH-02)
+- [ ] **Phase 1** — Close Milestone 1a's sign-off obligation: the component-architecture write-up
+      (with a DESIGNED-NOT-BUILT category), `SpecialistResult`, and entry documents that are true
+      (ARCH-01, ARCH-04, CONT-01; QUAL-01 done)
+- [ ] **Phase 2** — The spine: orchestrator on LangGraph behind our own port, bounded specialist
+      sub-calls through the gateway on tier aliases, deterministic ceilings, crash mid-fan-out and
+      resume without double-paying, refusals that never become empty results, LangSmith pinned
+      closed (ORCH-01..04, SPEC-01, VAL-02, QUAL-02)
+- [ ] **Phase 3** — Human disposition gate across a process boundary, one command to a validated
+      typed envelope, and a handoff package that states plainly what was designed and not built
+      (REV-01..02, DEL-02, HAND-01)
+
+**Cut by ADR-020 and moved to `.planning/REQUIREMENTS.md` § v2 § Cut by ADR-020** — 18 requirements,
+acceptance intact, each owed a designed-not-built entry under HAND-01: the second orchestration
+adapter and the outcome-level bake-off (ORCH-05, BAKE-01, ARCH-03, ARCH-05), checkpoint hardening
+(CKPT-01..03), retrieval and local ingest (RETR-01..03, CONT-02), authority routing and policy packs
+(ROUT-01..02), citation validators (VAL-01), the outbox and ASAP mock (DEL-01), the dependency
+inventory and the GovCloud gate (ARCH-02, HAND-02..03).
 
 ### Out of Scope
 
@@ -94,33 +102,41 @@ started. Milestone 3 is an explicit placeholder.
 `IREPORTS_LIVE_SMOKE=1`). `ruff` clean. `mypy --strict` **clean across 48 source files** — the 15 pre-existing `tests/contract/` errors were cleared 2026-08-11 (QUAL-01 done). `pip-audit` reports no
 known vulnerabilities over the pinned set.
 
-**The orchestration decision is provisional, and is being re-tested at outcome level.** All three
-bake-off candidates passed all four legs, so ADR-012 turned on cost, not correctness: durable
-checkpointing over PostgreSQL cost two lines with LangGraph's first-party `PostgresSaver`, against 56
-hand-rolled and 166 for a `SessionRepository` Strands does not ship. But `docs/ROADMAP.md` §1c names
-that exercise a **partial spike**, and its scorecard §5 records what it did not measure: *"It does
-not measure real model behaviour... all four legs are about control flow."* No routing, no retrieval,
-no finding, no validator, no delivery.
+**The scope was pared to the orchestrator spine on 2026-08-11 (ADR-020).** The preceding roadmap
+carried 33 requirements across 9 phases — a dual-adapter bake-off re-run at outcome level, checkpoint
+MAC hardening, local OpenSearch ingestion, authority routing across two policy packs, citation
+validators, a transactional outbox, and a GovCloud gate. Each is defensible alone; together they
+answer a question the project was not asked. ADR-001 fixes the deliverable as a proven architecture
+plus a handoff package, and the risk that deliverable exists to retire is the orchestrator.
 
-So the roadmap now writes analysis logic **once behind this project's orchestration port and runs it
-under two adapters** — LangGraph and hand-rolled — both landing in Phase 2 and both staying in one
-conformance suite thereafter. That is affordable only because ORCH-01 already forbids nodes from
-importing LangGraph; the second adapter is what proves the port is an abstraction rather than a
-LangGraph tracing. Strands no longer carries mission logic (last on every measured axis) — an
-amendment to ADR-012's candidate set, with `spikes/strands/` retained per ADR-001. Cold start under
-SAM local is still unmeasured; `spikes/test_scorecard.py` fails the moment a figure is recorded, and
-it is now taken in Phase 8 on both adapters carrying real work. **What would supersede ADR-012 is
-written down in Phase 1, before either adapter carries mission logic.**
+Nine phases became three. **Nothing was deleted** — 18 requirements moved to
+`.planning/REQUIREMENTS.md` § v2 with acceptance intact, and Phase 3 is obliged to record each in the
+handoff as designed-not-built with the reason. **ADR-011 (the human disposition gate) and ADR-014 (no
+aggregate score) were considered for the cut and explicitly kept:** both are already structural in the
+shipped contracts with passing tests, so retaining them costs nothing, and cutting them would mean
+deleting working guardrails.
+
+**ADR-012 stands as decided and is no longer under re-test.** All three bake-off candidates passed
+all four legs, so the decision turned on cost, not correctness: durable checkpointing over PostgreSQL
+cost two lines with LangGraph's `PostgresSaver`, against 56 hand-rolled and 166 for a
+`SessionRepository` Strands does not ship. The second adapter that would have re-tested it is cut;
+**the port (ORCH-01) is now the sole protection against lock-in, so its no-import test carries that
+weight alone.** Cold start under SAM local remains unmeasured and now has **no scheduled phase** —
+`spikes/test_scorecard.py` still fails the moment a figure is recorded, which keeps the gap visible
+rather than closing it by omission. `spikes/` is retained in full per ADR-001.
 
 **`blueprint.md` is the project's INPUT, not its output.** It is deliberately lowest precedence.
 Wherever it conflicts with `docs/DECISIONS.md`, DECISIONS.md wins, and the divergence is recorded
 rather than dropped.
 
-**Three GATE questions are open.** Q-01 (Claude model availability in GovCloud) refuses any working
-assumption and all model evidence to date is commercial-partition only. Q-02 (AWS vector collection
-schema) proceeds under a working assumption with the mapping module marked PROVISIONAL — contained
-by ADR-007, **not cleared**. Q-03 (query-time embedding parity) is high blast radius and silent: a
-mismatch does not error, it just retrieves worse.
+**Three GATE questions are open, and under ADR-020 none of them blocks the build** — the work that
+would have run into them is not being built. That is a narrowing of what this project claims, not a
+resolution. Q-01 (Claude model availability in GovCloud) refuses any working assumption, all model
+evidence is commercial-partition only, and it is now left open with its cost stated rather than
+closed. Q-02 (AWS vector collection schema) and Q-03 (query-time embedding parity) stop being build
+gates because there is no local retrieval or embedding; their blast radius is unchanged for whoever
+builds retrieval, and **no document may imply either gate was cleared**. Q-03 in particular is high
+blast radius and silent: a mismatch does not error, it retrieves worse.
 
 **Evidence-tag vocabulary travels with every quoted claim** in the handoff docs: `[measured]`,
 `[first-party]`, `[secondary]`, `[judged]`, `[unverified]`.
@@ -232,7 +248,7 @@ marked unverified.
 
 ## Key Decisions
 
-Nineteen decisions from `docs/DECISIONS.md` (precedence 0). **All LOCKED.** Read `docs/DECISIONS.md`
+Twenty decisions from `docs/DECISIONS.md` (precedence 0). **All LOCKED.** Read `docs/DECISIONS.md`
 before proposing an architectural change; either follow a recorded decision or explicitly supersede
 it with a new numbered entry stating what changed and why. Do not silently diverge.
 
@@ -256,6 +272,7 @@ it with a new numbered entry stating what changed and why. Do not silently diver
 <decision id="ADR-017" status="LOCKED" scope="gateway routing" amends="ADR-015">`IREPORTS_LITELLM_BASE_URL` is used verbatim; `{base}/v1/messages` is LiteLLM's native Anthropic-format endpoint. `{base}/anthropic/v1/messages` is passthrough to `api.anthropic.com` and returns `401 invalid x-api-key` — a wrong-route error that presents as an authentication error. An optional per-tier alias→model override exists for shared proxies, defaulting to the identity mapping. ADR-008's invariant is untouched.</decision>
 <decision id="ADR-018" status="LOCKED" scope="structured output" amends="ADR-015" partly-superseded-by="ADR-019">A requested schema is verified, not trusted. The gateway raises `StructuredOutputError` if the response is not the requested structure; the diagnostic reports shape only — length, and whether the text is fenced — never the text itself. Stripping the Markdown fence was rejected. Milestone 2 surfaces `StructuredOutputError` to the reviewer as an `InformationGap` (`blocking=True`).</decision>
 <decision id="ADR-019" status="LOCKED" scope="structured output mechanism" supersedes="ADR-015 mechanism, ADR-018 diagnosis">Structured output is a single tool call, and no tier needs Opus. `output_config.format` is measured unreliable everywhere including Opus 4.8. A `response_schema` is sent as one tool and the gateway returns that tool call's validated input. Not sent: `strict: true`, forced `tool_choice`, `output_config.format`. Development mapping is Sonnet 4.6 / Sonnet 5 / Haiku 4.5, verified end to end. This is a per-endpoint finding — re-run the live smoke check before assuming it transfers.</decision>
+<decision id="ADR-020" status="LOCKED" scope="buildable scope" amends="ADR-003, ADR-007, ADR-010, ADR-012 carried conditions">The buildable scope is the orchestrator spine: one command loads a synthetic case, fans out to bounded specialist sub-calls through the `ModelGateway` port on tier aliases, enforces budgets and loop limits in the deterministic shell, survives a crash mid-fan-out and resumes in a separate process without double-paying for an in-flight model call, pauses for a recorded human disposition, and emits a validated typed envelope. Nine phases become three; 18 requirements move to v2 with acceptance intact and are owed a designed-not-built entry in the handoff. Retained deliberately: ADR-011's disposition gate and ADR-014's no-aggregate-score rule (already structural, cutting them would delete working guardrails), crash-and-resume across a process boundary, model-call idempotency (ORCH-02), and refusal-never-becomes-empty (VAL-02). ADR-012 stands and is no longer under re-test; the port is the sole lock-in protection. Cold start under SAM local remains unmeasured with no scheduled phase, and that gap stays visible.</decision>
 </decisions>
 
 **Open questions live in `docs/OPEN-QUESTIONS.md` (Q-01..Q-14) and nothing there is decided.** Check
@@ -263,6 +280,9 @@ it before building on an assumption. Q-01, Q-02, and Q-03 are GATE items — see
 `.planning/ROADMAP.md` § Gates for how each is being handled.
 
 ---
-*Last updated: 2026-08-11 — roadmap restructured to a port-first dual-adapter bake-off over the full
-seam-walk. Originally created from the `/gsd-new-project` ingest of 12 source documents
-(`.planning/intel/SYNTHESIS.md`, `.planning/INGEST-CONFLICTS.md`).*
+*Last updated: 2026-08-11 — **ADR-020: pared to the orchestrator spine, 9 phases → 3, 33 v1
+requirements → 15.** Nothing deleted; 18 requirements moved to v2 with acceptance intact and are owed
+designed-not-built entries in the handoff. ADR-011 and ADR-014 explicitly retained. Previously
+restructured the same day to a port-first dual-adapter bake-off (now cut). Originally created from
+the `/gsd-new-project` ingest of 12 source documents (`.planning/intel/SYNTHESIS.md`,
+`.planning/INGEST-CONFLICTS.md`).*

@@ -1,17 +1,24 @@
 # Requirements: asap-ireports
 
-**Defined:** 2026-08-11
-**Core Value:** One command takes a synthetic case to a delivered, human-approved iReport, with
-every seam exercised once and every handoff claim either cited or explicitly marked unverified.
+**Defined:** 2026-08-11 · **Pared to the spine:** 2026-08-11 (ADR-020)
+**Core Value:** One command takes a synthetic case to a human-approved, validated typed envelope,
+with the orchestrator's hard parts exercised and every handoff claim either cited or explicitly
+marked unverified.
 
 **Source:** derived from `.planning/intel/requirements.md` (extracted from `docs/ROADMAP.md`) plus
-the outstanding work items recorded in `docs/handoff/*`. Every requirement below traces to a source
-document. The `REQ-{slug}` handles in the intel are carried in the *Traces* line of each requirement
-so the mapping back to the source is not lost.
+the outstanding work items recorded in `docs/handoff/*`, then narrowed by **ADR-020** to the
+orchestrator spine. The `REQ-{slug}` handles from the intel are carried in each *Traces* line so the
+mapping back to source is not lost.
 
-**Scope of v1:** close Milestone 1a, deliver Milestone 2 behind an orchestration port with two
-adapters running it, then render the verdict on ADR-012 that Milestone 1c's *partial* spike could
-not. Milestone 3 is deliberately not decomposed — see v2.
+**Scope of v1:** close Milestone 1a, then build and prove the orchestrator spine —
+bounded specialist sub-calls through the gateway port, deterministic ceilings, crash and resume
+without double-paying, a human disposition gate, and a validated typed envelope. Thirteen active
+requirements, down from thirty-three.
+
+**What "cut" means here.** Nothing was deleted. Every requirement ADR-020 removed from v1 appears
+under § v2 § Cut by ADR-020 with its acceptance criteria intact, and Phase 3 is obliged to record it
+in the handoff package as designed-not-built with the reason. A requirement that quietly disappears
+is the failure ADR-001 is written against.
 
 ---
 
@@ -21,38 +28,18 @@ not. Milestone 3 is deliberately not decomposed — see v2.
 
 - [ ] **ARCH-01**: A component-architecture write-up marks the boundaries that matter — what is
       ours, what the AWS ingestion pipeline owns, what ASAP owns, and where the human review gate
-      sits.
-      *Acceptance:* program leadership can sign off on the component boundaries.
-      *Traces:* `REQ-component-architecture` · docs/ROADMAP.md §1a. **This is the last item blocking
-      program sign-off on Milestone 1a — highest priority in the project.**
-- [ ] **ARCH-02**: The library and framework inventory covers the non-orchestration layers, with
-      versions and the reason each dependency is there.
-      *Acceptance:* every dependency has a recorded version and rationale. The orchestration layer is
-      already covered by the 1b scan's footprint and version tables.
-      *Traces:* `REQ-library-inventory` · docs/ROADMAP.md §1a (partly covered). **Moved from Phase 1
-      to Phase 9 on 2026-08-11** — the dependency set is not final until two orchestration adapters,
-      retrieval, and delivery are all in; inventorying it earlier means rewriting it every phase.
-- [ ] **ARCH-03**: Cold start and packaging under SAM local are measured for **both mission-carrying
-      adapters**, the figure is recorded, and ADR-012 is re-read against it.
-      *Acceptance:* a number exists per adapter, measured on the real seam-walk rather than on a
-      spike; `spikes/test_scorecard.py` (which fails the moment a figure is recorded) is updated.
-      *Traces:* `REQ-cold-start-measurement` · docs/ROADMAP.md §1c, scorecard §2. **Moved from Phase
-      1 to Phase 8 on 2026-08-11** — under a port-first build the port, not the measurement, is what
-      prevents lock-in, and by Phase 8 the number can be taken on real work with the alternative
-      adapter already running. The trade is recorded in ROADMAP.md § Phase 8.
+      sits — **and separately marks what ADR-020 designed and did not build.**
+      *Acceptance:* program leadership can sign off on the component boundaries. Every component is
+      BUILT, PLANNED (naming its phase), NOT OURS, or DESIGNED-NOT-BUILT (naming the reason). A test
+      fails if a BUILT row does not resolve to a real path or a PLANNED row already exists.
+      *Traces:* `REQ-component-architecture` · docs/ROADMAP.md §1a · ADR-020. **This is the last item
+      blocking program sign-off on Milestone 1a — highest priority in the project.**
 - [ ] **ARCH-04**: The repository's entry documents describe the actual current state.
       *Acceptance:* `CLAUDE.md` § Current state and `README.md` § Status no longer assert that
-      application code does not exist or that the orchestration framework is undecided.
+      application code does not exist or that the orchestration framework is undecided, and both
+      reflect ADR-020's narrowed scope.
       *Traces:* INGEST-CONFLICTS.md WARNING 1 residue (the stack-table line was fixed 2026-08-11;
-      the state narrative was not).
-- [ ] **ARCH-05**: The criteria that would supersede ADR-012 are recorded **before the build
-      starts**.
-      *Acceptance:* each criterion names the number or observation it turns on, and the record is
-      committed in Phase 1 — before either adapter carries mission logic. Phase 8 judges against
-      this list and may not substitute its own.
-      *Traces:* ADR-012 § conditions carried forward · scorecard §2 (the two qualifications riding
-      with the recommendation). **Rationale:** criteria invented after the effort is spent get
-      judged against the effort. Same instinct as `test_cold_start_is_null_and_stays_visible`.
+      the state narrative was not) · ADR-020.
 
 ### Contracts
 
@@ -62,27 +49,19 @@ not. Milestone 3 is deliberately not decomposed — see v2.
       `docs/handoff/contracts.md` updated. `extra="forbid"`, `frozen=True`, no aggregate score field.
       *Traces:* `REQ-specialist-result-contract` · contracts.md §5. **Block lifted — it was deferred
       only until ADR-012 resolved.**
-- [ ] **CONT-02**: `ChunkRecord` and `PolicyRecord` are defined **PROVISIONALLY** under Q-02's
-      working assumption.
-      *Acceptance:* both contracts published, each carrying an explicit provisional marker naming
-      Q-02, so a reader cannot mistake them for confirmed against the real AWS collection.
-      *Traces:* `REQ-deferred-contracts` (partial) · contracts.md §5. **Derived split:**
-      `EntityCandidate` and `TimelineEvent` have no Milestone 2 consumer and stay deferred to v2.
 
 ### Quality gates
 
 - [x] **QUAL-01** *(done 2026-08-11)*: `mypy --strict` is clean across the workspace.
-      *Acceptance:* the 15 pre-existing errors in `tests/contract/` are cleared; no package under
-      `packages/` or `spikes/` is affected. A handoff document that overstates a quality gate is
-      exactly the failure ADR-001 is written against.
-      *Traces:* `REQ-fix-mypy-tests-contract` · model-gateway.md §6 (recorded as 13 at the time of
-      writing; 15 as measured 2026-08-11).
-- [ ] **QUAL-02**: The orchestration spike runs on the real `ModelGateway` port.
+      *Acceptance:* the 15 pre-existing errors in `tests/contract/` are cleared. A handoff document
+      that overstates a quality gate is exactly the failure ADR-001 is written against.
+      *Traces:* `REQ-fix-mypy-tests-contract` · model-gateway.md §6.
+- [ ] **QUAL-02**: The orchestrator runs on the real `ModelGateway` port.
       *Acceptance:* `spikes/harness/gateway.py`'s separate Postgres-backed instrument is replaced by
       or reconciled with `packages/gateway/`; the bake-off's leg-1 model-call log survives the move.
       *Traces:* `REQ-migrate-spike-to-gateway-port` · model-gateway.md §5.
 
-### Orchestration
+### The orchestrator spine
 
 - [ ] **ORCH-01**: The orchestrator runs on LangGraph **behind this project's own orchestration
       port**, and no analysis node imports LangGraph.
@@ -90,15 +69,17 @@ not. Milestone 3 is deliberately not decomposed — see v2.
       `from langgraph import ...` outside the adapter; `durability="sync"` and strict checkpoint
       deserialization are set in code with tests, because both defaults are wrong here and invisible
       when reading a graph.
-      *Traces:* `REQ-orchestrator-on-langgraph` · ADR-012, docs/ROADMAP.md §M2. ADR-012 calls this
-      Milestone 2's first obligation.
+      *Traces:* `REQ-orchestrator-on-langgraph` · ADR-012. **Under ADR-020 the port is the sole
+      protection against framework lock-in — the second adapter that would have proven it is cut,
+      so the no-import test carries that weight alone.**
 - [ ] **ORCH-02**: Model-call-level idempotency — a crash mid-fan-out does not re-run an in-flight
       model call.
       *Acceptance:* the duplicate-query detector of blueprint §8.5 exists and the bake-off's crash
       harness measures 0 duplicate paid calls over the same 24 trials that measured LangGraph 11/24
       and hand-rolled 12/24.
-      *Traces:* `REQ-model-call-idempotency` · docs/ROADMAP.md §M2, scorecard §4, blueprint §8.5.
-      **Owed by all three bake-off candidates and built by none.**
+      *Traces:* `REQ-model-call-idempotency` · scorecard §4 · blueprint §8.5. **Owed by all three
+      bake-off candidates and built by none. The most expensive item ADR-020 retained, retained
+      because durable orchestration of paid sub-calls is not proven if resuming double-pays.**
 - [ ] **ORCH-03**: Budgets and loop limits are enforced by the deterministic shell, not requested of
       the model.
       *Acceptance:* per-specialist ceilings on model calls, tool calls, retrieved evidence, tokens,
@@ -112,166 +93,61 @@ not. Milestone 3 is deliberately not decomposed — see v2.
       per entry point of the same shape as `spikes/langgraph/test_langsmith_egress.py`. The negative
       control already showed an unpinned run POSTs ~90 KB of graph state including finding text to
       `api.smith.langchain.com` **and still succeeds**, because the failure is swallowed.
-      *Traces:* `REQ-langsmith-egress-deny` (carried obligation) · ADR-012: "any future entry point
-      inherits this obligation."
-- [ ] **ORCH-05**: A second adapter — hand-rolled — implements the same orchestration port, and one
-      conformance suite runs against both.
-      *Acceptance:* the suite is parameterized over adapters and both pass every leg; adding a third
-      adapter requires no change to any node; from Phase 3 onward, each phase's orchestration tests
-      run under both. The hand-rolled spike (195 lines, four legs passing) is the starting point —
-      what is new is satisfying the port the mission nodes call.
-      *Traces:* ADR-012 (hand-rolled is "the recorded runner-up and the fallback") · ORCH-01.
-      **Rationale:** a port with one implementation is an assertion, not an abstraction. An adapter
-      written later gets shaped, unnoticed, around whatever came first — which is why both land in
-      Phase 2 rather than the second one arriving at the end.
+      *Traces:* `REQ-langsmith-egress-deny` · ADR-012: "any future entry point inherits this
+      obligation."
 
-### Orchestration verdict
+### Specialist sub-calls
 
-- [ ] **BAKE-01**: An outcome-level scorecard compares both adapters over the full seam-walk, and
-      ADR-012 stands on that evidence or is superseded.
-      *Acceptance:* the comparison is scored on the dimensions pre-registered under ARCH-05, not on
-      dimensions chosen after the results were in; ADR-012 either stands with the evidence recorded
-      or is superseded by a numbered entry; the scorecard states what it still does not measure, in
-      the same voice as its predecessor; the removal of Strands from the mission bake-off is recorded
-      as an amendment to ADR-012's candidate set, with `spikes/strands/` retained per ADR-001.
-      *Traces:* docs/ROADMAP.md §1c ("partial spike") · orchestration-scorecard.md §5 ("does not
-      measure real model behaviour... all four legs are about control flow"). **This runs what 1c
-      deferred; it does not redo what 1c did.**
-
-### Checkpoint hardening
-
-- [ ] **CKPT-01**: A keyed MAC over serialized checkpoint state, with the key unreadable by the DB
-      role, verified on load.
-      *Acceptance:* a tampered checkpoint row fails to load and the failure is loud. Converts threats
-      T2 (findings altered before review) and T3 (review gate skipped) from difficult to detectable.
-      *Traces:* `REQ-checkpoint-row-integrity` · checkpoint-threat-model.md §6. **The single largest
-      security gap recorded in the threat model.**
-- [ ] **CKPT-02**: A separate least-privilege checkpoint-write DB role, distinct from everything else
-      and from the migration role.
-      *Acceptance:* the application's checkpoint role cannot read or alter findings, dispositions, or
-      run state; a test asserts the grant set.
-      *Traces:* `REQ-checkpoint-least-privilege` · checkpoint-threat-model.md §6.
-- [ ] **CKPT-03**: Resume provenance — the checkpoint id a resumed run resumed from is recorded in
-      the run manifest.
-      *Acceptance:* an audit can reconstruct the resume chain for any run. Described in the source as
-      "cheap to add; not added."
-      *Traces:* `REQ-checkpoint-provenance-on-load` · checkpoint-threat-model.md §6.
-
-### Retrieval and case evidence — PROVISIONAL under Q-02
-
-- [ ] **RETR-01**: Retrieval goes through the port, and every OpenSearch field name, filter, and
-      facet mapping lives in **one module**, explicitly marked PROVISIONAL.
-      *Acceptance:* no raw OpenSearch client outside the adapter; a test asserts every field name
-      resolves through the mapping module; the module carries a header naming Q-02 and stating that
-      the AWS collection's real schema is unconfirmed.
-      *Traces:* C-retrieval-through-the-port · ADR-007 · Q-02. **See ROADMAP § Gates — Q-02 is
-      contained, not cleared.**
-- [ ] **RETR-02**: One synthetic case is ingested locally and indexed into local OpenSearch, mirroring
-      the assumed collection shape.
-      *Acceptance:* a case from the blueprint §11 designs (starting with `AMI-SYN-SUIT-001`) is
-      ingested and retrievable with mandatory case/access/version filters and bounded K. Local
-      ingestion, chunking, and embedding are development only (ADR-007).
-      *Traces:* `REQ-synthetic-case-ingest` · docs/ROADMAP.md §M2.
-- [ ] **RETR-03**: Every vector records its embedding provenance, and no locally-measured retrieval
-      quality is presented as predictive of AWS behaviour.
-      *Acceptance:* model identifier and revision, dimension, normalization, input prefix, library
-      version, and source-text hash recorded per vector; the embedding provider sits behind an
-      interface; a parity check fails loudly on drift; the handoff records Q-03 as open and the
-      coupling as unverified.
-      *Traces:* ADR-007 consequences 1 and 3 · Q-03 (**high blast radius and silent — a mismatch does
-      not error, it retrieves worse**).
-
-### Authority routing and policy
-
-- [ ] **ROUT-01**: Authority routing selects the policy pack, with an explicit recorded decision for
-      **every** authority, including those that do not apply.
-      *Acceptance:* `AuthorityRoutingResult` produced for a synthetic case showing that, e.g., SEAD-4
-      was considered and declined and on what basis. `RoutingBasis` has no `INFERRED` member; missing
-      metadata produces `BLOCKED_MISSING_METADATA` with a required `blocking_gap`, never a guess.
-      *Traces:* `REQ-authority-routing-engine`, `REQ-authority-routing-model` · ADR-003 ·
-      C-routing-is-never-inferred · blueprint §2.1.
-- [ ] **ROUT-02**: Two approved policy packs exist — 5 CFR 731 factors and SEAD-4 guidelines — and
-      policy fails closed.
-      *Acceptance:* `PolicyPackRef` refuses to construct unless `status == APPROVED`; effectivity is
-      a date comparison in code; an expired or unapproved pack stops the run rather than degrading it.
-      *Traces:* ADR-003 (two approved packs at launch) · C-fail-closed-on-policy.
-
-### Specialist analysis and validation
-
-- [ ] **SPEC-01**: A single specialist sub-agent query produces proposed findings against one
-      criterion.
+- [ ] **SPEC-01**: A specialist sub-call produces proposed findings against one criterion, and the
+      orchestrator fans out over criteria.
       *Acceptance:* the specialist runs through the `ModelGateway` port on a tier **alias**, with a
       criterion-specific tool allowlist; prohibited tools (shell, generic HTTP, unrestricted
       filesystem, generic SQL, arbitrary Python, cross-case vector search, email, direct ASAP
-      delivery) are unreachable; the result is a typed `SpecialistResult`, not prose.
-      *Traces:* `REQ-specialist-query` · docs/ROADMAP.md §M2 · blueprint §8.3, §8.4.
-- [ ] **VAL-01**: Deterministic validators reject a proposed finding on schema, unresolvable
-      citation, policy effectivity, or prohibited content **before a reviewer sees it**.
-      *Acceptance:* a finding asserting something about the record without a resolvable evidence span
-      is rejected; a policy-relevance claim without a resolvable policy citation is rejected; a
-      finding carrying determinative phrasing is rejected; an expired policy pack is rejected. Tool
-      input is best-effort (`strict: true` is unavailable), so it is re-validated through the
-      Pydantic contracts here.
-      *Traces:* `REQ-deterministic-validators` · C-evidence-before-inference · C-deterministic-shell.
+      delivery) are unreachable; the result is a typed `SpecialistResult`, not prose. **Evidence is
+      handed in from a synthetic fixture, not retrieved** — RETR-01..03 are cut by ADR-020.
+      *Traces:* `REQ-specialist-query` · blueprint §8.3, §8.4 · ADR-020.
 - [ ] **VAL-02**: A model refusal and a `StructuredOutputError` reach the reviewer as an
       `InformationGap` with `blocking=True`, never as an absent or empty finding.
       *Acceptance:* both paths wired and tested. Silent under-analysis that looks like a completed
       analysis is the worst outcome this system can produce — worse than a crash, because a crash is
       visible. Refusals are expected in normal operation on adjudicative content.
-      *Traces:* `REQ-refusal-to-information-gap` · ADR-018 · model-gateway.md §3.
+      *Traces:* `REQ-refusal-to-information-gap` · ADR-018 · model-gateway.md §3. **Retained by
+      ADR-020 as nearly free — the gateway already raises `ModelRefusalError`.**
 
-### Human review and delivery
+### Human review and typed output
 
 - [ ] **REV-01**: The run pauses in an explicit review state, an authorized reviewer records a
       disposition out of band, and the run resumes.
       *Acceptance:* the pause survives a process boundary — the disposition is recorded by a
       different process than the one that proposed the finding, and the run resumes from the
       checkpoint. End-to-end tests drive the review transition explicitly.
-      *Traces:* `REQ-human-review-gate` · ADR-011.
-- [ ] **REV-02**: No path reaches delivery without a recorded human disposition, in **any** profile
+      *Traces:* `REQ-human-review-gate` · ADR-011. **Explicitly retained by ADR-020; NON-NEGOTIABLE.**
+- [ ] **REV-02**: No path reaches output without a recorded human disposition, in **any** profile
       including local development, and both versions are retained.
-      *Acceptance:* the transition table is walked to prove no path reaches delivery without passing
-      the gate; a run in any delivery-side status with `human_review_recorded=False` fails validation;
+      *Acceptance:* the transition table is walked to prove no path reaches output without passing
+      the gate; a run in any output-side status with `human_review_recorded=False` fails validation;
       `HumanDisposition` references the immutable proposal by id and carries `approved_text` alongside
       it. No dev-mode auto-approve flag exists — that affordance is exactly what survives into
       production.
-      *Traces:* ADR-011 · C-human-disposition-gate (NON-NEGOTIABLE).
-- [ ] **DEL-01**: Delivery to the ASAP mock goes through the transactional outbox with an idempotency
-      key and a recorded receipt.
-      *Acceptance:* the mock validates the envelope schema and simulates status codes, timeouts, and
-      retries; a replayed delivery does not double-deliver; a `DeliveryReceipt` is recorded. The
-      envelope is our proposal, not an agreed interface (Q-04) — contract tests pin our side so the
-      delta is measurable.
-      *Traces:* `REQ-asap-delivery-outbox` · ADR-010.
-- [ ] **DEL-02**: One command takes a synthetic case to a delivered, human-approved iReport, with
-      every seam exercised once.
-      *Acceptance:* **this is the verbatim Milestone 2 exit criterion.** Ingest → routing →
-      specialist → validation → review gate → outbox → mock receipt, in one invocation.
-      *Traces:* docs/ROADMAP.md §Milestone 2 Exit.
+      *Traces:* ADR-011 · C-human-disposition-gate (**NON-NEGOTIABLE**) · ADR-020 § retained.
+- [ ] **DEL-02**: One command takes a synthetic case to a human-approved, validated typed envelope.
+      *Acceptance:* load → fan-out → budgets → validation → review gate → validated `ASAPEnvelope`
+      written to disk, in one invocation. **The envelope contract is validated; the transactional
+      outbox and ASAP mock (DEL-01) are cut by ADR-020.**
+      *Traces:* docs/ROADMAP.md §Milestone 2 Exit (narrowed) · ADR-010 (contract stands, transport
+      does not ship).
 
-### Handoff package and the GovCloud gate
+### Handoff package
 
-- [ ] **HAND-01**: The handoff package is current at the Milestone 2 exit.
+- [ ] **HAND-01**: The handoff package is current, and states plainly what was not built.
       *Acceptance:* `docs/DECISIONS.md`, `docs/OPEN-QUESTIONS.md`, the scorecard, contracts and
-      schemas, deployment and packaging notes, and — described in the source as the most useful and
-      most commonly omitted artifact — **known failure modes and things we tried that did not work**.
-      Every claim cited or explicitly marked with an evidence tag.
-      *Traces:* docs/ROADMAP.md §Continuous · ADR-001.
-- [ ] **HAND-02**: Q-01 is closed — the live smoke check is re-run in the target GovCloud account and
-      region.
-      *Acceptance:* the result is **appended to `docs/handoff/compatibility-matrix.md` as a SECOND
-      run-of-record, alongside the commercial one rather than replacing it** — the value is the
-      comparison between partitions. Covers model availability, concrete model and inference-profile
-      ids, cross-region inference restrictions, data-routing rules, whether
-      `bedrock-mantle.{region}.api.aws` resolves, and whether a LiteLLM proxy is permitted.
-      *Traces:* Q-01 (GATE, refuses any working assumption) · ADR-004 · ADR-015 · ADR-019
-      ("a per-endpoint finding — re-run the live smoke check before assuming it transfers").
-      **Status: Blocked — requires access to the target GovCloud account.**
-- [ ] **HAND-03**: The `bedrock` adapter is exercised against a real endpoint for the first time in
-      any partition.
-      *Acceptance:* a recorded live run. Today the adapter is verified as correctly constructed and
-      nothing more — the green test suite must not be read as connectivity.
-      *Traces:* model-gateway.md § Known gaps.
+      schemas, **a designed-not-built section covering every ADR-020 cut with its reason**, and —
+      described in the source as the most useful and most commonly omitted artifact — **known failure
+      modes and things we tried that did not work**. Every claim cited or explicitly marked with an
+      evidence tag. `docs/ROADMAP.md` is reconciled with ADR-020 or explicitly retired.
+      *Traces:* docs/ROADMAP.md §Continuous · ADR-001 · ADR-020 consequence 4. **This is where
+      ADR-020 is paid for: a narrower build is only defensible if the package is honest about the
+      narrowing.**
 
 ---
 
@@ -279,16 +155,43 @@ not. Milestone 3 is deliberately not decomposed — see v2.
 
 Tracked, not in the current roadmap.
 
+### Cut by ADR-020 — designed, not built
+
+Acceptance criteria are preserved verbatim in intent so that a future milestone can pick any of these
+up without re-deriving it. **Each one is owed a designed-not-built entry in the handoff under
+HAND-01.**
+
+| ID | What it was | Why cut |
+|---|---|---|
+| **ORCH-05** | A second, hand-rolled adapter behind the same port, with one conformance suite over both | The port plus ORCH-01's no-import test is the lock-in protection; a parallel implementation doubles every downstream phase |
+| **BAKE-01** | Outcome-level scorecard comparing both adapters over the full seam-walk | Needs two adapters; ADR-012 stands as decided |
+| **ARCH-03** | Cold start and packaging measured under SAM local | Was scoped to the bake-off verdict. **Remains unmeasured with no scheduled phase**; `spikes/test_scorecard.py` still fails the moment a figure is recorded, keeping the gap visible |
+| **ARCH-05** | ADR-012's supersession criteria pre-registered before the build | Existed only to stop a bake-off from choosing its own rubric |
+| **ARCH-02** | Library and framework inventory with versions and rationale | Dependency set is small and stable under the spine |
+| **CKPT-01** | Keyed MAC over serialized checkpoint state, verified on load | **The single largest recorded security gap** (threat-model §6). Converts T2 and T3 from difficult to detectable |
+| **CKPT-02** | Least-privilege checkpoint-write DB role, distinct from the migration role | Hardening of a store the spine exercises unhardened |
+| **CKPT-03** | Resume provenance — the checkpoint id a resumed run resumed from, in the run manifest | Described in the source as "cheap to add; not added" — still true |
+| **RETR-01** | Retrieval through the port, all OpenSearch mappings in one PROVISIONAL module | No local retrieval in the spine; ADR-007's one-file rule stands as design guidance |
+| **RETR-02** | One synthetic case ingested into local OpenSearch | Evidence is handed to the specialist from a fixture instead |
+| **RETR-03** | Per-vector embedding provenance and a parity check that fails loudly on drift | No local embedding. **Q-03's blast radius is unchanged for whoever builds this** |
+| **CONT-02** | `ChunkRecord` and `PolicyRecord`, PROVISIONAL under Q-02 | No consumer in the spine |
+| **ROUT-01** | Authority routing with an explicit decision for **every** authority, never inferred | Breadth across authorities, not orchestrator risk. ADR-003's coverage decision is unchanged; its implementation is deferred |
+| **ROUT-02** | Two approved policy packs (5 CFR 731, SEAD-4), policy fails closed | As above |
+| **VAL-01** | Deterministic validators rejecting a finding on schema, unresolvable citation, effectivity, or prohibited content | Resolving citations needs a real evidence snapshot to mean anything. **The finding contract still requires citations structurally** |
+| **DEL-01** | Transactional outbox with idempotency key, ASAP mock, `DeliveryReceipt` | Envelope contract stands and is validated; transport does not ship |
+| **HAND-02** | Q-01 closed by re-running the live smoke check in GovCloud | Externally blocked on account access regardless. **Q-01 stays open and its cost is stated** |
+| **HAND-03** | The `bedrock` adapter exercised against a real endpoint | Today it is verified as correctly constructed and nothing more — **do not read the green test suite as connectivity** |
+
 ### Milestone 3 — Optimize (**placeholder, deliberately not sequenced**)
 
-`docs/ROADMAP.md` states no exit criteria for Milestone 3 and instructs: *"Sequence this from M2
-findings — not from this list."* The candidates below are recorded **unordered and unscoped**.
-Turning them into phases would manufacture a plan the source refuses to make.
+`docs/ROADMAP.md` states no exit criteria for Milestone 3 and instructs: *"Sequence this from
+findings — not from this list."* Under ADR-020 the candidate pool is the list above **plus** the
+originals below. Recorded **unordered and unscoped**.
 
 - **M3-a**: The full specialist set across both authority families (blueprint §8.3)
 - **M3-b**: Retrieval quality work — hybrid fusion, query planning, reranking
 - **M3-c**: The contradiction and challenge stages
-- **M3-d**: Multi-criterion fan-out
+- **M3-d**: Multi-criterion fan-out beyond the spine's demonstration
 - **M3-e**: Model-tier tuning across the three aliases (including whether the thinking tier escalates
   to an Opus-class model — on measured finding quality, not by default)
 - **M3-f**: The evaluation harness and red-team scenarios
@@ -296,23 +199,18 @@ Turning them into phases would manufacture a plan the source refuses to make.
 ### Deferred, blocked on an open question
 
 - **CKPT-04**: Checkpoint encryption at rest and backup handling — assumed platform-provided,
-  `[unverified]`. *Blocked on:* Q-01. *Traces:* `REQ-checkpoint-encryption-at-rest`.
+  `[unverified]`. *Blocked on:* Q-01.
 - **CKPT-05**: Checkpoint retention and pruning policy for state carrying case-derived text — 37,033 B
   retained per run and growing. *Blocked on:* Q-09 (records retention).
-  *Traces:* `REQ-checkpoint-retention`.
-- **CONT-03**: `EntityCandidate` and `TimelineEvent` contracts. *Blocked on:* Q-02, and no Milestone 2
-  consumer exists. *Traces:* `REQ-deferred-contracts` (remainder).
+- **CONT-03**: `EntityCandidate` and `TimelineEvent` contracts. *Blocked on:* Q-02, and no consumer.
 - **GW-01**: Revisit `MAX_EXCERPT_CHARS = 2000`, an unresearched starting value, against real ASAP
-  payload limits. *Blocked on:* Q-04. *Traces:* `REQ-max-excerpt-chars`.
-- **GW-02**: Prompt caching. *Blocked on:* Q-13 — material to cost, immaterial to correctness; not
-  enabled pending approval for this data class.
+  payload limits. *Blocked on:* Q-04.
+- **GW-02**: Prompt caching. *Blocked on:* Q-13 — material to cost, immaterial to correctness.
 
 ### Deferred, unblocked but not yet needed
 
-- **GW-03**: Retry and fallback policy. Server-side `fallbacks` is unavailable on Bedrock; deferred
-  until the orchestrator exists to own bounded retry semantics. *Traces:* `REQ-retry-fallback-policy`.
-- **GW-04**: Streaming run status. ADR-013's single-case interactive model wants it eventually; the
-  port is synchronous today and the change is additive. *Traces:* `REQ-streaming-run-status`.
+- **GW-03**: Retry and fallback policy. Server-side `fallbacks` is unavailable on Bedrock.
+- **GW-04**: Streaming run status. The port is synchronous today and the change is additive.
 - **PIV-01**: PIV/HSPD-12 credentialing analysis — ADR-003 places it outside the first release while
   requiring that it not be structurally excluded.
 
@@ -323,15 +221,15 @@ Turning them into phases would manufacture a plan the source refuses to make.
 | Feature | Reason |
 |---------|--------|
 | Any final adjudicative determination | The decision-support boundary. NON-NEGOTIABLE. |
-| Universal person-risk score / aggregate risk level / overall recommendation field | ADR-014. Collapses distinct legal authorities into a number that invites the deference the boundary prohibits. |
+| Universal person-risk score / aggregate risk level / overall recommendation field | ADR-014. **Considered for ADR-020's cut and explicitly retained** — already structural in the shipped contracts with a passing test, so keeping it costs nothing. |
 | Cross-case personality profiling, generalized predictive scoring | blueprint §1.3 |
 | Real case data in fixtures, tests, or examples | Synthetic only, ever. `DataClassification` has one member. |
-| Neo4j or any graph database | ADR-006 — until a measurement shows graph traversal improves findings |
-| Streamlit or any UI | ADR-005 — FastAPI, JSON, contract tests, and the eval harness are the interface |
+| Neo4j or any graph database | ADR-006 |
+| Streamlit or any UI | ADR-005 — FastAPI, JSON, and contract tests are the interface |
 | Offline run profile, recorded-fixture provider, local LLM server | ADR-009 — Bedrock access is required; tests mock at the gateway boundary |
 | LocalStack in the default profile | CLAUDE.md |
 | Shared code or infrastructure with `amilens-localdev` | ADR-002 — prior art, not a dependency |
-| Batch queue | ADR-013 — single-case interactive in the first milestone |
+| Batch queue | ADR-013 — single-case interactive |
 | Bedrock AgentCore as a deployment target | Q-14 working assumption is no; ADR-004 stands |
 | Investigative data collection, web browsing, autonomous contact with subjects | blueprint §1.3 |
 | Sampling parameters (`temperature`, `top_p`, `top_k`) | ADR-015 — reasoning depth is `effort` per tier |
@@ -344,45 +242,30 @@ Turning them into phases would manufacture a plan the source refuses to make.
 |-------------|-------|--------|
 | ARCH-01 | Phase 1 | Pending |
 | ARCH-04 | Phase 1 | Pending |
-| ARCH-05 | Phase 1 | Pending |
 | CONT-01 | Phase 1 | Pending |
-| QUAL-01 | Phase 1 | Done (2026-08-11) |
+| QUAL-01 | — | Done (2026-08-11) |
 | ORCH-01 | Phase 2 | Pending |
 | ORCH-02 | Phase 2 | Pending |
 | ORCH-03 | Phase 2 | Pending |
 | ORCH-04 | Phase 2 | Pending |
-| ORCH-05 | Phase 2 | Pending |
+| SPEC-01 | Phase 2 | Pending |
+| VAL-02 | Phase 2 | Pending |
 | QUAL-02 | Phase 2 | Pending |
-| CKPT-01 | Phase 3 | Pending |
-| CKPT-02 | Phase 3 | Pending |
-| CKPT-03 | Phase 3 | Pending |
-| RETR-01 | Phase 4 | Pending |
-| RETR-02 | Phase 4 | Pending |
-| RETR-03 | Phase 4 | Pending |
-| CONT-02 | Phase 4 | Pending |
-| ROUT-01 | Phase 5 | Pending |
-| ROUT-02 | Phase 5 | Pending |
-| SPEC-01 | Phase 6 | Pending |
-| VAL-01 | Phase 6 | Pending |
-| VAL-02 | Phase 6 | Pending |
-| REV-01 | Phase 7 | Pending |
-| REV-02 | Phase 7 | Pending |
-| DEL-01 | Phase 7 | Pending |
-| DEL-02 | Phase 7 | Pending |
-| ARCH-03 | Phase 8 | Pending |
-| BAKE-01 | Phase 8 | Pending |
-| ARCH-02 | Phase 9 | Pending |
-| HAND-01 | Phase 9 | Pending |
-| HAND-02 | Phase 9 | Blocked (GovCloud account access) |
-| HAND-03 | Phase 9 | Pending |
+| REV-01 | Phase 3 | Pending |
+| REV-02 | Phase 3 | Pending |
+| DEL-02 | Phase 3 | Pending |
+| HAND-01 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 33 total
-- Mapped to phases: 33
+- v1 requirements: 15 total (14 active, 1 done)
+- Mapped to phases: 14
 - Unmapped: 0 ✓
+- Cut to v2 by ADR-020: 18, each owed a designed-not-built entry under HAND-01
 
 ---
 *Requirements defined: 2026-08-11*
-*Last updated: 2026-08-11 — roadmap restructured to a port-first dual-adapter bake-off over the full
-seam-walk. Added ARCH-05, ORCH-05, BAKE-01; ARCH-03 moved Phase 1 → 8; ARCH-02 moved Phase 1 → 9.
-Nothing was removed and no acceptance criterion was weakened.*
+*Updated 2026-08-11 — port-first dual-adapter bake-off. Added ARCH-05, ORCH-05, BAKE-01.*
+*Updated 2026-08-11 — **ADR-020: pared to the orchestrator spine. 33 v1 requirements → 15.** Nothing
+was deleted; 18 requirements moved to v2 § Cut by ADR-020 with their acceptance intact and are owed
+a designed-not-built entry in the handoff. No acceptance criterion on a retained requirement was
+weakened. ADR-011 (REV-01/02) and ADR-014 were considered for the cut and explicitly kept.*

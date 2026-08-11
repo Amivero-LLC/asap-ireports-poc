@@ -1,0 +1,68 @@
+{
+  "phase": "1",
+  "phase_name": "close-the-architecture-package",
+  "timestamp": "2026-08-11T16:44:00Z",
+  "note": "Discussion was interrupted mid-flight by ADR-020, which pared the project from 9 phases to 3 and changed what Phase 1 delivers. Areas are re-derived against the new Phase 1 (ARCH-01, ARCH-04, CONT-01).",
+  "areas_completed": ["SpecialistResult shape (partial - 3 of ~4 questions)"],
+  "areas_obsolete": [
+    "Port boundary: prose or code - CUT. Old Phase 1 success criterion 3 (port specified precisely enough for two adapters) served the dual-adapter bake-off. ADR-020 cut the second adapter; the port is built in Phase 2 under ORCH-01 and is not specified in prose first.",
+    "ADR-012 reopen criteria: form - CUT with ARCH-05. Pre-registered supersession criteria existed only to stop a bake-off from choosing its own rubric. There is no bake-off."
+  ],
+  "areas_remaining": [
+    "SpecialistResult shape (finish - the refusal/gap question was interrupted)",
+    "Build-state table and its test (now including the new DESIGNED-NOT-BUILT category)",
+    "Write-up home, shape, audience",
+    "Entry-doc refresh scope (now also: reflecting ADR-020's narrowed scope)"
+  ],
+  "decisions": {
+    "SpecialistResult shape": [
+      {
+        "question": "Does SpecialistResult carry an explicit completion status?",
+        "answer": "Required status field, no default, full enum: COMPLETE, INCOMPLETE_DUE_TO_BUDGET, REFUSED, STRUCTURED_OUTPUT_ERROR, BLOCKED. An empty findings list is never ambiguous and a constructor cannot omit it.",
+        "options_presented": ["Required status, full enum", "Required status, two members", "No status field"]
+      },
+      {
+        "question": "Does SpecialistResult carry per-query budget accounting?",
+        "answer": "No - run-level BudgetConsumption on RunManifest is enough. SpecialistResult stays analysis output. Recorded tradeoff: INCOMPLETE_DUE_TO_BUDGET reaches a reviewer with no per-query account of what it spent.",
+        "options_presented": ["Consumption + which ceiling was hit", "Consumption only", "Neither - run-level is enough"]
+      },
+      {
+        "question": "What identifies the query on a SpecialistResult that produced zero findings?",
+        "answer": "Criterion descriptor (decision_domain, policy_pack_id, policy_id, criterion_id - a new sibling type to FindingAuthority WITHOUT its >=1 policy-citation requirement, since a query does not cite) plus the existing GeneratedBy (node, model_alias, prompt_version). No tool-allowlist id, no evidence-considered list.",
+        "options_presented": ["Criterion + provenance", "Criterion + provenance + tool allowlist id", "Criterion + provenance + evidence considered"]
+      },
+      {
+        "question": "INTERRUPTED - not answered. A refusal produces no finding, so its blocking InformationGap has nothing to attach to. Where does it live?",
+        "answer": null,
+        "options_presented": ["Result-level gaps + cross-field validator", "Result-level gaps, no validator", "A synthetic INFORMATION_GAP finding"]
+      }
+    ]
+  },
+  "scope_decisions_taken_during_discussion": {
+    "adr": "ADR-020",
+    "summary": "Pared to the orchestrator spine. 9 phases -> 3, 33 v1 requirements -> 15, 18 moved to v2 with acceptance intact.",
+    "retained_deliberately": [
+      "ADR-011 human disposition gate - already structural, cutting it would delete working guardrails",
+      "ADR-014 no aggregate score - already structural with a passing schema-walking test",
+      "Crash and resume across a process boundary - named non-negotiable by the user",
+      "ORCH-02 model-call idempotency - the most expensive keep; durable orchestration of paid sub-calls is unproven if resuming double-pays",
+      "VAL-02 refusal never becomes empty - nearly free, gateway already raises ModelRefusalError"
+    ],
+    "cut": ["ORCH-05", "BAKE-01", "ARCH-03", "ARCH-05", "ARCH-02", "CKPT-01", "CKPT-02", "CKPT-03", "RETR-01", "RETR-02", "RETR-03", "CONT-02", "ROUT-01", "ROUT-02", "VAL-01", "DEL-01", "HAND-02", "HAND-03"]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    "docs/DECISIONS.md",
+    "docs/OPEN-QUESTIONS.md",
+    "docs/ROADMAP.md",
+    "docs/handoff/contracts.md",
+    "docs/handoff/orchestration-scorecard.md",
+    "docs/handoff/checkpoint-threat-model.md",
+    "docs/handoff/model-gateway.md",
+    "packages/domain/src/ireports_domain/finding.py",
+    "packages/domain/src/ireports_domain/run.py",
+    "scripts/generate_schemas.py",
+    "spikes/test_scorecard.py",
+    "blueprint.md"
+  ]
+}
