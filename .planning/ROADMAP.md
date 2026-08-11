@@ -94,7 +94,15 @@ true.
      field.
   5. `CLAUDE.md` § Current state and `README.md` § Status no longer assert that application code does
      not exist or that the orchestration framework is undecided, and both reflect ADR-020's scope.
-**Plans**: TBD
+**Plans**: 3 plans, in 3 waves
+
+Plans:
+- [ ] 01-01-PLAN.md — `SpecialistResult` contract (CONT-01): the Pydantic v2 model, generated JSON
+      Schema, contract tests, and the lifted deferral in `docs/handoff/contracts.md`
+- [ ] 01-02-PLAN.md — The component-architecture write-up (ARCH-01): two Mermaid levels, the
+      four-marker build-state tables, the designed-not-built account, and the test that enforces them
+- [ ] 01-03-PLAN.md — Entry documents made true (ARCH-04): `CLAUDE.md` § Current state and
+      `README.md` § Status carry the measured inventory and ADR-020's three-phase scope
 
 *Diagrams are Mermaid fences inside the write-up*, canonical there rather than exported — the
 diagram and the prose stay one reviewable artifact, and it diffs. The build-state table is enforced
@@ -225,7 +233,7 @@ roadmapping pass that sequences from those measurements. Do not linearize the ca
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Close the architecture package | 0/TBD | Not started | - |
+| 1. Close the architecture package | 0/3 | Planned | - |
 | 2. Bounded sub-calls that survive a crash | 0/TBD | Not started | - |
 | 3. Human gate, typed output, and the handoff | 0/TBD | Not started | - |
 
