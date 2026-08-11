@@ -71,46 +71,62 @@ egress-deny test** if LangGraph is selected, since `langsmith` is a mandatory tr
 of `langchain-core`; and a **checkpoint-store threat model** treating the checkpoint blob as a
 deserialization trust boundary in every design, hand-rolled included.
 
-**In progress (2026-08-10).** Shared harness and the hand-rolled baseline are built and passing;
-see `spikes/README.md`. The harness is deliberately opinionated: node bodies are shared so that
-"framework-specific lines of code" measures wiring and nothing else, the stub gateway logs every
-model call to PostgreSQL outside the framework so leg 1 is answerable, candidates are driven
-across a real process boundary, and a permanently retained broken candidate proves leg 1 can
-actually fail something.
+**All three candidates built and passing (2026-08-11).** Full results, measurement method, and
+the fair reading of every number: `spikes/README.md`. Headline, one ruler across all three
+(`spikes/measure.py`):
 
-**Hand-rolled result:** all four legs pass, ~200 candidate-specific lines, 16,379-byte checkpoint
-at the review interrupt, no dependencies beyond `psycopg`. That is the floor the frameworks are
-measured against — though a floor and not a total, since no-progress detection, cancellation,
-tool allowlists, and OTel spans are still owed. A follow-up probe added a further debit: it
-**re-executes a completed model call** when a crash lands mid-fan-out (see below).
+| | hand-rolled | LangGraph | Strands |
+|---|---|---|---|
+| Four legs | pass | pass | pass |
+| Candidate-specific lines | **195** | 266 (192 net of spike-only instrumentation) | 373 |
+| State at the review interrupt | 16,346 B | **16,115 B** (37,033 B retained for the run) | 23,739 B |
+| Distributions / size beyond baseline | **0 / 0.0 MB** | 31 / 18.0 MB | 42 / 47.3 MB |
+| `pip-audit` advisories, pinned set | 0 | 0 | 0 |
 
-**Strands result (2026-08-10): all four legs pass, and leg 1's open question is settled.** The
-landscape scan's unconfirmed third-party claim — that Strands restores *conversation* rather than
-resuming *execution* — **does not hold for `Graph` in `strands-agents` 1.51.0**. `serialize_state`
-carries `completed_nodes` and `next_nodes_to_execute`, state is synced after every node, and after
-a hard `os._exit(9)` no completed node re-executed. That was the single highest-value unknown in
-the milestone and it is now a measurement rather than a citation.
+**Both LangGraph-specific deliverables the 1b scan required are done.** The LangSmith egress-deny
+test (`spikes/langgraph/test_langsmith_egress.py`) proves the default is closed, proves an
+explicit `langsmith.configure(enabled=False)` pin beats a hostile inherited `LANGSMITH_TRACING`,
+and — via a negative control — proves the risk is real rather than theoretical: unpinned, a run
+`POST`s roughly 90 KB of graph state including finding text to `api.smith.langchain.com`, **and
+still succeeds**, because LangSmith swallows the failure. The framework-independent
+`docs/handoff/checkpoint-threat-model.md` records the checkpoint blob as a deserialization trust
+boundary in every design, together with the controls this project did *not* build.
 
-A follow-up probe found a **duplicate-model-call window on a mid-fan-out crash**: a sibling
-specialist whose call is in flight when the process dies runs again on resume. The hand-rolled
-candidate hits it 8 times in 12; Strands 0 in 12 — but that 0 is an artifact of our synchronous
-node bodies, which stop Strands' `asyncio` tasks from ever interleaving, and it should not be read
-as a durability property of the framework. The real mitigation is model-call-level idempotency
-(blueprint §8.5 duplicate-query detection), which **neither candidate has** and which belongs on
-both sides of the "still owes" ledger. Leg 1 was tightened to assert on every specialist and then
-reverted — re-running work the orchestrator never observed completing is correct at-least-once
-behaviour, so the stricter assertion is flaky rather than strict; the duplicate count is recorded
-as a measurement instead.
+Two LangGraph defaults are wrong for this architecture and invisible in the code: `durability`
+defaults to `async` rather than `sync`, and checkpoint deserialization defaults to permissive —
+the library's own source says *"any Python callable stored in checkpoint data will be imported and
+executed on load"* without `LANGGRAPH_STRICT_MSGPACK`. The candidate sets both in code.
 
-Costs measured, not asserted: 367 candidate-specific lines against ~200 (of which 159 are the
-PostgreSQL `SessionRepository` Strands does not ship), a 23,772-byte checkpoint against 16,379,
-and 39 added distributions / 34.1 MB — 20.1 MB of that `botocore`. State is also
-conversation-shaped: a node's durable result must be an `AgentResult`, which persists only
-`message` and `stop_reason`, so typed contracts are flattened into a message body and re-validated
-on the way out. Full write-up and the fair reading of the line counts: `spikes/README.md`.
+**The duplicate-model-call window is universal, not an artifact.** The 2026-08-10 write-up
+predicted that Strands' 0/12 was an artifact of our synchronous node bodies and that a candidate
+with genuine concurrent fan-out would show the window. LangGraph is that candidate and it does:
+over 24 trials the sibling's call was in flight at crash time in **24/24** and cost a duplicate
+paid call in **11/24**, against hand-rolled's 12/24 and Strands' 0/24. Model-call-level
+idempotency (blueprint §8.5 duplicate-query detection) is owed by **all three**.
 
-**Remaining:** the LangGraph candidate, the LangSmith egress-deny test if LangGraph is selected,
-the checkpoint-store threat model, and cold start under SAM local.
+**Superseded figures, recorded rather than quiet.** The 2026-08-10 line counts (hand-rolled 202,
+Strands 367) came from an unrecorded method and could not be reproduced; re-counted by
+`spikes/measure.py` they are 195 and 373 — within 4%, ordering unchanged.
+
+**What the harness guarantees**, unchanged since 2026-08-10: node bodies are shared so that
+"framework-specific lines of code" measures wiring and nothing else; the stub gateway logs every
+model call to PostgreSQL outside the framework so leg 1 is answerable; candidates are driven
+across a real process boundary; and a permanently retained broken candidate proves leg 1 can
+actually fail something. Leg 1 was once tightened to assert on every specialist and then reverted
+— re-running work the orchestrator never observed completing is correct at-least-once behaviour,
+so the stricter assertion is flaky rather than strict.
+
+**The scan's highest-value unknown, settled (2026-08-10, unchanged).** The third-party claim that
+Strands restores *conversation* rather than resuming *execution* **does not hold for `Graph` in
+`strands-agents` 1.51.0**: `serialize_state` carries `completed_nodes` and `next_nodes_to_execute`,
+state is synced after every node, and after a hard `os._exit(9)` no completed node re-executed.
+The same was asserted rather than assumed for LangGraph, with the same result. What *is* true of
+Strands is that its state container is conversation-shaped — a node's durable result must be an
+`AgentResult`, which persists only `message` and `stop_reason` — so typed contracts are flattened
+into a message body and re-validated on the way out, which is also why its checkpoint is the
+largest of the three.
+
+**Remaining:** cold start and packaging under SAM local, for all three candidates.
 
 **Exit:** a scorecard, a recommendation, and ADR-012 moved from `Open` to `Accepted`. Losing
 spikes are kept — a rejected candidate with a recorded reason is part of the handoff.

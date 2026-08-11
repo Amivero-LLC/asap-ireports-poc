@@ -9,17 +9,19 @@ dependencies = [
     "ireports-gateway",
     "ireports-spike-harness",
     "spike-handrolled",
+    "spike-langgraph",
     "spike-strands",
 ]
 
 [tool.uv.workspace]
-members = ["packages/*", "spikes/harness", "spikes/handrolled", "spikes/strands"]
+members = ["packages/*", "spikes/harness", "spikes/handrolled", "spikes/langgraph", "spikes/strands"]
 
 [tool.uv.sources]
 ireports-domain = { workspace = true }
 ireports-gateway = { workspace = true }
 ireports-spike-harness = { workspace = true }
 spike-handrolled = { workspace = true }
+spike-langgraph = { workspace = true }
 spike-strands = { workspace = true }
 
 [dependency-groups]
