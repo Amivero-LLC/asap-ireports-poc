@@ -77,8 +77,17 @@ orchestration, review, and delivery. A silently-dropped unknown field at a bound
 contract mismatch becomes a data-loss bug; forbidding extras turns it into a validation error at
 the seam where it happened.
 
-**`frozen=True` on every contract.** ADR-011's "both versions are retained" only holds if the
-machine proposal cannot be edited in place.
+**`frozen=True` on every contract, and no mutable container fields.** ADR-011's "both versions
+are retained" only holds if the machine proposal cannot be edited in place. `frozen=True` alone
+does not deliver that: it blocks attribute *rebinding*, not mutation of the object an attribute
+already points at, so a `list` field on a frozen model stays appendable. That gap was real and is
+closed — every sequence field is `tuple[X, ...]`, which emits identical JSON Schema
+(`{"type": "array", …}`) and so costs nothing at the boundary. Without it, appending to a
+validated `SpecialistResult.findings` bypassed the cross-field validator that had just rejected
+foreign findings at construction, letting a case-A result carry a case-B finding.
+`test_no_contract_field_is_a_mutable_container` walks every contract in `ROOT_CONTRACTS`,
+following nested models, and enforces this mechanically; a paired negative control proves the
+walk can still fail.
 
 **Prefixed identifier types.** `run_id` and `finding_id` travel adjacently through orchestration,
 delivery, and audit records. If both are bare strings, transposing them is invisible; with
@@ -181,13 +190,19 @@ Stated plainly, because this package will be read as authoritative.
 
 ## 6. Verification, as run
 
-macOS arm64, Python 3.13.x via `uv`, 2026-08-10; re-verified 2026-08-11 for CONT-01.
+macOS arm64, Python 3.13.x via `uv`, 2026-08-10; re-verified 2026-08-11 for CONT-01 and again
+after the mutable-container fix. Each row names its scope — an unscoped file count is the kind of
+figure that goes stale without anyone noticing.
 
 | Gate | Result |
 |---|---|
-| `ruff check` | All checks passed |
-| `ruff format --check` | 20 files already formatted |
-| `mypy --strict` | Success: no issues found in 11 source files |
-| `pytest tests/contract` | 91 passed |
+| `ruff check packages tests scripts` | All checks passed |
+| `ruff format --check packages tests scripts` | 23 files already formatted |
+| `mypy --strict packages tests scripts` | Success: no issues found in 23 source files |
+| `pytest tests/contract` | 107 passed |
+| `pytest` (whole suite) | 142 passed, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 | `generate_schemas.py --check` | schemas/ is current (14 contracts) |
-| `bandit` | 0 high, 0 medium severity (3 low-severity false positives, §5) |
+| `bandit -r packages` | 0 high, 0 medium severity (3 low-severity false positives, §5) |
+
+These gates are run by hand. There is no CI workflow in this repository yet, so nothing runs them
+on a push — treat the figures as of the date above, not as a live signal.
