@@ -80,7 +80,7 @@ class _Usage:
 
 @dataclass
 class _Message:
-    content: list[_Block]
+    content: list[_Block | _ToolUse]
     stop_reason: str = "end_turn"
     model: str = "anthropic.claude-test"
     usage: _Usage | None = None
@@ -130,7 +130,7 @@ def test_no_sampling_parameters_are_ever_sent() -> None:
     """
     adapter = _adapter(_Message(content=[_Block("ok")], usage=_Usage()))
     adapter.complete(REQUEST)
-    sent = adapter._client.messages.captured  # type: ignore[attr-defined]
+    sent = adapter._client.messages.captured
     assert "temperature" not in sent
     assert "top_p" not in sent
     assert "top_k" not in sent
@@ -139,7 +139,7 @@ def test_no_sampling_parameters_are_ever_sent() -> None:
 def test_thinking_is_adaptive_not_a_token_budget() -> None:
     adapter = _adapter(_Message(content=[_Block("ok")], usage=_Usage()))
     adapter.complete(REQUEST)
-    sent = adapter._client.messages.captured  # type: ignore[attr-defined]
+    sent = adapter._client.messages.captured
     assert sent["thinking"] == {"type": "adaptive"}
     assert "budget_tokens" not in sent["thinking"]
 
@@ -147,13 +147,13 @@ def test_thinking_is_adaptive_not_a_token_budget() -> None:
 def test_effort_comes_from_the_tier() -> None:
     adapter = _adapter(_Message(content=[_Block("ok")], usage=_Usage()))
     adapter.complete(REQUEST)
-    assert adapter._client.messages.captured["output_config"]["effort"] == "high"  # type: ignore[attr-defined]
+    assert adapter._client.messages.captured["output_config"]["effort"] == "high"
 
     adapter2 = _adapter(_Message(content=[_Block("ok")], usage=_Usage()))
     adapter2.complete(
         ModelRequest(alias=ModelAlias.FAST, messages=(Message(role="user", content="Classify."),))
     )
-    assert adapter2._client.messages.captured["output_config"]["effort"] == "low"  # type: ignore[attr-defined]
+    assert adapter2._client.messages.captured["output_config"]["effort"] == "low"
 
 
 def test_structured_output_is_a_single_tool_not_a_response_format() -> None:
@@ -173,7 +173,7 @@ def test_structured_output_is_a_single_tool_not_a_response_format() -> None:
             response_schema=schema,
         )
     )
-    sent = adapter._client.messages.captured  # type: ignore[attr-defined]
+    sent = adapter._client.messages.captured
 
     assert sent["tools"][0]["input_schema"] == schema
     assert len(sent["tools"]) == 1, "one tool means there is nothing to choose between"

@@ -260,7 +260,7 @@ def _run(status: RunStatus, policy_pack: PolicyPackRef, **overrides: object) -> 
         ),
         "status": status,
     }
-    return RunManifest(**(base | overrides))  # type: ignore[arg-type]
+    return RunManifest(**(base | overrides))
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +433,7 @@ def _envelope(
         ),
         "integrity": EnvelopeIntegrity(payload_sha256=HASH_C),
     }
-    return ASAPEnvelope(**(base | overrides))  # type: ignore[arg-type]
+    return ASAPEnvelope(**(base | overrides))
 
 
 def test_full_chain_reaches_a_delivered_envelope(

@@ -8,6 +8,7 @@ fails here rather than in a review someone might not do.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from ireports_domain import (
@@ -29,7 +30,7 @@ from ireports_domain import (
     reject_determinative_language,
 )
 from ireports_domain.run import LEGAL_TRANSITIONS
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 NOW = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
 
@@ -69,7 +70,7 @@ not an assessment of the person.
 ALLOWED_EXCEPTIONS = frozenset({"position_risk_level"})
 
 
-def _walk_property_names(schema: dict, defs: dict) -> set[str]:
+def _walk_property_names(schema: dict[str, Any], defs: dict[str, Any]) -> set[str]:
     """Collect every property name reachable from a schema, following $defs."""
     seen_defs: set[str] = set()
     names: set[str] = set()
@@ -99,7 +100,7 @@ def _walk_property_names(schema: dict, defs: dict) -> set[str]:
 
 
 @pytest.mark.parametrize("stem,model", sorted(ROOT_CONTRACTS.items()))
-def test_no_contract_carries_an_aggregate_score(stem: str, model: type) -> None:
+def test_no_contract_carries_an_aggregate_score(stem: str, model: type[BaseModel]) -> None:
     schema = model.model_json_schema(mode="serialization")
     names = _walk_property_names(schema, schema.get("$defs", {}))
     offenders = {
@@ -120,7 +121,7 @@ def test_the_guard_actually_catches_something() -> None:
     Without this, a refactor that broke `_walk_property_names` would leave every ADR-014 test
     passing vacuously.
     """
-    schema = {
+    schema: dict[str, Any] = {
         "properties": {"harmless": {}, "subject_risk_score": {}},
         "$defs": {},
     }
@@ -131,7 +132,7 @@ def test_the_guard_actually_catches_something() -> None:
 
 def test_guard_reaches_nested_definitions() -> None:
     """The walk must follow $defs, or nested contracts go unchecked."""
-    schema = {
+    schema: dict[str, Any] = {
         "properties": {"nested": {"$ref": "#/$defs/Inner"}},
         "$defs": {"Inner": {"properties": {"overall_risk": {}}}},
     }
@@ -215,7 +216,7 @@ def _finding(**overrides: object) -> ProposedFinding:
         ),
         "proposed_at": NOW,
     }
-    return ProposedFinding(**(base | overrides))  # type: ignore[arg-type]
+    return ProposedFinding(**(base | overrides))
 
 
 def test_a_finding_cannot_state_a_determination() -> None:
@@ -269,7 +270,7 @@ def test_model_reference_must_be_an_alias() -> None:
     with pytest.raises(ValidationError):
         GeneratedBy(
             node="specialist",
-            model_alias="anthropic.claude-sonnet-4-6",  # type: ignore[arg-type]
+            model_alias="anthropic.claude-sonnet-4-6",
             prompt_version="v1",
         )
 

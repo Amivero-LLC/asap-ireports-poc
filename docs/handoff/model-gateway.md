@@ -224,12 +224,20 @@ macOS arm64, Python 3.13.x, `anthropic` 0.121.0, 2026-08-10.
 | `ruff check` / `ruff format --check` | clean |
 | `pytest` (offline) | 87 passed, 8 skipped — the 8 are the opt-in live checks |
 | `pytest tests/live` (opt-in, live) | 8 passed against a commercial-partition Bedrock proxy |
-| `mypy --strict` | **13 pre-existing errors in three test modules** — see below |
+| `mypy --strict` | clean — 48 source files, 0 errors (2026-08-11) |
 
-**On mypy.** An earlier revision of this page recorded `mypy --strict` as clean at 26 source files.
-It is not, and was not: `uv run mypy .` reports 13 errors, all in `tests/contract/`, all present on
-the commit that made the claim. Nine are unused `# type: ignore` comments; four are missing
-annotations in `test_decision_support_boundary.py`. No package under `packages/` is affected.
-Recorded here rather than quietly fixed, because a handoff document that overstates a quality gate
-is exactly the failure ADR-001 is written against. Fixing them is a small, contained job and is not
-yet done.
+**On mypy — the correction, and its resolution, both kept.** An earlier revision of this page
+recorded `mypy --strict` as clean at 26 source files. It was not, and had not been: `uv run mypy .`
+reported 15 errors, all confined to `tests/contract/`, all present on the commit that made the
+claim. (This page said 13; a later count found 15 — the two extra were `list-item` errors against
+the `anthropic` SDK's block types.) No package under `packages/` was ever affected.
+
+**Fixed 2026-08-11**, and the gate is now clean across 48 source files. Nine were unused
+`# type: ignore` comments; four were missing annotations in `test_decision_support_boundary.py`;
+two were a fake `_Message.content` typed `list[_Block]` that could not admit the `_ToolUse` block
+ADR-019 made the normal structured-output shape. All fixes were annotations — no test logic
+changed, and the ADR-014 guard still catches its planted `subject_risk_score` offender.
+
+The overstatement is left on the record deliberately. A handoff document that quietly repairs its
+own false claim teaches a reader nothing; one that shows the claim, the correction, and the fix
+teaches them to check. That is the failure ADR-001 is written against.

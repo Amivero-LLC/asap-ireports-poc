@@ -55,8 +55,7 @@ orchestration framework is LangGraph.** M2 not started. M3 is a placeholder, gat
 decomposed.
 
 **Repo health (2026-08-11):** 111 tests passing, 8 skipped (the skips are live-model tests, opt-in
-via `IREPORTS_LIVE_SMOKE=1`). `ruff` clean. `mypy --strict` 15 errors — **all pre-existing and all
-confined to `tests/contract/`**; none in `packages/`, none in `spikes/`. `pip-audit` clean over the
+via `IREPORTS_LIVE_SMOKE=1`). `ruff` clean. `mypy --strict` **clean across 48 source files** — the 15 pre-existing `tests/contract/` errors were cleared 2026-08-11 (QUAL-01 done). `pip-audit` clean over the
 pinned set.
 
 ## Performance Metrics

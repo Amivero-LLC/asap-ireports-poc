@@ -86,8 +86,7 @@ write-up is outstanding and is the last item blocking program sign-off on 1a.** 
 started. Milestone 3 is an explicit placeholder.
 
 **Repo health (2026-08-11):** 111 tests passing, 8 skipped (the 8 are opt-in live-model checks,
-`IREPORTS_LIVE_SMOKE=1`). `ruff` clean. `mypy --strict` reports 15 errors, **all pre-existing and all
-confined to `tests/contract/`** — none in `packages/`, none in `spikes/`. `pip-audit` reports no
+`IREPORTS_LIVE_SMOKE=1`). `ruff` clean. `mypy --strict` **clean across 48 source files** — the 15 pre-existing `tests/contract/` errors were cleared 2026-08-11 (QUAL-01 done). `pip-audit` reports no
 known vulnerabilities over the pinned set.
 
 **The orchestration decision is settled and the reasoning matters.** All three bake-off candidates

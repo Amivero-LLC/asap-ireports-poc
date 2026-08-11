@@ -59,7 +59,7 @@ decomposed — see v2.
 
 ### Quality gates
 
-- [ ] **QUAL-01**: `mypy --strict` is clean across the workspace.
+- [x] **QUAL-01** *(done 2026-08-11)*: `mypy --strict` is clean across the workspace.
       *Acceptance:* the 15 pre-existing errors in `tests/contract/` are cleared; no package under
       `packages/` or `spikes/` is affected. A handoff document that overstates a quality gate is
       exactly the failure ADR-001 is written against.
@@ -312,7 +312,7 @@ Turning them into phases would manufacture a plan the source refuses to make.
 | ARCH-03 | Phase 1 | Pending |
 | ARCH-04 | Phase 1 | Pending |
 | CONT-01 | Phase 1 | Pending |
-| QUAL-01 | Phase 1 | Pending |
+| QUAL-01 | Phase 1 | Done (2026-08-11) |
 | ORCH-01 | Phase 2 | Pending |
 | ORCH-02 | Phase 2 | Pending |
 | ORCH-03 | Phase 2 | Pending |
