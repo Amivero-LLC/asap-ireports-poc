@@ -347,3 +347,59 @@ determination.
 
 **Consequences.** Schema review must reject any field that functions as an aggregate score,
 whatever it is named.
+
+---
+
+## ADR-015 — Two model-gateway adapters behind one port; both use the Anthropic SDK
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Amends ADR-008**
+
+**Context.** ADR-008 and `CLAUDE.md` name LiteLLM as "the only component permitted to call
+Bedrock." That is a good default and a bad single point of failure. LiteLLM's own availability
+and approval in the target partition is not established, its advisory history is substantial
+(the M1b scan found repeated RCE, auth-bypass, and privilege-escalation advisories), and a proxy
+the program has not approved is a deployment blocker we would discover late. Separately, nothing
+in this project had ever actually called a model — the orchestration spike runs against a
+deterministic stub, correctly, since all four bake-off legs are about control flow.
+
+**Decision.** A `ModelGateway` port with two production adapters, selected by configuration:
+
+| Adapter | Transport | Where the alias→model mapping lives |
+|---|---|---|
+| `litellm` (default) | Official Anthropic SDK pointed at LiteLLM's **Anthropic-native passthrough** (`{base}/anthropic`) | LiteLLM's config — outside our process entirely |
+| `bedrock` | `anthropic.AnthropicBedrockMantle`, standard AWS credential chain, no proxy | Our environment (`IREPORTS_BEDROCK_MODEL_*`) |
+
+A third adapter, `stub`, is offline and exists for contract tests only (ADR-009's "mock at the
+gateway boundary"). It must never be selectable in a profile that produces reviewer-visible
+findings.
+
+**Both production adapters use the official `anthropic` SDK, and that is the load-bearing part.**
+The obvious LiteLLM integration is its OpenAI-compatible surface, which would silently cost the
+Anthropic request surface this architecture depends on: adaptive thinking, `output_config.effort`,
+structured outputs, thinking blocks, and the `refusal` stop reason. LiteLLM also exposes an
+Anthropic passthrough, so we keep the gateway *and* the real API. The Bedrock adapter uses the
+SDK's Messages-API Bedrock client rather than a raw `bedrock-runtime` `converse` call for the same
+reason — one request shape, one refusal path, no second place for decision-support behaviour to
+drift.
+
+**Consequences.**
+
+1. **ADR-008 still holds, more strongly.** Application code names a tier; no model id reaches a
+   contract. With the LiteLLM adapter no model id reaches our repository at all.
+2. **A refusal can never become an empty finding.** Current models decline with HTTP 200 and a
+   possibly-empty content list; the gateway raises rather than returning. For this system that is
+   the highest-stakes error path — silent under-analysis that validates cleanly and reaches a
+   reviewer looking like a clean result.
+3. **No sampling parameters, anywhere.** `temperature`, `top_p`, and `top_k` are rejected by
+   current models and are not configurable in this system. Reasoning depth is `effort` per tier.
+4. **`ireports-fast` is low effort with thinking on, not thinking disabled.** Disabling thinking
+   has two documented failure modes — a tool call written into visible text (the call silently
+   never runs) and internal tags leaking into output. Neither is survivable for a system whose
+   validators depend on structured output.
+5. **No default model id exists.** A missing one is a startup error naming the variable. Q-01 is
+   refused, not guessed; `.env.example` carries placeholders that fail loudly.
+6. **New unverified risk.** The Mantle endpoint is `bedrock-mantle.{region}.api.aws`; whether it
+   resolves in GovCloud is **unverified**, and GovCloud endpoints do not generally follow the
+   commercial pattern. `IREPORTS_BEDROCK_BASE_URL` is the escape hatch; if the endpoint is absent
+   there, the fallback is a `bedrock-runtime` adapter — real work to scope, not a flag. Folded
+   into Q-01.

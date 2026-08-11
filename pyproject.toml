@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ireports-domain",
+    "ireports-gateway",
     "ireports-spike-harness",
     "spike-handrolled",
 ]
@@ -15,6 +16,7 @@ members = ["packages/*", "spikes/harness", "spikes/handrolled"]
 
 [tool.uv.sources]
 ireports-domain = { workspace = true }
+ireports-gateway = { workspace = true }
 ireports-spike-harness = { workspace = true }
 spike-handrolled = { workspace = true }
 

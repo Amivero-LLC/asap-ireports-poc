@@ -48,6 +48,7 @@ uv run pytest spikes -v -s
 | [`docs/OPEN-QUESTIONS.md`](docs/OPEN-QUESTIONS.md) | What is unresolved, and what it costs to be wrong |
 | [`docs/handoff/orchestration-landscape.md`](docs/handoff/orchestration-landscape.md) | The framework scan behind ADR-012's amended candidate set |
 | [`docs/handoff/contracts.md`](docs/handoff/contracts.md) | The contract set, what each rule enforces, and where it diverges from the blueprint |
+| [`docs/handoff/model-gateway.md`](docs/handoff/model-gateway.md) | The two model adapters, what the gateway guarantees, and the refusal path |
 | [`CLAUDE.md`](CLAUDE.md) | Working conventions and the rules that constrain code |
 | [`blueprint.md`](blueprint.md) | The source architecture paper — the project's **input**, not its output |
 

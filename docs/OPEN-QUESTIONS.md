@@ -26,6 +26,13 @@ inference restrictions, and data-routing rules in GovCloud are unvalidated (blue
 §"Working assumptions", §4.1.9). If the intended model is unavailable in the approved partition,
 the model tier strategy (ADR-008) needs different targets and the evaluation baseline moves.
 
+**Added 2026-08-10 (ADR-015).** Two endpoint questions now ride on Q-01, not just model ids:
+whether the Anthropic SDK's Bedrock Messages endpoint (`bedrock-mantle.{region}.api.aws`) resolves
+in GovCloud at all — GovCloud endpoints do not generally follow the commercial pattern — and
+whether a LiteLLM proxy is permitted in the approved environment. If the first is absent, the
+fallback is a `bedrock-runtime` adapter (scoped work); if the second is refused, the `bedrock`
+adapter becomes the only path and the alias→model mapping moves into our environment.
+
 **To resolve:** confirm against current AWS GovCloud Bedrock documentation and an actual API call
 in the target account and region — not from a general availability page. Record the answer as a
 compatibility matrix entry (blueprint §15.3), not prose.
