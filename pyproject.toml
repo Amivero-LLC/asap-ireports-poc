@@ -6,13 +6,17 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ireports-domain",
+    "ireports-spike-harness",
+    "spike-handrolled",
 ]
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "spikes/harness", "spikes/handrolled"]
 
 [tool.uv.sources]
 ireports-domain = { workspace = true }
+ireports-spike-harness = { workspace = true }
+spike-handrolled = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -36,4 +40,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "spikes"]
+markers = [
+    "requires_postgres: needs the compose stack in infrastructure/docker",
+]
