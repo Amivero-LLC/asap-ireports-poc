@@ -21,6 +21,12 @@ coming" are never left for a reader to infer.
 > AWS ingestion pipeline, ASAP, or the human reviewer). `DESIGNED-NOT-BUILT` — cut by ADR-020 or
 > ADR-021; the row names the reason. A reader must never have to guess which of these four applies
 > to a given box.
+>
+> **Edge legend.** The build-state markers above govern boxes; edges carry their own distinction.
+> A **solid** edge is a dependency that exists today or is scheduled within the three-phase scope.
+> A **dotted** edge crosses a boundary out of this repository, or depends on something unresolved —
+> its label names which. Shape carries meaning too: `{{hexagons}}` are gates and branch points,
+> `[(cylinders)]` are datastores, and plain boxes are components.
 
 ---
 
@@ -78,6 +84,7 @@ flowchart LR
         RETR["packages/retrieval/<br/>retrieval port + mapping module<br/>PLANNED - Phase 2"]
         PG[("PostgreSQL<br/>system of record for<br/>workflow state<br/>PLANNED - Phase 2")]
         OSLOCAL[("Local OpenSearch<br/>dev mirror of the AWS collection<br/>PLANNED - Phase 2")]
+        GATE{{"AWAITING_HUMAN_REVIEW<br/>our run state - no bypass, in any profile<br/>BUILT - state machine in run.py<br/>pause/resume across a process: PLANNED - Phase 3"}}
     end
 
     subgraph AWSSIDE["AWS ingestion pipeline (NOT OURS)"]
@@ -90,7 +97,10 @@ flowchart LR
         ASAPSYS["ASAP<br/>receiving system of record<br/>NOT OURS"]
     end
 
-    BEDROCK[("LiteLLM to Amazon Bedrock<br/>NOT OURS")]
+    subgraph MODELSIDE["Model access (NOT OURS)"]
+        PROXY["LiteLLM proxy<br/>resolves alias to model id<br/>NOT OURS"]
+        BEDROCK[("Amazon Bedrock<br/>NOT OURS")]
+    end
 
     DOMAIN --> ORCH
     DOMAIN --> GATEWAY
@@ -100,16 +110,24 @@ flowchart LR
     RETR --> OSLOCAL
     RETR -. "hybrid lexical + kNN query, Q-02" .-> VCOL
     INGEST --> VCOL
-    GATEWAY -. "tier alias, never a model id" .-> BEDROCK
-    ORCH --> REVIEWER
-    REVIEWER --> ASAPSYS
-    ORCH -. "validated ASAPEnvelope, written to disk" .-> ASAPSYS
+    GATEWAY -- "tier alias; resolved to a<br/>model id in proxy config (ADR-017)" --> PROXY
+    PROXY --> BEDROCK
+    GATEWAY -. "bedrock adapter: direct, no proxy (ADR-015)" .-> BEDROCK
+    ORCH --> GATE
+    GATE --> REVIEWER
+    REVIEWER -- "disposition recorded, run resumes" --> GATE
+    GATE -. "validated ASAPEnvelope, written to disk,<br/>only after a disposition" .-> ASAPSYS
 ```
 
-**Where the boundaries sit, one sentence each.** iReports queries the AWS-owned vector collection
-directly and is a consumer of it, never a producer — the AWS ingestion pipeline owns extraction,
-chunking, and production embedding, and iReports's own local ingestion exists only to develop
-against (ADR-007). iReports writes a validated `ASAPEnvelope` to disk; ASAP owns everything that
+Every ASAP-bound path in that diagram traverses `GATE`. There is deliberately no edge from `ORCH`
+to `ASAPSYS` — the no-bypass claim below is a property of the graph, not a caption on it.
+
+**Where the boundaries sit, one sentence each.** In the target deployment iReports **will query**
+the AWS-owned vector collection directly as a consumer, never a producer — `PLANNED`, and
+untestable until Q-02 confirms the collection's real schema; nothing queries it today, and
+RETR-01/RETR-02 build against local OpenSearch only (ADR-021 Decision 1). The AWS ingestion
+pipeline owns extraction, chunking, and production embedding, and iReports's own local ingestion
+exists only to develop against (ADR-007). iReports writes a validated `ASAPEnvelope` to disk; ASAP owns everything that
 happens to that envelope after it is written, including transport, storage, and any downstream
 action (ADR-010). iReports pauses in an explicit `AWAITING_HUMAN_REVIEW` state and cannot proceed
 past it by itself — a human reviewer, not this system, records the disposition that lets a run
@@ -129,6 +147,15 @@ opposite:
   (the `ModelGateway` port and its `litellm` and `bedrock` adapters) is the only component
   permitted to call a model at all (ADR-015).
 
+  **The invariant is narrower than "no model id reaches this repository."** ADR-017 Decision 2
+  adds optional per-tier overrides (`IREPORTS_LITELLM_MODEL_ORCHESTRATOR|THINKING|FAST`) for the
+  case where a shared organisational proxy does not carry our aliases. When one is configured, a
+  concrete model id *does* live in this repository's configuration — and ADR-017's own
+  Consequences say so: the ADR-015 claim that "with the LiteLLM adapter no model id reaches our
+  repository at all" is conditional on the proxy carrying our aliases. What survives unconditionally
+  is that **application code** names a tier and the **gateway** resolves it. The `bedrock` adapter
+  goes direct with no proxy at all, which is why the diagram draws two edges out of `GATEWAY`.
+
 `packages/retrieval/` returns to the diagram above under ADR-021: an earlier version of this
 scope cut retrieval entirely on the reasoning that a fixture could stand in for a search. That
 reasoning was wrong about what this architecture demonstrates — a sub-agent's RAG search against
@@ -146,24 +173,44 @@ checked, and where the run pauses for the human reviewer.
 ```mermaid
 flowchart TD
     STEP1["1. Load the case<br/>a CaseManifest initializes a RunManifest"]
-    STEP2["2. Determine the criteria to analyze<br/>fan out one specialist sub-call per criterion"]
-    STEP3A["3. Specialist sub-call:<br/>case-filtered, bounded-K<br/>vector + lexical query<br/>through the retrieval port"]
-    STEP3B["Retrieved spans become<br/>the evidence the model reasons over"]
-    STEP3C["One call through the ModelGateway port<br/>on a tier alias, with a<br/>criterion-specific tool allowlist"]
-    STEP3D["Deserialized into a SpecialistResult:<br/>criterion, provenance, and<br/>proposed findings with citations"]
-    SHELL{"4. Deterministic shell checks<br/>budgets and loop limits<br/>between steps"}
+    STEP2{{"2. Determine the criteria to analyze<br/>fan out one specialist sub-call per criterion"}}
+
+    subgraph SPECIALIST["3. One specialist sub-call - one instance per criterion, in parallel"]
+        direction TB
+        STEP3A["Case-filtered, bounded-K<br/>vector + lexical query<br/>through the retrieval port"]
+        STEP3B["Retrieved spans become<br/>the evidence the model reasons over"]
+        STEP3C["One call through the ModelGateway port<br/>on a tier alias, with a<br/>criterion-specific tool allowlist"]
+        STEP3D["Deserialized into a SpecialistResult:<br/>criterion, provenance, and<br/>proposed findings with citations"]
+        STEP3A --> STEP3B --> STEP3C --> STEP3D
+    end
+
+    SHELL{"4. Deterministic shell checks<br/>budgets, loop limits, and<br/>no-progress between steps"}
     BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>routes to human review, not to failure"]
+    AGG["Aggregate the SpecialistResults<br/>no aggregate score, ever (ADR-014)"]
     STEP5["5. Checkpoint durably,<br/>before the node returns"]
     STEP6["6. Run enters AWAITING_HUMAN_REVIEW<br/>and pauses"]
     DISPOSITION["Disposition recorded out of band<br/>by a different process (ADR-011)"]
     STEP7A["7. Run resumes from the checkpoint"]
     STEP7B["Emits a validated ASAPEnvelope<br/>written to disk"]
 
-    STEP1 --> STEP2 --> STEP3A --> STEP3B --> STEP3C --> STEP3D --> SHELL
-    SHELL -- "ceiling hit" --> BUDGETSTOP --> STEP6
-    SHELL -- "within budget" --> STEP5 --> STEP6
+    STEP1 --> STEP2
+    STEP2 -- "per criterion" --> SPECIALIST
+    SPECIALIST --> SHELL
+    SHELL -- "criteria remain,<br/>within limits" --> STEP2
+    SHELL -- "ceiling hit" --> BUDGETSTOP
+    SHELL -- "all criteria done" --> AGG
+    BUDGETSTOP --> AGG
+    AGG --> STEP5 --> STEP6
     STEP6 --> DISPOSITION --> STEP7A --> STEP7B
 ```
+
+Two properties are drawn rather than described, because they are the reason the spine exists
+(ADR-020): the **fan-out** (`STEP2 -- per criterion --> SPECIALIST`, one instance per criterion)
+and the **loop the limits bound** (`SHELL -- criteria remain --> STEP2`). Note also that the
+budget-stop path rejoins before step 5 — **every** path to `AWAITING_HUMAN_REVIEW` checkpoints
+first, including the truncated one. A path that returned without checkpointing would contradict
+the durability property stated below, and would be the specific way a truncated analysis
+disappears instead of reaching a reviewer.
 
 **The deterministic shell around probabilistic reasoning.** Schema validation, citation
 validation, authority routing, policy-pack effectivity, and loop and termination limits are
@@ -211,7 +258,7 @@ the API and delivery surfaces, the spikes, the handoff documents, and the four n
 | Component | Build state | Path | Notes |
 |---|---|---|---|
 | Domain contracts (fourteen Pydantic v2 models) | `BUILT` | `packages/domain/src/ireports_domain/` | Includes `SpecialistResult` / `SpecialistCriterion` (CONT-01) |
-| Generated JSON Schema | `BUILT` | `schemas/` | Regenerated by `scripts/generate_schemas.py`; `--check` is the CI currency gate |
+| Generated JSON Schema | `BUILT` | `schemas/` | Regenerated by `scripts/generate_schemas.py`; `--check` is the *intended* CI currency gate — **no CI pipeline exists in this repository**, and wiring one is the handoff team's to own |
 | Contract tests | `BUILT` | `tests/contract/` | 91 tests as of CONT-01, including the ADR-014 schema-walking guard |
 | `ModelGateway` port | `BUILT` | `packages/gateway/src/ireports_gateway/port.py` | The only component permitted to call a model (ADR-015) |
 | `litellm` adapter | `BUILT` | `packages/gateway/src/ireports_gateway/adapters.py` | Default; Anthropic SDK against LiteLLM's native `/v1/messages` route (ADR-017) |
@@ -270,6 +317,15 @@ Phase 3 creates a path a `PLANNED` row names, that row must be flipped to `BUILT
 commit — the test failing at that point is the intended signal, not a nuisance. This instruction is
 the entire reason D-11 exists: `CLAUDE.md`'s state narrative went stale in this repository once
 before and nothing caught it.
+
+**How far that enforcement actually reaches, stated rather than implied.** The test runs when
+someone runs the suite — which is the same condition under which the earlier staleness went
+uncaught, since **this repository has no CI**. It is a guard against a reader being misled, not an
+automatic one. Two known gaps in it are recorded in `01-REVIEW.md` and are open at the time of
+writing: several violation categories the checker computes are not yet asserted by a named test
+(CR-01), and multiple `PLANNED` rows share a directory-level path, so the first commit under
+Phase 2 will fail several unrelated rows at once (CR-02). Read the guard as narrower than the
+paragraph above implies until both are closed.
 
 ---
 
