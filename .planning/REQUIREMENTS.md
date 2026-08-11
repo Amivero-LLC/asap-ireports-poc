@@ -106,13 +106,32 @@ is the failure ADR-001 is written against.
       delivery) are unreachable; the result is a typed `SpecialistResult`, not prose. **Evidence is
       handed in from a synthetic fixture, not retrieved** — RETR-01..03 are cut by ADR-020.
       *Traces:* `REQ-specialist-query` · blueprint §8.3, §8.4 · ADR-020.
-- [ ] **VAL-02**: A model refusal and a `StructuredOutputError` reach the reviewer as an
-      `InformationGap` with `blocking=True`, never as an absent or empty finding.
-      *Acceptance:* both paths wired and tested. Silent under-analysis that looks like a completed
-      analysis is the worst outcome this system can produce — worse than a crash, because a crash is
-      visible. Refusals are expected in normal operation on adjudicative content.
-      *Traces:* `REQ-refusal-to-information-gap` · ADR-018 · model-gateway.md §3. **Retained by
-      ADR-020 as nearly free — the gateway already raises `ModelRefusalError`.**
+- [ ] **VAL-02** *(reduced by ADR-021)*: A model refusal and a `StructuredOutputError` are **logged**,
+      never swallowed into an empty result.
+      *Acceptance:* the node catches `ModelRefusalError` / `StructuredOutputError` from the gateway
+      and logs it with `run_id`, `case_id`, and the criterion. **No `InformationGap` plumbing, no
+      `blocking` flag, no review routing** — the orchestrator does nothing special. The gateway
+      already checks `stop_reason` before touching content, so a refusal cannot become `""`.
+      *Traces:* `REQ-refusal-to-information-gap` (reduced) · ADR-018 · ADR-021 · model-gateway.md §3.
+      **Known gap, deliberately accepted:** an empty findings list from a refusal is indistinguishable
+      at the artifact level from a criterion that came back clean. The distinction lives in the log.
+      Owed a designed-not-built entry under HAND-01.
+
+### Retrieval — PROVISIONAL under Q-02, restored by ADR-021
+
+- [ ] **RETR-01**: Retrieval goes through the port, and every OpenSearch field name, filter, and
+      facet mapping lives in **one module**, explicitly marked PROVISIONAL.
+      *Acceptance:* no raw OpenSearch client outside the adapter; a test asserts every field name
+      resolves through the mapping module; the module carries a header naming Q-02 and stating that
+      the AWS collection's real schema is unconfirmed.
+      *Traces:* C-retrieval-through-the-port · ADR-007 · ADR-021 · Q-02. **Q-02 is contained by the
+      one-file rule, NOT cleared.**
+- [ ] **RETR-02**: One synthetic case is ingested locally and indexed into local OpenSearch, and the
+      sub-agent retrieves against it.
+      *Acceptance:* a synthetic case is indexed and retrievable by vector + lexical query with a
+      mandatory case filter and bounded K. **Vector and lexical only — ADR-006, no graph database, in
+      any milestone.** Local ingestion, chunking, and embedding are development only (ADR-007).
+      *Traces:* `REQ-synthetic-case-ingest` · ADR-006 · ADR-007 · ADR-021.
 
 ### Human review and typed output
 
@@ -171,10 +190,10 @@ HAND-01.**
 | **CKPT-01** | Keyed MAC over serialized checkpoint state, verified on load | **The single largest recorded security gap** (threat-model §6). Converts T2 and T3 from difficult to detectable |
 | **CKPT-02** | Least-privilege checkpoint-write DB role, distinct from the migration role | Hardening of a store the spine exercises unhardened |
 | **CKPT-03** | Resume provenance — the checkpoint id a resumed run resumed from, in the run manifest | Described in the source as "cheap to add; not added" — still true |
-| **RETR-01** | Retrieval through the port, all OpenSearch mappings in one PROVISIONAL module | No local retrieval in the spine; ADR-007's one-file rule stands as design guidance |
-| **RETR-02** | One synthetic case ingested into local OpenSearch | Evidence is handed to the specialist from a fixture instead |
-| **RETR-03** | Per-vector embedding provenance and a parity check that fails loudly on drift | No local embedding. **Q-03's blast radius is unchanged for whoever builds this** |
-| **CONT-02** | `ChunkRecord` and `PolicyRecord`, PROVISIONAL under Q-02 | No consumer in the spine |
+| ~~**RETR-01**~~ | ~~Retrieval through the port~~ | **RESTORED to v1 by ADR-021** — the sub-agent's RAG search is what the sub-agent *is*; a fixture-fed specialist demonstrates a fan-out, not this system |
+| ~~**RETR-02**~~ | ~~One synthetic case in local OpenSearch~~ | **RESTORED to v1 by ADR-021** |
+| **RETR-03** | Per-vector embedding provenance and a parity check that fails loudly on drift | Model-evaluation work; stays cut under ADR-021. **Q-03's blast radius is unchanged for whoever builds this** |
+| **CONT-02** | `ChunkRecord` and `PolicyRecord`, PROVISIONAL under Q-02 | The indexed record shape lives inside the retrieval package rather than as a published contract — publishing it would commit a schema against an unconfirmed collection for no consumer outside retrieval (ADR-021) |
 | **ROUT-01** | Authority routing with an explicit decision for **every** authority, never inferred | Breadth across authorities, not orchestrator risk. ADR-003's coverage decision is unchanged; its implementation is deferred |
 | **ROUT-02** | Two approved policy packs (5 CFR 731, SEAD-4), policy fails closed | As above |
 | **VAL-01** | Deterministic validators rejecting a finding on schema, unresolvable citation, effectivity, or prohibited content | Resolving citations needs a real evidence snapshot to mean anything. **The finding contract still requires citations structurally** |
@@ -249,7 +268,9 @@ originals below. Recorded **unordered and unscoped**.
 | ORCH-03 | Phase 2 | Pending |
 | ORCH-04 | Phase 2 | Pending |
 | SPEC-01 | Phase 2 | Pending |
-| VAL-02 | Phase 2 | Pending |
+| VAL-02 | Phase 2 | Pending (reduced to logging, ADR-021) |
+| RETR-01 | Phase 2 | Pending (restored, ADR-021) |
+| RETR-02 | Phase 2 | Pending (restored, ADR-021) |
 | QUAL-02 | Phase 2 | Pending |
 | REV-01 | Phase 3 | Pending |
 | REV-02 | Phase 3 | Pending |
@@ -257,10 +278,11 @@ originals below. Recorded **unordered and unscoped**.
 | HAND-01 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 15 total (14 active, 1 done)
-- Mapped to phases: 14
+- v1 requirements: 17 total (16 active, 1 done)
+- Mapped to phases: 16
 - Unmapped: 0 ✓
-- Cut to v2 by ADR-020: 18, each owed a designed-not-built entry under HAND-01
+- Cut to v2 by ADR-020, net of ADR-021's restorations: 16, each owed a designed-not-built entry
+  under HAND-01
 
 ---
 *Requirements defined: 2026-08-11*

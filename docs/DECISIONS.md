@@ -763,3 +763,49 @@ be cited or marked unverified.
    hedged.
 5. **Milestone 3 is unaffected.** It was already a placeholder gated on measurements, and the
    measurements it was gated on have narrowed.
+
+---
+
+## ADR-021 — Retrieval is part of the spine; the refusal path is a log line
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Amends ADR-020 (same day)**
+
+**Context.** ADR-020 cut retrieval on the reasoning that evidence could be handed to the specialist
+from a synthetic fixture, since bounded fan-out, budget exhaustion, and crash-mid-flight do not
+depend on where the spans came from. That reasoning was wrong about what the architecture is. The
+thing being demonstrated is *an orchestrator kicking off a sub-agent call that searches the case
+record and returns policy findings with citations* — the search is not incidental to the sub-agent,
+it is what the sub-agent does. A fixture-fed specialist demonstrates a fan-out, not this system.
+
+Separately, ADR-020 retained VAL-02's full refusal path — a model refusal surfacing to the reviewer
+as a blocking `InformationGap`. That is reviewer-workflow machinery, and this project is proving an
+architecture rather than building the analysis product or evaluating model behaviour.
+
+**Decision.**
+
+1. **Retrieval returns to the spine, reduced.** Local OpenSearch in Docker, one synthetic case
+   indexed, queried through the retrieval port. Every field name, filter, and facet mapping lives in
+   one module marked PROVISIONAL against Q-02, per ADR-007's one-file containment rule.
+   **RETR-01 and RETR-02 return to v1; RETR-03 stays cut** — embedding provenance and the parity
+   check are model-evaluation work, and Q-03 remains a documented unknown rather than a build gate.
+   **ADR-006 is untouched: vector and lexical search only, no graph database, in any milestone.**
+2. **`SpecialistResult` carries no completion status.** It is the criterion analyzed, the provenance
+   of the run, and the proposed findings with their citations. Nothing else.
+3. **VAL-02 reduces from wired to logged.** The gateway already raises `ModelRefusalError` on
+   `stop_reason` before touching content, so a refusal cannot become an empty string. The node
+   catches it, logs it with `run_id`, `case_id`, and the criterion, and the orchestrator does no
+   special routing. No `InformationGap` plumbing, no `blocking` flag, no review branch.
+
+**Consequences.**
+
+1. **Q-02 is a live containment concern again, and is still not cleared.** The mapping module must
+   carry a header naming Q-02 and stating that the AWS collection's real schema is unconfirmed.
+   Adapting to the real schema stays a one-file change. No document may imply the gate was cleared.
+2. **The false-negative failure mode is now caught by logs rather than by contract.** A refused
+   sub-agent produces a `SpecialistResult` with an empty findings list, which is indistinguishable
+   at the artifact level from a criterion that came back clean. The distinction lives in the log.
+   **This is a deliberate trade and it is the weakest point in the spine** — stated here so the
+   handoff can carry it forward as a known gap rather than discovering it in production.
+3. **`ChunkRecord` and `PolicyRecord` (CONT-02) stay cut.** The indexed record shape lives inside
+   the retrieval package rather than being published as a domain contract. Publishing it would mean
+   committing a schema against an unconfirmed collection (Q-02) for no consumer outside retrieval.

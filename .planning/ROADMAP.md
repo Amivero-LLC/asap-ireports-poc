@@ -29,22 +29,27 @@ Milestone 3 is a named placeholder with no phases. See § Milestone 3 below.
 
 ## Gates
 
-Three GATE questions in `docs/OPEN-QUESTIONS.md` are open. **Under ADR-020, none of them blocks this
-roadmap** — the work that would have run into them is not being built. That is a narrowing of what
-this project claims, not a resolution of the questions.
+Three GATE questions in `docs/OPEN-QUESTIONS.md` are open. **None is cleared.** ADR-021 restored
+retrieval to the spine, so Q-02 is a live containment concern again.
 
-### Q-02 — AWS vector collection schema · OPEN · **no longer a build gate**
+### Q-02 — AWS vector collection schema · OPEN · **contained, NOT cleared**
 
-No local OpenSearch, no ingestion, no mapping module. Nothing in the spine touches the collection's
-schema, so nothing proceeds under a working assumption about it. Q-02's blast radius is unchanged for
-whoever builds retrieval; ADR-007's one-file containment rule stands as design guidance in the
-handoff. **No document may imply the gate was cleared.**
+Phase 2 proceeds under Q-02's working assumption because RETR-01/02 are back in scope (ADR-021). The
+containment argument is ADR-007's and it is the only reason proceeding is defensible: **every field
+name, filter, and facet mapping is isolated to one module, so adapting to the real AWS collection
+schema is a one-file change.** RETR-01 requires that module's header to name Q-02 explicitly, so no
+reader can mistake it for confirmed. Q-02 becomes high blast radius rather than medium if the real
+shape is structurally different — separate collections per corpus, or nested documents. It resolves
+only when the ingestion team supplies actual index mappings. **No document may imply the gate was
+cleared.**
 
-### Q-03 — Query-time embedding parity · OPEN · **no longer a build gate**
+### Q-03 — Query-time embedding parity · OPEN · **not a build gate; high blast radius and silent**
 
-No local embedding means no parity to verify and no locally-measured retrieval quality to
-misrepresent. The coupling stays recorded as unverified and high blast radius: a mismatch does not
-error, it retrieves worse, and every downstream evaluation number becomes meaningless silently.
+RETR-03 stays cut, so there is no parity check and no embedding-provenance record. **Nobody may read
+locally-measured retrieval quality as predictive of AWS behaviour.** A mismatch between the
+query-time embedding model and the model that populated the AWS collection does not error — it
+retrieves worse, silently, and every downstream number becomes meaningless without anyone noticing.
+Local embedding is development only (ADR-007). The handoff records the coupling as unverified.
 
 ### Q-01 — Claude model availability in AWS GovCloud · OPEN · **refuses any working assumption**
 
@@ -109,24 +114,30 @@ is no longer happening. The port itself is still built in Phase 2 — ORCH-01 is
 enforces its own ceilings, dies mid-fan-out, and resumes in a different process without re-running an
 in-flight model call — with no analysis node aware of LangGraph.
 **Depends on**: Phase 1
-**Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04, SPEC-01, VAL-02, QUAL-02
+**Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04, SPEC-01, VAL-02, RETR-01, RETR-02, QUAL-02
 **Success Criteria** (what must be TRUE):
   1. `packages/orchestration/` exposes this project's own port with a LangGraph adapter behind it,
      and a test proves no file outside the adapter imports LangGraph.
   2. `durability="sync"` and strict checkpoint deserialization are set in code with tests — both
      defaults are wrong here and invisible when reading a graph.
-  3. A specialist sub-call against one criterion returns a typed `SpecialistResult`, obtained through
-     the `ModelGateway` port on a tier **alias**, with a criterion-specific tool allowlist and every
-     prohibited tool unreachable.
-  4. A run survives a mid-node process kill and resumes in a separate process without re-executing
+  3. One synthetic case is indexed into local OpenSearch, and the sub-agent retrieves against it by
+     vector + lexical query with a mandatory case filter and bounded K — **no graph database, ever
+     (ADR-006)**. Every field name, filter, and facet mapping lives in one module whose header names
+     Q-02 and states that the AWS collection's real schema is unconfirmed.
+  4. A specialist sub-call against one criterion returns a typed `SpecialistResult` — criterion,
+     provenance, and proposed findings with citations, **and no completion-status field** — obtained
+     through the `ModelGateway` port on a tier **alias**, with a criterion-specific tool allowlist and
+     every prohibited tool unreachable.
+  5. A run survives a mid-node process kill and resumes in a separate process without re-executing
      completed work.
-  5. A crash mid-fan-out does not re-run an in-flight model call — measured as 0 duplicate paid calls
+  6. A crash mid-fan-out does not re-run an in-flight model call — measured as 0 duplicate paid calls
      over the same 24-trial harness that measured LangGraph at 11/24 and hand-rolled at 12/24.
-  6. A node that hits a model-call, tool-call, token, or wall-clock ceiling emits
+  7. A node that hits a model-call, tool-call, token, or wall-clock ceiling emits
      `INCOMPLETE_DUE_TO_BUDGET` and routes to human review, not to failure.
-  7. A model refusal and a `StructuredOutputError` each reach the reviewer as an `InformationGap`
-     with `blocking=True`, never as an absent finding, an empty result, or prose.
-  8. LangSmith egress is proven closed at every production entry point by a fail-closed test, not
+  8. A model refusal and a `StructuredOutputError` are **logged** with `run_id`, `case_id`, and the
+     criterion, and never become an empty string. No `InformationGap` plumbing, no review routing
+     (ADR-021).
+  9. LangSmith egress is proven closed at every production entry point by a fail-closed test, not
      merely configured closed.
 **Plans**: TBD
 
@@ -138,16 +149,20 @@ retained on cost rather than on being nearly free. It is owed by all three bake-
 was built by none of them. Durable orchestration of paid sub-calls is not a proven claim if resuming
 double-pays.
 
-*Evidence reaches the specialist from a synthetic fixture,* not from retrieval — RETR-01..03 are cut.
-The fan-out is over criteria, and the interesting behaviour (bounded parallelism, budget exhaustion,
-crash mid-flight) does not depend on where the spans came from.
+*The sub-agent's RAG search is what the sub-agent is (ADR-021).* ADR-020 cut retrieval on the
+reasoning that evidence could be handed in from a fixture; that was wrong about the architecture — a
+fixture-fed specialist demonstrates a fan-out, not this system. RETR-01 and RETR-02 are restored
+reduced. **RETR-03 stays cut**: embedding provenance and the parity check are model-evaluation work,
+and Q-03 stays a documented unknown rather than a build gate.
 
-*The failure this phase's criterion 7 exists to prevent:* silent under-analysis that looks like a
-completed analysis is the worst outcome this system can produce — worse than a crash, because a crash
-is visible. Models decline with HTTP 200 and a possibly-empty content list; read naively, a refused
-specialist returns `""`, which validates, yields no finding, and reaches a reviewer as a clean
-result. Refusals are expected in normal operation — adjudicative case files routinely discuss
-criminal conduct, substance use, and foreign contacts.
+*Criterion 8 is a deliberate weakening, recorded rather than hidden.* Models decline with HTTP 200
+and a possibly-empty content list; read naively, a refused specialist returns `""`. The gateway
+already raises `ModelRefusalError` on `stop_reason` before touching content, so that cannot happen.
+What is **not** built is the reviewer-facing path: a refused sub-agent produces an empty findings
+list that is indistinguishable at the artifact level from a criterion that came back clean, and the
+distinction lives only in the log. **This is the weakest point in the spine** and is owed a
+designed-not-built entry under HAND-01. Refusals are expected in normal operation — adjudicative case
+files routinely discuss criminal conduct, substance use, and foreign contacts.
 
 ### Phase 3: Human gate, typed output, and the handoff
 **Goal**: One command takes a synthetic case to a human-approved, validated typed envelope — and the

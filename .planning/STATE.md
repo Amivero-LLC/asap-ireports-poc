@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-last_updated: "2026-08-11T16:44:25.928Z"
+last_updated: "2026-08-11T17:12:56.778Z"
 last_activity: 2026-08-11 — **scope pared to the orchestrator spine (ADR-020). 9 phases → 3, 33 v1
 progress:
   total_phases: 3
@@ -178,13 +178,13 @@ into them is not being built. That narrows what the project claims; it does not 
 
 ## Session Continuity
 
-Last session: 2026-08-11T16:44:25.878Z
-Stopped at: Scope pared to the orchestrator spine (ADR-020): 9 phases -> 3, 33 v1 requirements -> 15. docs/DECISIONS.md (ADR-020), .planning/ROADMAP.md, REQUIREMENTS.md, PROJECT.md, STATE.md all updated. Phase 1 discussion was interrupted mid-flight by the pare-down; its port-spec decisions are obsolete, its SpecialistResult decisions survive in 01-DISCUSS-CHECKPOINT.json. No CONTEXT.md written yet. Still owed: docs/ROADMAP.md reconciliation (Phase 3, HAND-01).
+Last session: 2026-08-11T17:12:56.767Z
+Stopped at: Phase 1 context gathered. ADR-020 pared the project to the orchestrator spine (9 phases -> 3); ADR-021 restored retrieval to the spine, dropped SpecialistResult's status field, and reduced VAL-02 to logging. Phase 1 is now ARCH-01, ARCH-04, CONT-01.
 `.planning/ROADMAP.md` and `REQUIREMENTS.md` are updated. **Two follow-on writes are owed and not
 yet done:** a numbered ADR entry recording the outcome-level re-test and the Strands amendment, and
 `docs/ROADMAP.md` (which still describes the old milestone shape). No implementation work has
 started under GSD; the repo's own prior work is inventoried above.
-Resume file: .planning/ROADMAP.md
+Resume file: .planning/phases/01-close-the-architecture-package/01-CONTEXT.md
 
 **Cold-start reading order:** this file → `.planning/ROADMAP.md` § Gates → `docs/DECISIONS.md` →
 `docs/OPEN-QUESTIONS.md`. `blueprint.md` is the project's **input**, lowest precedence; where it
