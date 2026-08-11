@@ -41,33 +41,47 @@ a recorded human disposition, stop and raise it.
 
 ## Current state
 
-**Last updated 2026-08-11.** Milestone 1 is nearly closed. If this section disagrees with
-`.planning/STATE.md`, STATE.md is newer — and fix this section, because a stale "what exists" note
-is the single most expensive thing in this file.
+**Last updated 2026-08-11.** Milestone 1 is closed — 1a, 1b, and 1c are all done. If this section
+disagrees with `.planning/STATE.md`, STATE.md is newer — and fix this section, because a stale
+"what exists" note is the single most expensive thing in this file.
 
 What exists and works:
 
 | Area | State |
 |---|---|
-| `packages/domain/` | 13 Pydantic v2 contracts + generated JSON Schema in `schemas/` (M1a, done) |
+| `packages/domain/` | 14 Pydantic v2 contracts + generated JSON Schema in `schemas/` (M1a, done) — includes `SpecialistResult` / `SpecialistCriterion` (CONT-01) |
 | `packages/gateway/` | `ModelGateway` port with `litellm`, `bedrock`, and `stub` adapters; proven against a real endpoint |
 | `spikes/` | All three ADR-012 bake-off candidates, passing four legs each, plus a retained negative control and `measure.py` |
-| `docs/handoff/` | Six handoff documents, including the scorecard that resolved ADR-012 |
-| Tests | 111 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| `docs/handoff/` | Seven handoff documents, including the scorecard that resolved ADR-012 and `component-architecture.md`, the seventh, which closes Milestone 1a (ARCH-01) |
+| Tests | 126 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 What does **not** exist yet: `packages/orchestration`, `retrieval`, `ingestion`, `policy`,
 `delivery`, `observability`; `apps/`; `workers/`; `policy-packs/`; `cases/synthetic/`; `evals/`.
 
-Outstanding before M1 sign-off: the **component-architecture write-up** (the last 1a item), and
-cold start under SAM local — unmeasured, and the one number that could reopen ADR-012.
+**Scope is the orchestrator spine (ADR-020).** Three phases, not nine. Nothing was deleted:
+eighteen requirements moved to `.planning/REQUIREMENTS.md` § v2 with their acceptance intact, each
+owed a designed-not-built entry in the handoff. ADR-021 restored retrieval to the spine — RETR-01
+and RETR-02 are back, while RETR-03 and CONT-02 stay cut. ADR-011 (the human disposition gate) and
+ADR-014 (no aggregate score) were considered for the cut and explicitly kept — both remain
+NON-NEGOTIABLE. The per-component account of what is built, planned, and designed-not-built, with
+the reason for each cut, lives in `docs/handoff/component-architecture.md`, enforced by
+`tests/architecture/test_build_state_table.py`.
+
+Outstanding before M1 sign-off: cold start and packaging under SAM local, which is unmeasured, has
+no scheduled phase because ARCH-03 was cut by ADR-020, and is the one number that could reopen
+ADR-012. `spikes/test_scorecard.py` still fails the moment a cold-start figure is recorded, which
+keeps the gap visible rather than closing it by omission.
 
 **Do not scaffold empty directories.** Create a directory when the first real file lands in it.
 The target layout below is the plan, not the current state.
 
 ## Target layout
 
-Adapted from `blueprint.md` §5.2, trimmed to the decisions in `docs/DECISIONS.md`
-(no `ui/`, no Neo4j, no offline fixture profile):
+This is the blueprint-derived target layout — wider than the buildable scope, since ADR-020 and
+ADR-021 pared the build to the orchestrator spine. Several directories below, `policy/`,
+`delivery/`, `workers/`, `policy-packs/`, and `evals/` among them, are designed and not built. The
+authority on what is built, planned, and designed-not-built is the build-state table in
+`docs/handoff/component-architecture.md`:
 
 ```
 .planning/       GSD planning state — PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md, intel/
@@ -101,6 +115,9 @@ Decided (see `docs/DECISIONS.md` for the reasoning behind each):
 | Embeddings | Local model, **development only** — AWS owns production chunking and embedding |
 | Observability | OpenTelemetry + Jaeger |
 | Quality | Ruff, mypy/pyright, Bandit, pytest, pip-audit |
+
+This table records which technology was chosen for each layer, not which layer has been built —
+see the build-state table in `docs/handoff/component-architecture.md` for what exists today.
 
 Explicitly **out**: Neo4j, Streamlit/any UI, LocalStack in the default profile, a local LLM server.
 
