@@ -97,14 +97,17 @@ pinned set.
 
 ### Decisions
 
-20 LOCKED ADRs in `docs/DECISIONS.md`, mirrored into `.planning/PROJECT.md` § Key Decisions.
+21 LOCKED ADRs in `docs/DECISIONS.md`, mirrored into `.planning/PROJECT.md` § Key Decisions.
 Read `docs/DECISIONS.md` before proposing an architectural change; supersede with a numbered entry
 rather than diverging silently. Most load-bearing for current work:
 
 - **ADR-020** — **the buildable scope is the orchestrator spine.** 9 phases → 3; 18 requirements
   moved to v2 with acceptance intact, each owed a designed-not-built entry in the handoff. Retained
-  deliberately: the disposition gate, no-aggregate-score, crash-and-resume, model-call idempotency,
-  refusal-never-becomes-empty.
+  deliberately: the disposition gate, no-aggregate-score, crash-and-resume, model-call idempotency.
+
+- **ADR-021** — **retrieval is back in the spine; the refusal path is a log line.** RETR-01/02
+  restored reduced (RETR-03 stays cut); `SpecialistResult` carries no completion status; VAL-02
+  reduces to logging. **ADR-006 untouched — vector and lexical only, no graph database, ever.**
 
 - **ADR-012** — LangGraph, decided on cost not correctness (all three candidates passed all four
   legs). **Stands as decided; no longer under re-test (ADR-020).** The second adapter that would have
