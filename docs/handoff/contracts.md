@@ -15,13 +15,13 @@ types rather than by opinion.
 | `packages/domain/src/ireports_domain/` | The models. Source of truth. |
 | `schemas/*.schema.json` | Generated JSON Schema, for non-Python consumers. |
 | `scripts/generate_schemas.py` | Regenerates. `--check` fails on drift; run it in CI. |
-| `tests/contract/` | The rules, asserted. 91 tests. |
+| `tests/contract/` | The rules, asserted. 107 tests. |
 
 ```bash
 uv sync
 uv run python scripts/generate_schemas.py          # regenerate schemas/
 uv run python scripts/generate_schemas.py --check  # CI: fail if schemas/ drifted
-uv run pytest tests/contract -q                    # 91 passed
+uv run pytest tests/contract -q                    # 107 passed
 ```
 
 ---
