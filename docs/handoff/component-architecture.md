@@ -2,11 +2,68 @@
 
 **Milestone 1a** · **Date: 2026-08-11** · **Status: complete — closes Milestone 1a**
 
-This is the last item blocking program sign-off on Milestone 1a. It marks the component
-boundaries of the iReports reference implementation — what is ours, what the AWS ingestion
-pipeline owns, what ASAP owns, and where the human review gate sits — and it separately marks
-what ADR-020 designed and did not build, so that "coming in a later phase" and "deliberately not
-coming" are never left for a reader to infer.
+This is the last item blocking program sign-off on Milestone 1a.
+
+It answers two questions. **First: who owns what?** It draws the lines between the iReports
+reference implementation, the AWS ingestion pipeline, ASAP, and the human reviewer. **Second: what
+actually exists?** Every component is marked as built, planned, owned by someone else, or designed
+and deliberately not built — so that "coming in a later phase" and "not coming at all" never look
+alike.
+
+**New to this project? Start with §0**, which explains what the system does in plain language and
+defines the vocabulary the rest of the document uses.
+
+---
+
+## 0. How to read this document
+
+### What the system does, in plain language
+
+A case file arrives. The system looks up which rules apply to it, and for each rule it runs a
+small, separate analysis: it searches the case documents for relevant passages, asks an AI model
+to assess that one rule against those passages, and gets back a structured answer with pointers to
+the exact text it relied on. It does this for every applicable rule, keeping a running count of
+how much work it has done so it cannot run away.
+
+It then stops. It packages what it found and waits for an authorized human officer to review each
+item and record a decision. **The system never decides anything about a person.** It produces
+*proposed* items with evidence attached; a human accepts, rejects, or edits each one. Only after
+that does anything get sent onward to ASAP, and both the original machine version and the
+human-approved version are kept.
+
+Everything else in this document is detail about where the pieces of that sit, which ones exist
+today, and which ones were designed but deliberately not built.
+
+### The vocabulary
+
+This project uses a handful of words in specific ways. Several are borrowed from software
+architecture and a few are ours. None of them are standard adjudication terms, so they are defined
+here rather than left to context.
+
+| Term | What it means here | Worth knowing |
+|---|---|---|
+| **Port** | An interface *we* define and our code calls, so whatever sits behind it can be replaced without changing the callers. | From "ports and adapters." **Not** a network port. Used 50+ times below — if a sentence says "through the port," read it as "through our own interface rather than calling the vendor directly." |
+| **Adapter** | The swappable implementation behind a port. | `litellm` and `bedrock` are two adapters behind one model-access port. Swapping them is a config change, not a code change. |
+| **The spine** | The narrow, end-to-end path: one case in, one human-reviewed package out. | Chosen over building broad-but-shallow features. It is the smallest slice that still touches every genuinely hard part. |
+| **Fan out** | Start several small analyses at once — one per rule being checked — then collect the results. | This is the part that is architecturally hard, which is why it is the centre of the scope. |
+| **Criterion** | One specific thing being checked under one named authority (e.g. SEAD-4 Guideline B). | **Not** a risk category or a score bucket. |
+| **Specialist sub-call** | One bounded analysis of one criterion: search, one model call, one structured result. | "Specialist" means scoped to a single criterion, not a separate AI system. |
+| **Deterministic shell** | The ordinary, non-AI code wrapped around each model call that decides what happens next — validation, budgets, loop limits, routing. | The rule it encodes: **the model reasons; the shell decides.** The model never controls flow or judges its own output. |
+| **Tier alias** | A nickname for a *class* of model (`ireports-thinking`) instead of a specific model id. | Lets a model, region, or cloud partition change be a configuration change rather than a code change. |
+| **Proposed finding** | Anything the machine produced that no human has ruled on yet. | Everything this system emits is "proposed." The word is load-bearing, not hedging. |
+| **Disposition** | The record of what an authorized officer decided about a proposed finding — accept, reject, or edit — and why. | This is *the* gate. No disposition, nothing moves. |
+| **Envelope** | The single typed package handed to ASAP at the end of a run. | Typed = its shape is checked by machine before it is allowed out. |
+| **Checkpoint** | A durable save of the run's state, written before a step finishes. | So a crash can resume from the last good point instead of starting over. |
+| **Durability** | The property that state is written down before a step returns; nothing important lives only in memory. | The thing checkpoints deliver. |
+| **Double-paying** | Re-running a model call after a crash that was already made — and already billed. | Avoiding it is one of the two hardest problems in scope, and is still unbuilt. |
+| **No-progress detector** | A check that halts a loop still running but no longer producing anything new. | A budget catches "too much"; this catches "spinning." |
+| **Citation** | A pointer from a statement to the exact passage that supports it — either case evidence or policy text. | Enforced by code: an uncited claim is rejected before a human sees it. |
+| **Policy pack** | A versioned bundle of approved authority text (the actual rules). | Versioned so you can tell which wording was in force when. |
+| **Effectivity** | Which version of a policy pack applied on a given date. | Matters because a case is judged against the rules in force at the time. |
+| **Authority routing** | Deciding which authorities legitimately apply to a given case. | A request to analyze something is not authorization to analyze it. |
+| **`DESIGNED-NOT-BUILT`** | Worked out in enough detail to hand over, then deliberately not built. | The category that keeps "coming later" and "not coming" from looking alike. §5 lists every one. |
+
+---
 
 > **Claim tagging**, as in `orchestration-landscape.md`. `[measured]` — reproduced on this
 > machine and reproducible again. `[first-party]` — from this project's own source, package
@@ -32,21 +89,24 @@ coming" are never left for a reader to infer.
 
 ## 1. What this document settles
 
-This document marks the boundaries that matter: what belongs to iReports, what the AWS ingestion
-pipeline owns, what ASAP owns, and where the human review gate sits. §2 draws those boundaries at
-the level of packages and external systems. §3 opens the orchestrator box from §2 into its
-workflow steps. §4 marks every component `BUILT`, `PLANNED`, `NOT OURS`, or `DESIGNED-NOT-BUILT`.
-§5 accounts individually for everything ADR-020 designed and did not build. §6 states what remains
-unresolved and what it costs to be wrong. None of this is a determination about a case — it is a
-description of a system boundary.
+| Section | What you get from it | Read it if |
+|---|---|---|
+| §2 | The outside view — the boundaries drawn at the level of packages and external systems | You need to know who owns what |
+| §3 | The inside view — the orchestrator box from §2 opened into the steps one run passes through | You need to know how a case actually flows |
+| §4 | Every component marked `BUILT`, `PLANNED`, `NOT OURS`, or `DESIGNED-NOT-BUILT` | You need to know what exists today |
+| §5 | Individual account of everything designed and deliberately not built, with the reason | You are picking up this work |
+| §6 | What is still unresolved, and what it costs if we guessed wrong | You are assessing risk |
+
+Nothing here is a determination about a case. This is a description of a system boundary.
 
 **The deliverable is a proven architecture and a handoff package, not a product (ADR-001).**
 Runnable code exists to make architectural claims verifiable. A decision that cannot be
 demonstrated is a decision that has not been made, and every claim in this document is either
 cited or explicitly marked with a claim tag rather than asserted bare.
 
-**The decision-support boundary (`CLAUDE.md`) is a constraint on this architecture, not a policy
-statement.** It shows up as structure, not as prose the reader has to trust:
+**The system supports a decision. It never makes one.** That is not a policy promise written on
+top of the architecture — it is built into the shape of the code, so it can be checked rather than
+trusted:
 
 - No universal person-risk score and no aggregate risk level appear on any contract, whatever the
   field is named (ADR-014).
@@ -55,16 +115,29 @@ statement.** It shows up as structure, not as prose the reader has to trust:
 - Nothing reaches ASAP without that disposition — no bypass, in any profile.
 - Both the machine proposal and the human-approved version are retained.
 
-These are properties of the contracts and the state machine described in §3, enforced by
-`model_validator`s and tests, not by convention.
+These are enforced by validation code and tests, not by convention — meaning a change that broke
+one of them would fail the test suite rather than pass unnoticed.
 
-**Scope is the orchestrator spine (ADR-020). Three phases, not nine.** The buildable scope is:
-one command loads a synthetic case, fans out to bounded specialist sub-calls through the
-`ModelGateway` port on tier aliases, enforces budgets and loop limits in the deterministic shell,
-survives a crash mid-fan-out and resumes in a separate process without double-paying for an
-in-flight model call, pauses for a recorded human disposition, and emits a validated typed
-envelope. Breadth across authorities, retrieval infrastructure, and delivery plumbing is designed
-in this handoff and marked unbuilt rather than built thin — that is what §4 and §5 are for.
+**Scope is the orchestrator spine (ADR-020). Three phases, not nine.** One command carries a
+synthetic case all the way through, and that path has to do seven things:
+
+1. Load the case and work out which criteria apply.
+2. Run one bounded analysis per criterion, in parallel — each one searching the case documents,
+   then making a single model call through our own interface rather than a vendor's.
+3. Name models by tier (`ireports-thinking`), never by a specific model id.
+4. Enforce its own ceilings — model calls, tokens, time, loop count — in ordinary code, outside
+   the model's control.
+5. Survive being killed partway through the fan-out, and resume in a *different process* without
+   re-running (and re-paying for) a model call that was already in flight.
+6. Stop and wait for an authorized officer to record a disposition.
+7. Emit one typed package, machine-validated before it leaves.
+
+Item 5 is the genuinely hard one and is the reason the scope is shaped this way.
+
+Everything else — breadth across many authorities, production retrieval infrastructure, delivery
+plumbing — is **designed in this handoff and deliberately not built.** The choice was to build one
+path completely rather than many paths thinly, because a thin version of the above would not have
+proven anything. §4 marks what exists; §5 accounts for every piece that does not.
 
 ---
 
@@ -212,37 +285,49 @@ first, including the truncated one. A path that returned without checkpointing w
 the durability property stated below, and would be the specific way a truncated analysis
 disappears instead of reaching a reviewer.
 
-**The deterministic shell around probabilistic reasoning.** Schema validation, citation
-validation, authority routing, policy-pack effectivity, and loop and termination limits are
-ordinary code, not model behavior. The model reasons over retrieved evidence; it does not decide
-control flow and it does not decide whether its own output is valid. Per-specialist ceilings exist
-on model calls, tool calls, retrieved evidence, tokens, and wall clock, plus a no-progress
-detector. A node that hits a ceiling emits `INCOMPLETE_DUE_TO_BUDGET`, which routes to human
-review rather than to failure — a truncated analysis must stay visible to a reviewer rather than
-quietly disappearing.
+**Ordinary code wraps the AI, not the other way round.** This is the "deterministic shell" from
+§0, and it is the central design choice: *the model reasons; the surrounding code decides.*
+Concretely, all of the following are ordinary program logic that the model has no say in —
+checking that its output has the right shape, checking that every claim carries a real citation,
+deciding which authorities apply, deciding which version of the rules was in force, and deciding
+when a loop has gone on long enough. The model reads evidence and forms an assessment. It does not
+choose what happens next, and it does not get to rule on whether its own output is valid.
 
-**Durability, stated as properties the architecture requires rather than as framework settings.**
-State is durable before a node returns; nothing is carried in memory across a process boundary;
-deserialized state is re-validated rather than trusted. Under LangGraph these land as
-`durability="sync"` and strict checkpoint deserialization (ADR-012) — both are wrong by default
-here and both are invisible when reading a graph, which is why ORCH-01 sets them in code with
-tests rather than leaving them to configuration. `spikes/harness/src/ireports_spike_harness/port.py`
-is prior art for this shape — an orchestration port that survived three independent
-implementations during the Milestone 1c bake-off — cited here as evidence that the shape works,
-not as a component; it is not promoted into `packages/`.
+Each specialist analysis runs under ceilings — on model calls, tool calls, evidence retrieved,
+tokens, and elapsed time — plus a check for a loop that is still running but no longer producing
+anything new. A step that hits a ceiling does **not** fail. It reports
+`INCOMPLETE_DUE_TO_BUDGET` and routes to human review anyway, because a partial analysis that
+silently vanishes is worse than one a reviewer can see is partial.
+
+**Durability: what the architecture requires, stated before how any framework provides it.** Three
+requirements, in plain terms: the run's state is written to durable storage before a step
+finishes; nothing important is held only in memory between processes; and state read back after a
+crash is re-validated rather than trusted to still be well-formed.
+
+Under LangGraph those become the settings `durability="sync"` and strict checkpoint
+deserialization (ADR-012). Both matter more than they look: **LangGraph's defaults are wrong for
+us on both counts, and neither is visible when reading the workflow code.** That is why Phase 2
+sets them explicitly with tests rather than leaving them to configuration where a future reader
+would not notice them missing.
+
+One clarification on a path you will see referenced: `spikes/harness/.../port.py` is prior art,
+not a component. It is the interface shape that survived three independent implementations during
+the Milestone 1c bake-off, cited as evidence the shape works. It is not promoted into
+`packages/` and is not part of the delivered system.
 
 Two honest notes this section carries as claims, not as settled facts:
 
-- **Model-call idempotency is owed and unbuilt.** A crash mid-fan-out currently re-runs an
-  in-flight model call, measured at 11 of 24 trials under LangGraph and 12 of 24 hand-rolled
-  `[measured]`. It is retained by ADR-020 as its most expensive keep and is delivered by ORCH-02 in
-  Phase 2. Durable orchestration of paid sub-calls is not a proven claim while resuming can
-  double-pay.
-- **A refused sub-agent produces a `SpecialistResult` with an empty findings list**, which is
-  indistinguishable at the artifact level from a criterion that came back clean. The distinction
-  lives in the log, not in the contract (ADR-021 Consequence 2, VAL-02 reduced to logging). This is
-  the weakest point in the spine, and this document says so rather than leaving a reader to
-  discover it later.
+- **Crash recovery still double-pays, and that is not yet fixed.** If the system dies partway
+  through, resuming currently re-runs a model call that was already in flight — and already
+  billed. Measured at 11 of 24 trials under LangGraph and 12 of 24 hand-rolled `[measured]`.
+  ADR-020 kept this in scope as its single most expensive commitment; Phase 2 (ORCH-02) delivers
+  it. **Until then, "durable orchestration of paid sub-calls" is not a claim this project can
+  make.**
+- **A refusal and a clean result look identical in the output.** When a sub-analysis declines to
+  answer, it returns a result with an empty findings list — exactly what a criterion that found
+  nothing returns. The two are told apart only in the logs, not in the data itself (ADR-021
+  Consequence 2). **This is the weakest point in the design**, and it is stated here rather than
+  left for someone to discover in six months.
 
 ---
 
@@ -331,11 +416,14 @@ paragraph above implies until both are closed.
 
 ## 5. Designed and deliberately not built
 
-Stated plainly, because a document that lists only what was done reads as complete when it is not
-— the same framing `checkpoint-threat-model.md` §6 uses for its own honest list. ADR-020 pared nine
-phases to three; every requirement it removed from the buildable scope is accounted for below with
-its requirement id and the reason it was cut, so a reader never has to infer the difference between
-"coming in a later phase" and "deliberately not coming."
+A document that lists only what got done reads as complete when it is not. So this section lists
+the opposite.
+
+ADR-020 cut the plan from nine phases to three. Everything it removed is below, each row naming
+the requirement id and why it was dropped. These are not oversights and not backlog — they were
+worked out in enough detail to hand over, then deliberately left unbuilt. The point is that a
+reader never has to guess whether something is **coming later** or **not coming at all**.
+(`checkpoint-threat-model.md` §6 keeps its own honest list the same way.)
 
 **RETR-01 and RETR-02 are not in this table.** ADR-021 restored them to the spine, so they appear
 as `PLANNED` rows in §4 naming Phase 2, not as cuts — a reader comparing this document against
@@ -384,9 +472,22 @@ that they are unbuilt rather than implying otherwise.
 
 ## 6. What is unresolved, and what it costs to be wrong
 
-Three GATE questions from `docs/OPEN-QUESTIONS.md` remain open. Under ADR-020 none of them blocks
-the narrowed build — the work that would have run into them is not being built — but that is a
-narrowing of what this project claims, not a resolution of any of the three.
+Three questions are open, and all three are marked **GATE** in `docs/OPEN-QUESTIONS.md` — meaning
+getting the answer wrong would invalidate real work, not just inconvenience it. "Blast radius"
+below means how much would have to be rebuilt if the answer turns out to be different from what we
+assumed.
+
+Under ADR-020 none of the three blocks the current build, for a specific and slightly
+uncomfortable reason: **the work that would have collided with them is not being built.** That
+narrows what this project can claim. It does not resolve anything.
+
+| Question | In plain terms | Why it is still open | If we are wrong |
+|---|---|---|---|
+| **Q-02** | What does the AWS search index actually look like? | No access to confirm it | Contained — all assumptions sit in one file, so adapting is a one-file change. Grows to high if the real structure is fundamentally different |
+| **Q-03** | Does our search convert text to numbers the same way AWS's does? | Nothing local to compare against | **Silent.** A mismatch does not throw an error — it just returns worse results, with nobody told |
+| **Q-01** | Are Claude models available in AWS GovCloud, and under what ids and routing rules? | Blocked on account access, outside this project's control | Unknown. Every model result so far comes from the commercial cloud and says nothing about GovCloud |
+
+The detail behind each:
 
 **Q-02 — the AWS vector collection schema.** Contained, not cleared. RETR-01 requires every field
 name, filter, and facet mapping to live in one module whose header names Q-02 explicitly, so
