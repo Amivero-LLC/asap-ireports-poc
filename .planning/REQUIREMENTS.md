@@ -34,7 +34,7 @@ is the failure ADR-001 is written against.
       fails if a BUILT row does not resolve to a real path or a PLANNED row already exists.
       *Traces:* `REQ-component-architecture` · docs/ROADMAP.md §1a · ADR-020. **This is the last item
       blocking program sign-off on Milestone 1a — highest priority in the project.**
-- [ ] **ARCH-04**: The repository's entry documents describe the actual current state.
+- [x] **ARCH-04**: The repository's entry documents describe the actual current state.
       *Acceptance:* `CLAUDE.md` § Current state and `README.md` § Status no longer assert that
       application code does not exist or that the orchestration framework is undecided, and both
       reflect ADR-020's narrowed scope.
@@ -260,7 +260,7 @@ originals below. Recorded **unordered and unscoped**.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | ARCH-01 | Phase 1 | Complete |
-| ARCH-04 | Phase 1 | Pending |
+| ARCH-04 | Phase 1 | Complete |
 | CONT-01 | Phase 1 | Complete |
 | QUAL-01 | — | Done (2026-08-11) |
 | ORCH-01 | Phase 2 | Pending |

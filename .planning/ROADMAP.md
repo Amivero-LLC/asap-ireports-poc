@@ -67,8 +67,9 @@ blocked on account access regardless.
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Close the architecture package** - The component-architecture write-up, the
+- [x] **Phase 1: Close the architecture package** - The component-architecture write-up, the
       `SpecialistResult` contract, and entry documents that describe the actual current state
+      (completed 2026-08-11)
 
 - [ ] **Phase 2: Bounded sub-calls that survive a crash** - The orchestrator fans out through the
       gateway port, enforces its own limits, dies mid-fan-out, and resumes without double-paying
@@ -111,7 +112,7 @@ Plans:
 - [x] 01-02-PLAN.md — The component-architecture write-up (ARCH-01): two Mermaid levels, the
       four-marker build-state tables, the designed-not-built account, and the test that enforces them
 
-- [ ] 01-03-PLAN.md — Entry documents made true (ARCH-04): `CLAUDE.md` § Current state and
+- [x] 01-03-PLAN.md — Entry documents made true (ARCH-04): `CLAUDE.md` § Current state and
       `README.md` § Status carry the measured inventory and ADR-020's three-phase scope
 
 *Diagrams are Mermaid fences inside the write-up*, canonical there rather than exported — the
@@ -261,7 +262,7 @@ roadmapping pass that sequences from those measurements. Do not linearize the ca
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Close the architecture package | 2/3 | In Progress|  |
+| 1. Close the architecture package | 3/3 | Complete   | 2026-08-11 |
 | 2. Bounded sub-calls that survive a crash | 0/TBD | Not started | - |
 | 3. Human gate, typed output, and the handoff | 0/TBD | Not started | - |
 
