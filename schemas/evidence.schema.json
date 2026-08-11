@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/evidence.schema.json",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "EvidenceSpan": {
+      "additionalProperties": false,
+      "description": "A citable address inside a canonical document.\n\nThe address is `(document_id, page, block, char range)` qualified by\n`(document_sha256, extractor_version)`. Both qualifiers are required: without them a span\nsilently means something different after a re-extraction, which is how a citation that once\nresolved starts pointing at the wrong sentence.",
+      "properties": {
+        "document_id": {
+          "pattern": "^doc_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "document_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Document Sha256",
+          "type": "string"
+        },
+        "extractor_version": {
+          "minLength": 1,
+          "title": "Extractor Version",
+          "type": "string"
+        },
+        "page_number": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Number"
+        },
+        "block_index": {
+          "minimum": 0,
+          "title": "Block Index",
+          "type": "integer"
+        },
+        "char_start": {
+          "minimum": 0,
+          "title": "Char Start",
+          "type": "integer"
+        },
+        "char_end": {
+          "minimum": 0,
+          "title": "Char End",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "document_id",
+        "document_sha256",
+        "extractor_version",
+        "block_index",
+        "char_start",
+        "char_end"
+      ],
+      "title": "EvidenceSpan",
+      "type": "object"
+    },
+    "RetrievalMode": {
+      "enum": [
+        "lexical",
+        "vector_knn",
+        "hybrid",
+        "direct_lookup"
+      ],
+      "title": "RetrievalMode",
+      "type": "string"
+    },
+    "RetrievalProvenance": {
+      "additionalProperties": false,
+      "description": "How this evidence came to be in front of the model.\n\nRecorded so a run is reconstructable without replay (ADR-009). Note that the embedding model\nidentity is captured per retrieval: ADR-007's Q-03 parity risk is silent \u2014 a mismatch between\nour query-time embedding model and the one the AWS pipeline indexed with does not error, it\njust retrieves worse. Recording it per-record is what makes drift detectable after the fact.",
+      "properties": {
+        "retrieval_mode": {
+          "$ref": "#/$defs/RetrievalMode"
+        },
+        "query_id": {
+          "description": "Links back to the bounded retrieval request.",
+          "minLength": 1,
+          "title": "Query Id",
+          "type": "string"
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rank"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        },
+        "embedding_model_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required when retrieval_mode involves vectors. See ADR-007, Q-03.",
+          "title": "Embedding Model Id"
+        },
+        "embedding_model_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Model Revision"
+        },
+        "embedding_dimension": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Dimension"
+        },
+        "chunk_id": {
+          "anyOf": [
+            {
+              "pattern": "^chk_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chunk Id"
+        }
+      },
+      "required": [
+        "retrieval_mode",
+        "query_id"
+      ],
+      "title": "RetrievalProvenance",
+      "type": "object"
+    },
+    "SourceReliability": {
+      "description": "Blueprint \u00a77.6.\n\nSource reliability is recorded, never inferred at analysis time from the assertion's\ncontent. A subject's own statement and an investigator's finding carry different weight, and\na contradiction between them is a finding input rather than something to silently resolve.",
+      "enum": [
+        "official_record",
+        "investigator_finding",
+        "third_party_report",
+        "subject_self_report",
+        "undetermined"
+      ],
+      "title": "SourceReliability",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A snapshot of evidence as it was presented to a node.\n\n`text` is a *snapshot*, and that is intentional (blueprint \u00a77.4): the finding must remain\nreviewable against exactly what the model saw, even if the underlying index is later\nre-built. `CLAUDE.md` constrains where this may travel \u2014 evidence text lives in\naccess-controlled stores only, and never reaches a log or a trace.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "evidence_id": {
+      "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Evidence Id",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "ingestion_id": {
+      "pattern": "^ing_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Ingestion Id",
+      "type": "string"
+    },
+    "span": {
+      "$ref": "#/$defs/EvidenceSpan"
+    },
+    "text": {
+      "description": "Verbatim snapshot of the cited span. Never emitted to logs or traces.",
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "text_sha256": {
+      "description": "Lets a reviewer confirm the snapshot was not altered between proposal and review.",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Text Sha256",
+      "type": "string"
+    },
+    "source_reliability": {
+      "$ref": "#/$defs/SourceReliability",
+      "default": "undetermined"
+    },
+    "retrieval": {
+      "$ref": "#/$defs/RetrievalProvenance"
+    },
+    "snapshot_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Snapshot At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "evidence_id",
+    "case_id",
+    "ingestion_id",
+    "span",
+    "text",
+    "text_sha256",
+    "retrieval",
+    "snapshot_at"
+  ],
+  "title": "EvidenceRecord",
+  "type": "object"
+}

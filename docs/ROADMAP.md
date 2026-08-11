@@ -17,27 +17,42 @@ are written against it.
 ### 1a · Architecture package
 
 - Component architecture with the boundaries that matter marked: what is ours, what the AWS
-  ingestion pipeline owns, what ASAP owns, and where the human review gate sits.
-- Library and framework inventory with versions, and the reason each one is there.
+  ingestion pipeline owns, what ASAP owns, and where the human review gate sits. — **outstanding**
+- Library and framework inventory with versions, and the reason each one is there. —
+  **partly covered** by the 1b scan's measured footprint and version tables; the non-orchestration
+  layers still need writing up.
 - Data contracts as Pydantic models with generated JSON Schema: case, document, evidence, finding,
   run manifest, human disposition, ASAP envelope. Contracts first — they are the interface the
-  orchestration decision has to satisfy.
+  orchestration decision has to satisfy. — **done (2026-08-10)**
 - The authority-routing model: how a case maps to 5 CFR 731 suitability/fitness, SEAD-4, or both.
+  — **contract done**, routing engine itself is Milestone 2.
+
+**Contracts delivered.** Thirteen contracts in `packages/domain/`, published to `schemas/`,
+documented in `docs/handoff/contracts.md`. ADR-014, ADR-011, ADR-008, and the decision-support
+boundary are enforced structurally and asserted by 56 tests rather than left to review. Deferred:
+`ChunkRecord`, `EntityCandidate`, `TimelineEvent`, and `PolicyRecord` (blocked on Q-02), and
+`SpecialistResult` (deliberately deferred until ADR-012 resolves, since its shape is the one most
+likely to be influenced by the framework).
 
 **Exit:** program leadership can sign off on components, libraries, and contracts.
+**Status:** contracts ready for sign-off; the component-architecture write-up is outstanding.
 
-### 1b · Orchestration landscape scan
+### 1b · Orchestration landscape scan — **complete (2026-08-10)**
 
 Survey current agentic-orchestration frameworks — maintenance activity, release cadence, API
 stability, production adoption, licensing, and dependency footprint. The candidate set in ADR-012
 was drawn from a document written earlier; confirm it is still the right set before spending spike
 effort, and add or drop candidates with a recorded reason.
 
-**Exit:** a short written scan; ADR-012's candidate list confirmed or amended.
+**Exit met.** `docs/handoff/orchestration-landscape.md`. ADR-012's candidate set amended: PydanticAI
+/ Pydantic Graph dropped (Pydantic Graph 2.x has no state-persistence API, so it cannot attempt
+spike leg 1); AutoGen and Semantic Kernel removed from consideration (maintenance mode since April
+2026); Microsoft Agent Framework, DBOS, Temporal, and Restate recorded as considered-and-not-spiked.
+Four candidates became three. The scan also added three spike deliverables to 1c and raised Q-14.
 
 ### 1c · Orchestration bake-off (partial spike)
 
-Each candidate — LangGraph, Strands Agents SDK, PydanticAI/Pydantic Graph, hand-rolled Python —
+Each candidate — **LangGraph, Strands Agents SDK, hand-rolled Python** (three, per the 1b scan) —
 implements the same narrow scenario, covering only the legs where frameworks actually differ:
 
 1. Durable checkpoint and **resume in a separate process** after the first exits
@@ -49,6 +64,12 @@ Scored on blueprint §9.4: framework-specific lines of code, serialized state si
 correctness, budget and tool-allowlist enforcement, ease of inspecting and replaying state, test
 determinism, dependency and vulnerability footprint, cold-start and image size, and developer
 comprehension after a short onboarding exercise.
+
+Plus three deliverables the 1b scan added, each a question reading could not settle: assert on
+**resume semantics under a mid-node process kill** (does completed work re-execute?); a **LangSmith
+egress-deny test** if LangGraph is selected, since `langsmith` is a mandatory transitive dependency
+of `langchain-core`; and a **checkpoint-store threat model** treating the checkpoint blob as a
+deserialization trust boundary in every design, hand-rolled included.
 
 **Exit:** a scorecard, a recommendation, and ADR-012 moved from `Open` to `Accepted`. Losing
 spikes are kept — a rejected candidate with a recorded reason is part of the handoff.

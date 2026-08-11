@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/review-summary.schema.json",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "ApprovedFindingText": {
+      "additionalProperties": false,
+      "description": "The officer-approved wording, held separately from the machine proposal.\n\nSubject to the same language guard as the proposal. The boundary applies to the system's\n*output* regardless of who wrote the words \u2014 a delivered envelope carrying a determination\nis out of bounds whether a model or a human typed it, and the officer's determination\nauthority is exercised in their own system of record, not through this pipeline.",
+      "properties": {
+        "version": {
+          "description": "Increments per revision; version 1 is the first approved text.",
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "observation": {
+          "minLength": 1,
+          "title": "Observation",
+          "type": "string"
+        },
+        "policy_relevance": {
+          "minLength": 1,
+          "title": "Policy Relevance",
+          "type": "string"
+        },
+        "recommended_officer_action": {
+          "minLength": 1,
+          "title": "Recommended Officer Action",
+          "type": "string"
+        },
+        "information_gaps": {
+          "items": {
+            "$ref": "#/$defs/InformationGap"
+          },
+          "title": "Information Gaps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "version",
+        "title",
+        "observation",
+        "policy_relevance",
+        "recommended_officer_action"
+      ],
+      "title": "ApprovedFindingText",
+      "type": "object"
+    },
+    "DispositionKind": {
+      "description": "What the officer did with the proposal.\n\nNote what is absent. There is no `auto_approved`, and no member that a system could assign to\nitself. Every member describes an action a human took.",
+      "enum": [
+        "accepted",
+        "modified_and_accepted",
+        "rejected",
+        "deferred_pending_information"
+      ],
+      "title": "DispositionKind",
+      "type": "string"
+    },
+    "HumanDisposition": {
+      "additionalProperties": false,
+      "description": "One officer decision about one proposed finding.\n\n`release_to_asap` is the only thing that authorizes delivery, and the validators below make\nit structurally impossible to set on a rejected or deferred finding.",
+      "properties": {
+        "schema_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "disposition_id": {
+          "pattern": "^dsp_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Disposition Id",
+          "type": "string"
+        },
+        "finding_id": {
+          "description": "References the immutable machine proposal.",
+          "pattern": "^fnd_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "reviewer_id": {
+          "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+          "title": "Reviewer Id",
+          "type": "string"
+        },
+        "reviewer_role": {
+          "$ref": "#/$defs/ReviewerRole"
+        },
+        "reviewed_at": {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "title": "Reviewed At",
+          "type": "string"
+        },
+        "disposition": {
+          "$ref": "#/$defs/DispositionKind"
+        },
+        "reason_codes": {
+          "items": {
+            "$ref": "#/$defs/ReasonCode"
+          },
+          "minItems": 1,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "reviewer_summary": {
+          "minLength": 1,
+          "title": "Reviewer Summary",
+          "type": "string"
+        },
+        "approved_text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovedFindingText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required for MODIFIED_AND_ACCEPTED. Never overwrites the machine proposal."
+        },
+        "release_to_asap": {
+          "default": false,
+          "description": "The delivery authorization. Only an accepted finding may carry it.",
+          "title": "Release To Asap",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "disposition_id",
+        "finding_id",
+        "run_id",
+        "reviewer_id",
+        "reviewer_role",
+        "reviewed_at",
+        "disposition",
+        "reason_codes",
+        "reviewer_summary"
+      ],
+      "title": "HumanDisposition",
+      "type": "object"
+    },
+    "InformationGap": {
+      "additionalProperties": false,
+      "description": "A question for the reviewer.\n\nBlueprint \u00a78.4: the `propose_information_gap` tool records a question \u2014 it does not authorize\nexternal investigation or contact. Nothing in this contract carries an action to take.",
+      "properties": {
+        "gap_id": {
+          "pattern": "^gap_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Gap Id",
+          "type": "string"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "why_it_matters": {
+          "minLength": 1,
+          "title": "Why It Matters",
+          "type": "string"
+        },
+        "related_evidence_ids": {
+          "items": {
+            "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "title": "Related Evidence Ids",
+          "type": "array"
+        },
+        "blocking": {
+          "default": false,
+          "description": "True when analysis under this criterion cannot be completed without an answer.",
+          "title": "Blocking",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "gap_id",
+        "question",
+        "why_it_matters"
+      ],
+      "title": "InformationGap",
+      "type": "object"
+    },
+    "ReasonCode": {
+      "description": "Structured reasons, so reviewer behaviour is measurable.\n\nBlueprint \u00a712.9 wants human-factors evaluation; free-text-only reasons make that impossible.\nThese feed the evaluation harness \u2014 a high rate of `UNSUPPORTED_BY_EVIDENCE` on a given\ncriterion is a signal about the analysis, not about the reviewer.",
+      "enum": [
+        "MITIGATION_ADDED",
+        "WORDING_NARROWED",
+        "UNSUPPORTED_BY_EVIDENCE",
+        "CITATION_INCORRECT",
+        "POLICY_MISAPPLIED",
+        "DUPLICATE_OF_ANOTHER_FINDING",
+        "OUT_OF_SCOPE_FOR_AUTHORITY",
+        "GAP_MUST_BE_RESOLVED_FIRST",
+        "PROTECTED_ATTRIBUTE_CONCERN",
+        "ACCURATE_AS_PROPOSED"
+      ],
+      "title": "ReasonCode",
+      "type": "string"
+    },
+    "ReviewerRole": {
+      "description": "ADR-011: a single authorized reviewer role in the first release.\n\nKept as an enum rather than a free string so that widening the role model later is a visible\ncontract change reviewed against Q-07, not an incidental string that appears in production.",
+      "enum": [
+        "authorized_adjudicative_officer"
+      ],
+      "title": "ReviewerRole",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The run-level review record.\n\nExists so the gate can be checked in one place: a run may proceed only when every proposed\nfinding has a disposition. A partially-reviewed run is a state, not a rounding error.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "reviewer_id": {
+      "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+      "title": "Reviewer Id",
+      "type": "string"
+    },
+    "reviewer_role": {
+      "$ref": "#/$defs/ReviewerRole"
+    },
+    "completed_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Completed At",
+      "type": "string"
+    },
+    "dispositions": {
+      "items": {
+        "$ref": "#/$defs/HumanDisposition"
+      },
+      "minItems": 1,
+      "title": "Dispositions",
+      "type": "array"
+    },
+    "reviewer_run_summary": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reviewer Run Summary"
+    }
+  },
+  "required": [
+    "run_id",
+    "reviewer_id",
+    "reviewer_role",
+    "completed_at",
+    "dispositions"
+  ],
+  "title": "ReviewSummary",
+  "type": "object"
+}

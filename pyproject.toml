@@ -1,0 +1,39 @@
+[project]
+name = "asap-ireports"
+version = "0.1.0"
+description = "Reference architecture for a local-first, bounded-agentic case-analysis platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ireports-domain",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+ireports-domain = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.13",
+    "mypy>=1.15",
+    "bandit>=1.8",
+    "pip-audit>=2.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

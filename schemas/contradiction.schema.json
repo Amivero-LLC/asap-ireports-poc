@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/contradiction.schema.json",
+  "x-contract-version": "1.0.0",
+  "additionalProperties": false,
+  "description": "Two pieces of case evidence that cannot both be true.\n\nBlueprint \u00a77.6. A contradiction is surfaced, never resolved by the system \u2014 resolving it is\nan officer judgment about credibility, which sits outside the decision-support boundary.\nAmiLens's recorded gap (no cross-referencing of subject statements against investigator\nfindings) is exactly what this contract exists to close (ADR-002).",
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "contradiction_id": {
+      "minLength": 1,
+      "title": "Contradiction Id",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "topic": {
+      "minLength": 1,
+      "title": "Topic",
+      "type": "string"
+    },
+    "assertion_evidence_ids": {
+      "items": {
+        "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+        "type": "string"
+      },
+      "minItems": 2,
+      "title": "Assertion Evidence Ids",
+      "type": "array"
+    },
+    "description": {
+      "description": "Neutral statement of what conflicts. Not an assessment of who is truthful.",
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "resolved": {
+      "const": false,
+      "default": false,
+      "description": "Structurally unresolvable by the system. Credibility resolution is reserved to the reviewing officer.",
+      "title": "Resolved",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "contradiction_id",
+    "case_id",
+    "topic",
+    "assertion_evidence_ids",
+    "description"
+  ],
+  "title": "ContradictionRecord",
+  "type": "object"
+}

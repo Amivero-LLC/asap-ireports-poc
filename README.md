@@ -20,8 +20,18 @@ without that disposition.
 
 ## Status
 
-Early. This repo currently holds the source blueprint and the decision record. Application code
-does not exist yet — Milestone 1 is architecture sign-off plus an orchestration-framework bake-off.
+Milestone 1 in progress.
+
+- **1a — contracts: done.** Thirteen data contracts as Pydantic v2 models with generated JSON
+  Schema, in `packages/domain/`. The component-architecture write-up is still outstanding.
+- **1b — orchestration landscape scan: done.** ADR-012's candidate set amended on evidence.
+- **1c — orchestration bake-off: not started.** ADR-012 remains `Open`.
+
+```bash
+uv sync
+uv run pytest -q                                   # 56 contract tests
+uv run python scripts/generate_schemas.py --check  # schemas/ current with the models
+```
 
 ## Start here
 
@@ -30,6 +40,8 @@ does not exist yet — Milestone 1 is architecture sign-off plus an orchestratio
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Every architectural decision, with reasoning. **Read before proposing changes.** |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones and what each one has to prove |
 | [`docs/OPEN-QUESTIONS.md`](docs/OPEN-QUESTIONS.md) | What is unresolved, and what it costs to be wrong |
+| [`docs/handoff/orchestration-landscape.md`](docs/handoff/orchestration-landscape.md) | The framework scan behind ADR-012's amended candidate set |
+| [`docs/handoff/contracts.md`](docs/handoff/contracts.md) | The contract set, what each rule enforces, and where it diverges from the blueprint |
 | [`CLAUDE.md`](CLAUDE.md) | Working conventions and the rules that constrain code |
 | [`blueprint.md`](blueprint.md) | The source architecture paper — the project's **input**, not its output |
 
@@ -43,10 +55,14 @@ criteria comparison rather than a demonstration. Orchestration touches checkpoin
 human-in-the-loop, error handling, packaging, testing, and observability, and the choice is hard to
 reverse once analysis nodes are written against it.
 
-Milestone 1 settles it with a runnable bake-off across LangGraph, Strands Agents SDK,
-PydanticAI/Pydantic Graph, and hand-rolled Python — each implementing the same scenario, scored on
-the same dimensions. The losing spikes are kept: a rejected candidate with a recorded reason is
-part of the handoff.
+Milestone 1 settles it with a runnable bake-off across **LangGraph, Strands Agents SDK, and
+hand-rolled Python** — each implementing the same scenario, scored on the same dimensions. The
+losing spikes are kept: a rejected candidate with a recorded reason is part of the handoff.
+
+The 2026-08-10 landscape scan cut the set from four to three. PydanticAI / Pydantic Graph was
+dropped: Pydantic Graph 2.x has no state-persistence API, so it cannot attempt the durable-resume
+leg without either becoming the hand-rolled baseline or importing a workflow engine we have not
+adopted. Reasoning in [`docs/handoff/orchestration-landscape.md`](docs/handoff/orchestration-landscape.md).
 
 ## Stack (decided)
 
