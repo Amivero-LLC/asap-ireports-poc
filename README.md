@@ -20,10 +20,13 @@ without that disposition.
 
 ## Status
 
-Milestone 1 in progress.
+Milestone 1 is complete.
 
-- **1a — contracts: done.** Thirteen data contracts as Pydantic v2 models with generated JSON
-  Schema, in `packages/domain/`. The component-architecture write-up is still outstanding.
+- **1a — contracts and component architecture: done.** Fourteen data contracts as Pydantic v2
+  models with generated JSON Schema, in `packages/domain/` — the fourteenth is `SpecialistResult`,
+  the typed return value of one specialist sub-call (CONT-01). The component-architecture write-up
+  is complete: [docs/handoff/component-architecture.md](docs/handoff/component-architecture.md)
+  (ARCH-01).
 - **1b — orchestration landscape scan: done.** ADR-012's candidate set amended on evidence:
   four candidates became three.
 - **1c — orchestration bake-off: done (2026-08-11). ADR-012 accepted — the framework is
@@ -34,9 +37,16 @@ Milestone 1 in progress.
   See [`docs/handoff/orchestration-scorecard.md`](docs/handoff/orchestration-scorecard.md)
   and [`spikes/README.md`](spikes/README.md).
 
+**Scope is the orchestrator spine (ADR-020).** Three phases, not nine. Nothing was deleted —
+sixteen requirements moved to v2 with their acceptance intact — and the account of what was
+designed and deliberately not built, with the reason for each, is in
+[docs/handoff/component-architecture.md](docs/handoff/component-architecture.md). A program
+reader who sees a narrower build without seeing this sentence would read it as a project that
+shrank rather than a project that chose.
+
 ```bash
 uv sync
-uv run pytest -q                                   # 111 passed, 8 skipped
+uv run pytest -q                                   # 126 passed, 8 skipped
 uv run python scripts/generate_schemas.py --check  # schemas/ current with the models
 
 # bake-off (needs Docker)
@@ -52,6 +62,7 @@ uv run pytest spikes -v -s
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Milestones and what each one has to prove |
 | [`docs/OPEN-QUESTIONS.md`](docs/OPEN-QUESTIONS.md) | What is unresolved, and what it costs to be wrong |
 | [`docs/handoff/orchestration-landscape.md`](docs/handoff/orchestration-landscape.md) | The framework scan behind ADR-012's amended candidate set |
+| [`docs/handoff/component-architecture.md`](docs/handoff/component-architecture.md) | Component boundaries — what is ours, what AWS ingestion and ASAP own — and what was designed and not built |
 | [`docs/handoff/contracts.md`](docs/handoff/contracts.md) | The contract set, what each rule enforces, and where it diverges from the blueprint |
 | [`docs/handoff/model-gateway.md`](docs/handoff/model-gateway.md) | The two model adapters, what the gateway guarantees, and the refusal path |
 | [`CLAUDE.md`](CLAUDE.md) | Working conventions and the rules that constrain code |
