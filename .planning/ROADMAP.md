@@ -63,44 +63,54 @@ blocked on account access regardless.
 ## Phases
 
 **Phase Numbering:**
+
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [ ] **Phase 1: Close the architecture package** - The component-architecture write-up, the
       `SpecialistResult` contract, and entry documents that describe the actual current state
+
 - [ ] **Phase 2: Bounded sub-calls that survive a crash** - The orchestrator fans out through the
       gateway port, enforces its own limits, dies mid-fan-out, and resumes without double-paying
+
 - [ ] **Phase 3: Human gate, typed output, and the handoff** - The run pauses for a disposition,
       resumes, emits a validated envelope, and the package states plainly what was not built
 
 ## Phase Details
 
 ### Phase 1: Close the architecture package
+
 **Goal**: Program leadership can sign off on Milestone 1a's component boundaries, the build has the
 contract it needs, and the repository's entry documents stop asserting things that are no longer
 true.
 **Depends on**: Nothing (Milestones 1b and 1c are complete)
 **Requirements**: ARCH-01, ARCH-04, CONT-01
 **Success Criteria** (what must be TRUE):
+
   1. A reader of the component-architecture write-up can point to where our system ends and the AWS
      ingestion pipeline, ASAP, and the human reviewer begin — and program leadership signs off on
      those boundaries.
+
   2. The write-up marks every component BUILT, PLANNED (naming the phase that delivers it), or
      NOT OURS, **and separately marks what ADR-020 cut as DESIGNED-NOT-BUILT with the reason** — a
      reader must not have to infer the difference between "coming in Phase 3" and "deliberately not
      coming."
+
   3. A test fails if a BUILT row does not resolve to a real path, or a PLANNED row already exists.
   4. `SpecialistResult` is published to `schemas/` with contract tests, carrying no aggregate score
      field.
+
   5. `CLAUDE.md` § Current state and `README.md` § Status no longer assert that application code does
      not exist or that the orchestration framework is undecided, and both reflect ADR-020's scope.
 **Plans**: 3 plans, in 3 waves
-
 Plans:
+
 - [ ] 01-01-PLAN.md — `SpecialistResult` contract (CONT-01): the Pydantic v2 model, generated JSON
       Schema, contract tests, and the lifted deferral in `docs/handoff/contracts.md`
+
 - [ ] 01-02-PLAN.md — The component-architecture write-up (ARCH-01): two Mermaid levels, the
       four-marker build-state tables, the designed-not-built account, and the test that enforces them
+
 - [ ] 01-03-PLAN.md — Entry documents made true (ARCH-04): `CLAUDE.md` § Current state and
       `README.md` § Status carry the measured inventory and ADR-020's three-phase scope
 
@@ -118,33 +128,43 @@ pre-registered supersession criteria (ARCH-05). Both existed to serve a dual-ada
 is no longer happening. The port itself is still built in Phase 2 — ORCH-01 is untouched.
 
 ### Phase 2: Bounded sub-calls that survive a crash
+
 **Goal**: The orchestrator fans out to bounded specialist sub-calls through the gateway port,
 enforces its own ceilings, dies mid-fan-out, and resumes in a different process without re-running an
 in-flight model call — with no analysis node aware of LangGraph.
 **Depends on**: Phase 1
 **Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04, SPEC-01, VAL-02, RETR-01, RETR-02, QUAL-02
 **Success Criteria** (what must be TRUE):
+
   1. `packages/orchestration/` exposes this project's own port with a LangGraph adapter behind it,
      and a test proves no file outside the adapter imports LangGraph.
+
   2. `durability="sync"` and strict checkpoint deserialization are set in code with tests — both
      defaults are wrong here and invisible when reading a graph.
+
   3. One synthetic case is indexed into local OpenSearch, and the sub-agent retrieves against it by
      vector + lexical query with a mandatory case filter and bounded K — **no graph database, ever
      (ADR-006)**. Every field name, filter, and facet mapping lives in one module whose header names
      Q-02 and states that the AWS collection's real schema is unconfirmed.
+
   4. A specialist sub-call against one criterion returns a typed `SpecialistResult` — criterion,
      provenance, and proposed findings with citations, **and no completion-status field** — obtained
      through the `ModelGateway` port on a tier **alias**, with a criterion-specific tool allowlist and
      every prohibited tool unreachable.
+
   5. A run survives a mid-node process kill and resumes in a separate process without re-executing
      completed work.
+
   6. A crash mid-fan-out does not re-run an in-flight model call — measured as 0 duplicate paid calls
      over the same 24-trial harness that measured LangGraph at 11/24 and hand-rolled at 12/24.
+
   7. A node that hits a model-call, tool-call, token, or wall-clock ceiling emits
      `INCOMPLETE_DUE_TO_BUDGET` and routes to human review, not to failure.
+
   8. A model refusal and a `StructuredOutputError` are **logged** with `run_id`, `case_id`, and the
      criterion, and never become an empty string. No `InformationGap` plumbing, no review routing
      (ADR-021).
+
   9. LangSmith egress is proven closed at every production entry point by a fail-closed test, not
      merely configured closed.
 **Plans**: TBD
@@ -173,25 +193,33 @@ designed-not-built entry under HAND-01. Refusals are expected in normal operatio
 files routinely discuss criminal conduct, substance use, and foreign contacts.
 
 ### Phase 3: Human gate, typed output, and the handoff
+
 **Goal**: One command takes a synthetic case to a human-approved, validated typed envelope — and the
 ASAP program team receives a package that states plainly what was built, what was designed and not
 built, and what it would cost to be wrong.
 **Depends on**: Phase 2
 **Requirements**: REV-01, REV-02, DEL-02, HAND-01
 **Success Criteria** (what must be TRUE):
+
   1. A run pauses in an explicit review state; a disposition is recorded by a **different process**
      than the one that proposed the finding; the run resumes from the checkpoint.
+
   2. No path in the state machine reaches output without a recorded human disposition — proven by
      walking the transition table — and no bypass exists in any profile, including local development.
+
   3. Both the immutable machine proposal and the human-approved version are retained and separately
      readable.
+
   4. One command takes a synthetic case end to end — load, fan-out, budgets, validation, review gate,
      typed envelope — and produces a human-approved result under a single invocation.
+
   5. The handoff package is current: decisions, open questions, contracts and schemas, **and a
      section on what was designed and deliberately not built, with the reason for each** — every
      claim cited or carrying an explicit evidence tag.
+
   6. Known failure modes and things that did not work are recorded — described in the source as the
      most useful and most commonly omitted artifact.
+
   7. `docs/ROADMAP.md`, which still describes the pre-ADR-020 milestone shape, is reconciled or
      explicitly retired.
 **Plans**: TBD

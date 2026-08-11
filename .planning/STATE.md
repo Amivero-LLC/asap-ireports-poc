@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-last_updated: "2026-08-11T17:12:56.778Z"
-last_activity: 2026-08-11 — **scope pared to the orchestrator spine (ADR-020). 9 phases → 3, 33 v1
+status: executing
+last_updated: "2026-08-11T17:44:38.196Z"
+last_activity: 2026-08-11 -- Phase 01 planning complete
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
+  total_plans: 3
   completed_plans: 0
   percent: 0
 ---
@@ -30,8 +30,8 @@ unverified.
 
 Phase: 1 of 3 (Close the architecture package)
 Plan: — of — (no plans yet)
-Status: Ready to plan
-Last activity: 2026-08-11 — **scope pared to the orchestrator spine (ADR-020). 9 phases → 3, 33 v1
+Status: Ready to execute
+Last activity: 2026-08-11 -- Phase 01 planning complete
 requirements → 15.** Cut: the second orchestration adapter and the outcome-level bake-off
 (ORCH-05, BAKE-01, ARCH-03, ARCH-05), checkpoint hardening (CKPT-01..03), retrieval and local ingest
 (RETR-01..03, CONT-02), authority routing and policy packs (ROUT-01..02), citation validators
