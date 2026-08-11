@@ -1,0 +1,35 @@
+{
+  "source_path": "/Users/davidlarrimore/Documents/Github/asap-ireports/docs/handoff/compatibility-matrix.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Model Compatibility Matrix",
+  "summary": "Run-of-record of live model-gateway measurements taken against a commercial-partition Bedrock deployment via a shared LiteLLM proxy, plus an explicit list of what remains unverified.",
+  "scope": [
+    "model gateway",
+    "LiteLLM proxy",
+    "Amazon Bedrock (commercial partition)",
+    "tier aliases: ireports-orchestrator, ireports-thinking, ireports-fast",
+    "Claude Sonnet 4.6, Sonnet 5, Haiku 4.5, Opus 4.8",
+    "Anthropic request surface (output_config.effort, thinking, output_config.format, temperature, budget_tokens)",
+    "structured output via single tool call",
+    "endpoint routing (/v1/messages vs /anthropic/v1/messages)",
+    "live smoke test tests/live/test_live_smoke.py",
+    "Q-01 (AWS GovCloud partition validation)"
+  ],
+  "cross_refs": [
+    "docs/OPEN-QUESTIONS.md",
+    "docs/handoff/model-gateway.md",
+    "tests/live/test_live_smoke.py",
+    "blueprint.md",
+    "CLAUDE.md",
+    "docs/DECISIONS.md#ADR-008",
+    "docs/DECISIONS.md#ADR-015",
+    "docs/DECISIONS.md#ADR-017",
+    "docs/DECISIONS.md#ADR-018",
+    "docs/DECISIONS.md#ADR-019"
+  ],
+  "locked": false,
+  "precedence": 8,
+  "notes": "Manifest declared DOC; heuristic and content analysis agree. Evidence/measurement record, not a decision record: it reports observations and defers every decision to the ADRs it cites (ADR-015, ADR-017, ADR-018, ADR-019), so it must not be treated as a source of locked decisions. SCOPE LIMIT, load-bearing for downstream synthesis: every measurement is COMMERCIAL-PARTITION only, reached through an organisation-shared LiteLLM proxy, and the document says nothing about AWS GovCloud. Q-01 remains OPEN and is not narrowed by this file; it is closed only by re-running the live smoke check in the target GovCloud account and appending that result as a SECOND run-of-record alongside the commercial one (per section 8, which forbids overwriting sections 1-6). Do not let any extraction present this document as evidence about GovCloud availability, model or inference-profile IDs, cross-region inference, or data routing. Section 5 also contains a self-correction: an earlier revision's claim that structured-output enforcement was a per-model-group property is explicitly retracted as a sample-size-1 artifact; the corrected finding is that output_config.format is unreliable on every group and a single unforced tool call works everywhere."
+}

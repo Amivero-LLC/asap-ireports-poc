@@ -87,6 +87,17 @@ Q-01 in `OPEN-QUESTIONS.md`; must be validated before any GovCloud deployment wo
 is a config change. GovCloud feature gaps must be checked per feature, not assumed from commercial
 AWS behavior — several Bedrock capabilities differ from the first-party Claude API.
 
+**Amended 2026-08-10 by ADR-015** — recorded 2026-08-11, on a gap the doc ingest surfaced. This
+entry says "Bedrock **via LiteLLM** as the only network egress"; ADR-015 adds a `bedrock` adapter
+using the standard AWS credential chain with no proxy, which is a Bedrock call that does not go via
+LiteLLM. ADR-015 declared itself an amendment to ADR-008 and quoted the equivalent `CLAUDE.md`
+sentence, but did not name ADR-004, so the two entries read as though they disagree.
+
+**They do not, and the distinction is worth stating.** What ADR-004 governs is *what egress is
+permitted* — nothing but Bedrock — and that is unchanged. "Via LiteLLM" was mechanism wording, and
+the mechanism is what ADR-015 revisits. The surviving constraint is the stronger one: **the model
+gateway port is the only component permitted to call a model.** Read ADR-004's egress rule that way.
+
 ---
 
 ## ADR-005 — FastAPI is the boundary; no UI in Milestone 1

@@ -1,0 +1,67 @@
+# Ingest manifest for /gsd-ingest-docs — asap-ireports, 2026-08-11.
+#
+# Heuristic discovery gets this repo wrong in three ways, which is why an explicit manifest
+# exists rather than relying on directory conventions:
+#
+#   1. All nineteen ADRs live inside a single `docs/DECISIONS.md`, so no `ADR-*.md` or `docs/adr/`
+#      pattern matches and the authoritative decision record would be typed as a generic DOC.
+#   2. `blueprint.md` and `CLAUDE.md` sit outside `docs/` and would not be discovered at all,
+#      though both are load-bearing inputs.
+#   3. Default type precedence (ADR > SPEC > PRD > DOC) does not encode this project's actual
+#      rule, which `CLAUDE.md` states plainly: **docs/DECISIONS.md wins over blueprint.md.**
+#      The blueprint is the input to this project, not its output.
+#
+# `precedence` is explicit on every entry — lower wins — so the ordering is stated rather than
+# inferred from a type name.
+
+docs:
+  # -- Authoritative. These beat everything below them. --------------------------------
+  - path: docs/DECISIONS.md
+    type: ADR
+    precedence: 0    # ADR-001..ADR-019. ADR-012 (orchestration = LangGraph) accepted 2026-08-11.
+
+  - path: docs/OPEN-QUESTIONS.md
+    type: ADR
+    precedence: 1    # Q-01..Q-14 with blast radii. Q-01/Q-02/Q-03 are GATE items: they block
+                     # work rather than merely informing it, which is decision-record weight.
+
+  # -- Scope, sequencing, and the rules that constrain code -----------------------------
+  - path: docs/ROADMAP.md
+    type: PRD
+    precedence: 2    # Milestones 1-3. 1b and 1c complete; 1a component write-up outstanding.
+
+  - path: CLAUDE.md
+    type: SPEC
+    precedence: 3    # The decision-support boundary and the rules that constrain code:
+                     # no aggregate risk score, no model ids, evidence before inference,
+                     # synthetic data only, no raw case text in logs or traces.
+
+  # -- Evidence. Cited by the decisions above; does not override them. ------------------
+  - path: docs/handoff/orchestration-scorecard.md
+    type: DOC
+    precedence: 4    # Resolves ADR-012.
+  - path: docs/handoff/orchestration-landscape.md
+    type: DOC
+    precedence: 5    # Milestone 1b scan; amended ADR-012's candidate set, raised Q-14.
+  - path: docs/handoff/contracts.md
+    type: DOC
+    precedence: 6
+  - path: docs/handoff/model-gateway.md
+    type: DOC
+    precedence: 7    # Evidence behind ADR-015 through ADR-019.
+  - path: docs/handoff/compatibility-matrix.md
+    type: DOC
+    precedence: 8    # The commercial-partition run-of-record. Q-01 stays open on GovCloud.
+  - path: docs/handoff/checkpoint-threat-model.md
+    type: DOC
+    precedence: 9
+
+  - path: README.md
+    type: DOC
+    precedence: 10
+
+  # -- Input, not output. Lowest precedence deliberately. -------------------------------
+  - path: blueprint.md
+    type: DOC
+    precedence: 11   # The source architecture paper this project was handed. Where it diverges
+                     # from docs/DECISIONS.md, DECISIONS.md wins — see CLAUDE.md.

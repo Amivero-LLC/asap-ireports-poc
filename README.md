@@ -24,14 +24,19 @@ Milestone 1 in progress.
 
 - **1a — contracts: done.** Thirteen data contracts as Pydantic v2 models with generated JSON
   Schema, in `packages/domain/`. The component-architecture write-up is still outstanding.
-- **1b — orchestration landscape scan: done.** ADR-012's candidate set amended on evidence.
-- **1c — orchestration bake-off: in progress.** Shared harness and the hand-rolled baseline
-  pass all four legs (202 lines, no framework). LangGraph and Strands still to run; ADR-012
-  remains `Open`. See [`spikes/README.md`](spikes/README.md).
+- **1b — orchestration landscape scan: done.** ADR-012's candidate set amended on evidence:
+  four candidates became three.
+- **1c — orchestration bake-off: done (2026-08-11). ADR-012 accepted — the framework is
+  LangGraph.** All three candidates — hand-rolled (195 lines), LangGraph (266), Strands (373) —
+  pass all four legs, so the decision turned on cost rather than correctness. Durable
+  checkpointing over PostgreSQL cost two lines with LangGraph's first-party `PostgresSaver`,
+  against 56 and 166 for the others. Losing spikes are retained and still run.
+  See [`docs/handoff/orchestration-scorecard.md`](docs/handoff/orchestration-scorecard.md)
+  and [`spikes/README.md`](spikes/README.md).
 
 ```bash
 uv sync
-uv run pytest tests -q                             # 56 contract tests
+uv run pytest -q                                   # 111 passed, 8 skipped
 uv run python scripts/generate_schemas.py --check  # schemas/ current with the models
 
 # bake-off (needs Docker)
@@ -62,9 +67,11 @@ criteria comparison rather than a demonstration. Orchestration touches checkpoin
 human-in-the-loop, error handling, packaging, testing, and observability, and the choice is hard to
 reverse once analysis nodes are written against it.
 
-Milestone 1 settles it with a runnable bake-off across **LangGraph, Strands Agents SDK, and
-hand-rolled Python** — each implementing the same scenario, scored on the same dimensions. The
-losing spikes are kept: a rejected candidate with a recorded reason is part of the handoff.
+Milestone 1 settled it with a runnable bake-off across **LangGraph, Strands Agents SDK, and
+hand-rolled Python** — each implementing the same scenario, scored on the same dimensions. All
+three passed all four legs; **LangGraph was selected** on cost, not correctness (ADR-012,
+2026-08-11). The losing spikes are kept and still run: a rejected candidate with a recorded reason
+is part of the handoff.
 
 The 2026-08-10 landscape scan cut the set from four to three. PydanticAI / Pydantic Graph was
 dropped: Pydantic Graph 2.x has no state-persistence API, so it cannot attempt the durable-resume
@@ -76,7 +83,7 @@ adopted. Reasoning in [`docs/handoff/orchestration-landscape.md`](docs/handoff/o
 Python 3.12+ · FastAPI · Pydantic v2 · PostgreSQL (system of record) · OpenSearch (retrieval) ·
 LiteLLM → Amazon Bedrock · Docling / OCRmyPDF / Chonkie · OpenTelemetry + Jaeger
 
-Orchestration framework: **undecided — Milestone 1 output.**
+Orchestration: **LangGraph** (ADR-012) — behind our own port, so nodes never import it directly.
 
 Explicitly out: Neo4j, any UI in Milestone 1, LocalStack in the default profile, a local LLM
 server, and any offline model-fixture profile.

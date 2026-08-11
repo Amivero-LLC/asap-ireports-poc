@@ -1,0 +1,40 @@
+{
+  "source_path": "/Users/davidlarrimore/Documents/Github/asap-ireports/docs/OPEN-QUESTIONS.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Open Questions",
+  "summary": "Fourteen unresolved architectural questions, each with blocks, working assumption, and blast radius; three are GATE items blocking downstream work.",
+  "scope": [
+    "Q-01 GATE Claude model availability in AWS GovCloud — Blocks: any GovCloud deployment work, the LiteLLM production configuration. Assumption: NONE, explicitly refused. Blast radius: high — model availability, concrete model and inference-profile IDs, cross-region inference restrictions, and data-routing rules in GovCloud are unvalidated; if the intended model is unavailable in the approved partition, the ADR-008 tier strategy needs different targets and the evaluation baseline moves. Two endpoint questions ride on it (ADR-015): whether bedrock-mantle.{region}.api.aws resolves in GovCloud, and whether a LiteLLM proxy is permitted. Partial evidence 2026-08-10 covers the COMMERCIAL partition only; gate stays shut.",
+    "Q-02 GATE AWS vector collection schema and field mapping — Blocks: finalizing the retrieval mapping module and the local OpenSearch index definition. Assumption: single collection with a facet separating case data from policy knowledge plus case-file metadata facets applied post-ingestion via a document.xml sidecar (ADR-007). Blast radius: medium and deliberately contained — all field names, filters, and facet mappings isolated to one module, so adapting is a one-file change; becomes high only if the real shape is structurally different (separate collections per corpus, or nested/parent-child docs).",
+    "Q-03 GATE Query-time embedding parity — Blocks: any claim that retrieval quality measured locally predicts retrieval quality in AWS. Assumption: pin a local model and treat parity as unverified until confirmed. Blast radius: high and silent — query vectors must come from the same embedding model and revision used to index; a mismatch does not error, it just retrieves worse, making every downstream evaluation number meaningless without anyone noticing.",
+    "Q-04 Authoritative ASAP ingestion contract — Assumption: versioned envelope with embedded excerpts plus references (ADR-010). Blast radius: medium, contained to the delivery adapter and envelope schema. Unknowns: endpoint and auth, idempotency semantics, error and retry contract, attachment handling, whether ASAP stores excerpts or only references and findings.",
+    "Q-05 Case scale and volume — Assumption: ~5-25 documents, a few hundred pages per case, single-case interactive (ADR-013). Blast radius: low for architecture, high for capacity planning; checkpointing and resume are built regardless, so a volume surprise means adding a batch queue rather than reworking the run model.",
+    "Q-14 Is Amazon Bedrock AgentCore an approved deployment target? — Raised by the Milestone 1b orchestration landscape scan, 2026-08-10. Assumption: no; ADR-004 stands and the Lambda/SAM adapter gets built and exercised. Blast radius: low for Milestone 1, medium for deployment — AgentCore is a managed agent runtime, not a Python orchestration library, so it does not change the M1 bake-off; it changes what the Lambda adapter is for. Documented GovCloud gaps: no semantic search in AgentCore Gateway; AWS Agent Registry (Preview), Bedrock Guardrails Policy, and Temporal Policy unavailable; six CloudFormation resource types absent including Policy, PolicyEngine, Evaluator. Read alongside Q-01, not as an answer to it.",
+    "Q-06 Agency supplemental fitness factors and precedent material — Assumption: federal-core policy pack only (5 CFR 731 factors, SEAD-4 guidelines). Blast radius: low structurally, since the policy-pack mechanism is designed for this, but it changes content scope and the evaluation set.",
+    "Q-07 Policy ownership — which office approves machine-readable policy interpretations, summaries, decision tables, and supersession. Governance; does not block engineering but must be answered before a pilot with real data. Design fails closed when a policy pack is expired or unapproved, which is only meaningful if an approver exists.",
+    "Q-08 Data environment rules — what synthetic, de-identified, and production data each environment may contain; data impact level, CUI category, privacy controls, records schedules. Assumption for this repo: synthetic only, always (ADR-002 constraints in CLAUDE.md).",
+    "Q-09 Records retention — retention schedule for evidence snapshots, model responses, reviewer edits, run manifests. Affects storage design and audit trail, not the analysis path.",
+    "Q-10 Performance thresholds and error tolerances — acceptable precision/recall and false-positive/false-negative rates per criterion. Evaluation harness can be built without these, but release gates cannot be set until an adjudication business owner sets them.",
+    "Q-11 Appeal and contestability — what subject-facing or reviewer-facing correction process must be supported.",
+    "Q-12 Production support ownership — who owns policy incidents, model incidents, data incidents, and ASAP delivery failures.",
+    "Q-13 Prompt caching approval — is prompt caching approved for this data class and provider configuration. Material to cost, immaterial to correctness.",
+    "GATE semantics: Q-01, Q-02, Q-03 are blocking constraints, not informational notes — they must be answered before the work they block starts",
+    "Resolved-question map: scope order (ADR-003), deployment partition (ADR-004), latency target (ADR-013), ASAP evidence model (ADR-010), human review roles (ADR-011), local model / disconnected operation (ADR-009), graph database (ADR-006), embedding strategy (ADR-007), model routing (ADR-008), workflow engine bake-off (ADR-012), universal risk score (ADR-014), Docker Desktop permitted (assumed yes under ADR-004)"
+  ],
+  "cross_refs": [
+    "blueprint.md",
+    "DECISIONS.md",
+    "docs/DECISIONS.md",
+    "CLAUDE.md",
+    "docs/handoff/compatibility-matrix.md",
+    "docs/handoff/orchestration-landscape.md",
+    "tests/live",
+    "https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-bedrock-agentcore.html",
+    "https://aws.amazon.com/about-aws/whats-new/2026/05/bedrock-agentcore-launch-aws-govcloud-us/"
+  ],
+  "locked": false,
+  "precedence": 1,
+  "notes": "Type ADR assigned by manifest override and treated as authoritative. Content signals alone would read as DOC/SPEC hybrid: this is a register of UNRESOLVED questions rather than a single accepted decision, with no Status: Accepted marker. locked is false because nothing here is decided — every entry is explicitly open, and several carry only a stated working assumption. Q-01, Q-02, Q-03 are GATE items and should be propagated downstream as blocking constraints. Q-01 uniquely refuses any working assumption. Q-01 has partial evidence dated 2026-08-10 from the commercial Bedrock partition, which the document is explicit does NOT satisfy the GovCloud gate. Q-14 is out of numeric order in the source, filed under Contract and integration between Q-05 and Q-06."
+}

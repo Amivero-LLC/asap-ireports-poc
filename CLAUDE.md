@@ -41,8 +41,25 @@ a recorded human disposition, stop and raise it.
 
 ## Current state
 
-Early. The repo currently holds the source blueprint and the decision/roadmap record. Application
-code does not exist yet — Milestone 1 is architecture sign-off plus the orchestration bake-off.
+**Last updated 2026-08-11.** Milestone 1 is nearly closed. If this section disagrees with
+`.planning/STATE.md`, STATE.md is newer — and fix this section, because a stale "what exists" note
+is the single most expensive thing in this file.
+
+What exists and works:
+
+| Area | State |
+|---|---|
+| `packages/domain/` | 13 Pydantic v2 contracts + generated JSON Schema in `schemas/` (M1a, done) |
+| `packages/gateway/` | `ModelGateway` port with `litellm`, `bedrock`, and `stub` adapters; proven against a real endpoint |
+| `spikes/` | All three ADR-012 bake-off candidates, passing four legs each, plus a retained negative control and `measure.py` |
+| `docs/handoff/` | Six handoff documents, including the scorecard that resolved ADR-012 |
+| Tests | 111 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+
+What does **not** exist yet: `packages/orchestration`, `retrieval`, `ingestion`, `policy`,
+`delivery`, `observability`; `apps/`; `workers/`; `policy-packs/`; `cases/synthetic/`; `evals/`.
+
+Outstanding before M1 sign-off: the **component-architecture write-up** (the last 1a item), and
+cold start under SAM local — unmeasured, and the one number that could reopen ADR-012.
 
 **Do not scaffold empty directories.** Create a directory when the first real file lands in it.
 The target layout below is the plan, not the current state.
@@ -53,6 +70,7 @@ Adapted from `blueprint.md` §5.2, trimmed to the decisions in `docs/DECISIONS.m
 (no `ui/`, no Neo4j, no offline fixture profile):
 
 ```
+.planning/       GSD planning state — PROJECT.md, REQUIREMENTS.md, ROADMAP.md, STATE.md, intel/
 docs/            DECISIONS.md, ROADMAP.md, OPEN-QUESTIONS.md, handoff/
 spikes/          orchestration bake-off — one directory per candidate framework
 schemas/         JSON Schema contracts (case, document, evidence, finding, run, asap-envelope)
@@ -75,10 +93,10 @@ Decided (see `docs/DECISIONS.md` for the reasoning behind each):
 | Language | Python 3.12+, `uv` + `pyproject.toml` |
 | API | FastAPI + Uvicorn — the stable boundary for local and cloud |
 | Contracts | Pydantic v2 + JSON Schema |
-| Orchestration | **Undecided — this is what Milestone 1 settles.** Candidates: LangGraph, Strands Agents SDK, PydanticAI/Pydantic Graph, hand-rolled Python |
+| Orchestration | **LangGraph** (ADR-012, accepted 2026-08-11) — chosen by a measured four-leg bake-off, not by comparison. Nodes depend on our own port, never on LangGraph directly. Set `durability="sync"` and strict checkpoint deserialization; both defaults are wrong for us and invisible in the code |
 | Retrieval | OpenSearch (local, Docker) mirroring the AWS vector collection |
 | Transactional store | PostgreSQL — system of record for workflow state |
-| Model gateway | LiteLLM — the only component permitted to call Bedrock |
+| Model gateway | The `ModelGateway` **port** is the only component permitted to call a model (ADR-015). Two production adapters behind it: `litellm` (default) and `bedrock` (direct, no proxy), both on the official `anthropic` SDK. A third, `stub`, is contract-tests only and must never be selectable where findings reach a reviewer |
 | Extraction | Docling, OCRmyPDF + Tesseract, Chonkie |
 | Embeddings | Local model, **development only** — AWS owns production chunking and embedding |
 | Observability | OpenTelemetry + Jaeger |
