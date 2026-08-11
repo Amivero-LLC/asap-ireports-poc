@@ -102,7 +102,7 @@ class DeliveredFinding(ContractModel):
     policy_pack_id: PolicyPackId
     policy_id: NonEmptyStr
     criterion_id: NonEmptyStr
-    policy_citations: list[PolicyCitationId] = Field(min_length=1)
+    policy_citations: tuple[PolicyCitationId, ...] = Field(min_length=1)
 
     classification: FindingClassification
     title: DecisionSupportText = Field(max_length=200)
@@ -110,13 +110,13 @@ class DeliveredFinding(ContractModel):
     policy_relevance: DecisionSupportText
     recommended_officer_action: DecisionSupportText
 
-    supporting_evidence: list[EvidenceExcerpt] = Field(default_factory=list)
-    mitigating_evidence: list[EvidenceExcerpt] = Field(default_factory=list)
-    contradicting_evidence: list[EvidenceExcerpt] = Field(default_factory=list)
+    supporting_evidence: tuple[EvidenceExcerpt, ...] = Field(default_factory=tuple)
+    mitigating_evidence: tuple[EvidenceExcerpt, ...] = Field(default_factory=tuple)
+    contradicting_evidence: tuple[EvidenceExcerpt, ...] = Field(default_factory=tuple)
 
-    aggravating_factors: list[DecisionSupportText] = Field(default_factory=list)
-    mitigating_factors: list[DecisionSupportText] = Field(default_factory=list)
-    information_gaps: list[InformationGap] = Field(default_factory=list)
+    aggravating_factors: tuple[DecisionSupportText, ...] = Field(default_factory=tuple)
+    mitigating_factors: tuple[DecisionSupportText, ...] = Field(default_factory=tuple)
+    information_gaps: tuple[InformationGap, ...] = Field(default_factory=tuple)
 
     evidence_confidence: Confidence
     analysis_confidence: Confidence
@@ -147,9 +147,9 @@ class EnvelopeAnalysis(ContractModel):
     """
 
     run_id: RunId
-    policy_pack_ids: list[PolicyPackId] = Field(min_length=1)
-    model_aliases: list[ModelAlias] = Field(min_length=1)
-    findings: list[DeliveredFinding] = Field(min_length=1)
+    policy_pack_ids: tuple[PolicyPackId, ...] = Field(min_length=1)
+    model_aliases: tuple[ModelAlias, ...] = Field(min_length=1)
+    findings: tuple[DeliveredFinding, ...] = Field(min_length=1)
     reviewer_summary: DecisionSupportText | None = Field(
         default=None, description="Reviewer-authored only. Never machine-generated."
     )

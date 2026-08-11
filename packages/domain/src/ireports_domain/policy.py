@@ -59,7 +59,7 @@ class PolicyPackRef(ContractModel):
     effective_to: UtcDatetime | None = Field(
         default=None, description="Null means currently in force with no scheduled end."
     )
-    decision_domains: list[DecisionDomain] = Field(min_length=1)
+    decision_domains: tuple[DecisionDomain, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _only_approved_packs_are_usable(self) -> PolicyPackRef:
@@ -124,7 +124,7 @@ class AuthorityRoute(ContractModel):
     decision_domain: DecisionDomain
     applies: bool
     basis: RoutingBasis
-    policy_pack_ids: list[PolicyPackId] = Field(default_factory=list)
+    policy_pack_ids: tuple[PolicyPackId, ...] = Field(default_factory=tuple)
     rationale: NonEmptyStr = Field(
         description="Deterministic explanation of the routing rule that fired. Not model prose."
     )
@@ -154,7 +154,7 @@ class AuthorityRoutingResult(ContractModel):
     """The complete routing decision for a run — every domain considered, none omitted."""
 
     schema_version: ContractVersion = CONTRACT_VERSION
-    routes: list[AuthorityRoute] = Field(min_length=1)
+    routes: tuple[AuthorityRoute, ...] = Field(min_length=1)
     routed_at: UtcDatetime
 
     @model_validator(mode="after")

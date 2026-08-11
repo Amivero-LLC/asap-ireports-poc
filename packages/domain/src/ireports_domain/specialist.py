@@ -68,7 +68,7 @@ class SpecialistResult(ContractModel):
     case_id: CaseId
     criterion: SpecialistCriterion
     generated_by: GeneratedBy
-    findings: list[ProposedFinding] = Field(default_factory=list)
+    findings: tuple[ProposedFinding, ...] = Field(default_factory=tuple)
 
     @model_validator(mode="after")
     def _findings_belong_to_this_criterion(self) -> SpecialistResult:

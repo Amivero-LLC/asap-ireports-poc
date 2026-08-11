@@ -87,7 +87,7 @@ class ApprovedFindingText(ContractModel):
     observation: DecisionSupportText
     policy_relevance: DecisionSupportText
     recommended_officer_action: DecisionSupportText
-    information_gaps: list[InformationGap] = Field(default_factory=list)
+    information_gaps: tuple[InformationGap, ...] = Field(default_factory=tuple)
 
 
 class HumanDisposition(ContractModel):
@@ -107,7 +107,7 @@ class HumanDisposition(ContractModel):
     reviewed_at: UtcDatetime
 
     disposition: DispositionKind
-    reason_codes: list[ReasonCode] = Field(min_length=1)
+    reason_codes: tuple[ReasonCode, ...] = Field(min_length=1)
     reviewer_summary: DecisionSupportText
 
     approved_text: ApprovedFindingText | None = Field(
@@ -202,7 +202,7 @@ class ReviewSummary(ContractModel):
     reviewer_id: ActorId
     reviewer_role: ReviewerRole
     completed_at: UtcDatetime
-    dispositions: list[HumanDisposition] = Field(min_length=1)
+    dispositions: tuple[HumanDisposition, ...] = Field(min_length=1)
     reviewer_run_summary: DecisionSupportText | None = None
 
     @model_validator(mode="after")

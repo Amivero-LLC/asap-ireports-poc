@@ -8,7 +8,7 @@ fails here rather than in a review someone might not do.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, get_args, get_origin
 
 import pytest
 from ireports_domain import (
@@ -26,6 +26,8 @@ from ireports_domain import (
     ReasonCode,
     ReviewerRole,
     RunStatus,
+    SpecialistCriterion,
+    SpecialistResult,
     ValidationOutcome,
     reject_determinative_language,
 )
@@ -344,3 +346,93 @@ def test_there_is_no_auto_approval_disposition() -> None:
     """Every disposition must describe an action a human took."""
     values = {d.value for d in DispositionKind}
     assert not any("auto" in v or "system" in v for v in values), values
+
+
+# ---------------------------------------------------------------------------
+# ADR-011 — the machine proposal cannot be edited in place
+# ---------------------------------------------------------------------------
+
+MUTABLE_ORIGINS = (list, set, dict)
+"""Container types whose *contents* stay mutable under Pydantic's `frozen=True`.
+
+`frozen=True` blocks attribute rebinding, not mutation of the object an attribute already
+points at. A `list` field on a frozen model is therefore still appendable, which silently
+defeats any cross-field validator that ran at construction. `CLAUDE.md` requires that both the
+original machine proposal and the human-approved version are retained; a contract whose
+sequence field can be appended to after validation does not retain the original.
+
+`tuple[X, ...]` serializes to the same JSON Schema (`{"type": "array", ...}`), so this costs
+nothing at the boundary — it only removes the mutation path.
+"""
+
+
+def _mutable_container_fields(model: type[BaseModel], seen: set[type] | None = None) -> set[str]:
+    """Every `Contract.field` in `model`'s tree whose annotation is a mutable container."""
+    seen = set() if seen is None else seen
+    if model in seen:
+        return set()
+    seen.add(model)
+
+    offenders: set[str] = set()
+
+    def inspect(annotation: object, label: str) -> None:
+        origin = get_origin(annotation)
+        if origin in MUTABLE_ORIGINS:
+            offenders.add(label)
+            return
+        for arg in get_args(annotation):
+            inspect(arg, label)
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            offenders.update(_mutable_container_fields(annotation, seen))
+
+    for name, field in model.model_fields.items():
+        inspect(field.annotation, f"{model.__name__}.{name}")
+    return offenders
+
+
+@pytest.mark.parametrize("stem,model", sorted(ROOT_CONTRACTS.items()))
+def test_no_contract_field_is_a_mutable_container(stem: str, model: type[BaseModel]) -> None:
+    offenders = _mutable_container_fields(model)
+    assert not offenders, (
+        f"contract {stem!r} carries mutable container field(s) {sorted(offenders)}. "
+        f"`frozen=True` does not freeze container contents, so these can be mutated after "
+        f"validation — defeating ADR-011's guarantee that the machine proposal is retained "
+        f"unedited. Use `tuple[X, ...]`, which emits identical JSON Schema."
+    )
+
+
+def test_the_mutability_guard_actually_catches_something() -> None:
+    """A guard that cannot fail is not a guard (same reasoning as the ADR-014 control)."""
+
+    class Mutable(BaseModel):
+        xs: list[int] = []
+
+    assert _mutable_container_fields(Mutable) == {"Mutable.xs"}
+
+
+def test_a_validated_result_cannot_be_given_another_cases_finding() -> None:
+    """The concrete failure this guard exists to prevent.
+
+    `SpecialistResult._findings_belong_to_this_criterion` rejects a foreign finding at
+    construction. Before `findings` became a tuple, appending one afterwards bypassed that
+    validator entirely and a case-A result could be made to carry a case-B finding.
+    """
+    result = SpecialistResult(
+        run_id="run_01J9AA",
+        case_id="AMI-SYN-MIX-004",
+        criterion=SpecialistCriterion(
+            decision_domain=DecisionDomain.NATIONAL_SECURITY_ELIGIBILITY,
+            policy_pack_id="sead4-current",
+            policy_id="SEAD-4",
+            criterion_id="GUIDELINE-B",
+        ),
+        generated_by=GeneratedBy(
+            node="foreign_influence_specialist",
+            model_alias=ModelAlias.THINKING,
+            prompt_version="foreign-v4",
+        ),
+        findings=[],
+    )
+    assert not hasattr(result.findings, "append")
+    with pytest.raises(AttributeError):
+        result.findings.append(object())  # type: ignore[attr-defined]

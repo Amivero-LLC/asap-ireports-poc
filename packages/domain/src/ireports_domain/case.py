@@ -98,8 +98,8 @@ class Subject(ContractModel):
     display_name: NonEmptyStr = Field(
         description="Synthetic name only. See DataClassification — this repo holds no real cases."
     )
-    citizenship: list[NonEmptyStr] = Field(
-        default_factory=list,
+    citizenship: tuple[NonEmptyStr, ...] = Field(
+        default_factory=tuple,
         description=(
             "Relevant to SEAD-4 Guidelines A-C analysis. Present because it is a "
             "criterion input under a named authority, not a general demographic attribute."
@@ -167,7 +167,7 @@ class CaseManifest(ContractModel):
     subject: Subject
     case_context: CaseContext
 
-    requested_analyses: list[DecisionDomain] = Field(
+    requested_analyses: tuple[DecisionDomain, ...] = Field(
         min_length=1,
         description=(
             "A request, not an authorization. Blueprint §10.2: requested_analyses cannot "
@@ -175,8 +175,8 @@ class CaseManifest(ContractModel):
             "case_context and may decline one or add one the requester omitted."
         ),
     )
-    policy_pack_ids: list[PolicyPackId] = Field(min_length=1)
-    document_expectations: list[DocumentExpectation] = Field(default_factory=list)
+    policy_pack_ids: tuple[PolicyPackId, ...] = Field(min_length=1)
+    document_expectations: tuple[DocumentExpectation, ...] = Field(default_factory=tuple)
     documents_root: NonEmptyStr = "documents"
 
     created_at: UtcDatetime

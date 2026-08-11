@@ -135,7 +135,7 @@ def _walk_property_names(schema: dict[str, Any], defs: dict[str, Any]) -> set[st
 def test_a_zero_findings_result_validates_and_still_names_its_criterion() -> None:
     """This is the whole reason the wrapper exists rather than a bare list of findings."""
     result = _result(findings=[])
-    assert result.findings == []
+    assert result.findings == ()
     assert result.criterion.criterion_id == "GUIDELINE-B"
 
 

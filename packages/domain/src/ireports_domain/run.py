@@ -124,7 +124,7 @@ class Actor(ContractModel):
     """Who initiated or acted on a run."""
 
     actor_id: ActorId
-    roles: list[NonEmptyStr] = Field(min_length=1)
+    roles: tuple[NonEmptyStr, ...] = Field(min_length=1)
 
 
 class Budgets(ContractModel):
@@ -187,10 +187,10 @@ class RunManifest(ContractModel):
         description="e.g. 'local_bedrock'. See ADR-009 — no offline profile."
     )
 
-    policy_packs: list[PolicyPackRef] = Field(min_length=1)
+    policy_packs: tuple[PolicyPackRef, ...] = Field(min_length=1)
     authority_routing: AuthorityRoutingResult | None = None
 
-    model_aliases: list[ModelAlias] = Field(
+    model_aliases: tuple[ModelAlias, ...] = Field(
         min_length=1,
         description=(
             "Aliases only, never model IDs (ADR-008). Diverges from blueprint §10.3 deliberately."
@@ -204,9 +204,9 @@ class RunManifest(ContractModel):
     consumption: BudgetConsumption = Field(default_factory=BudgetConsumption)
 
     status: RunStatus
-    evidence_snapshot_ids: list[EvidenceId] = Field(default_factory=list)
-    proposed_finding_ids: list[FindingId] = Field(default_factory=list)
-    errors: list[RunError] = Field(default_factory=list)
+    evidence_snapshot_ids: tuple[EvidenceId, ...] = Field(default_factory=tuple)
+    proposed_finding_ids: tuple[FindingId, ...] = Field(default_factory=tuple)
+    errors: tuple[RunError, ...] = Field(default_factory=tuple)
 
     human_review_recorded: bool = Field(
         default=False,

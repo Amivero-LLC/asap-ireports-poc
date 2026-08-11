@@ -159,7 +159,7 @@ class CanonicalDocument(ContractModel):
             "Evidence spans are only comparable within one extractor version."
         )
     )
-    blocks: list[DocumentBlock] = Field(min_length=1)
+    blocks: tuple[DocumentBlock, ...] = Field(min_length=1)
     normalized_at: UtcDatetime
 
     @model_validator(mode="after")

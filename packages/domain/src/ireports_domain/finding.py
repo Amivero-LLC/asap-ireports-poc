@@ -80,7 +80,7 @@ class FindingAuthority(ContractModel):
     policy_pack_id: PolicyPackId
     policy_id: NonEmptyStr
     criterion_id: NonEmptyStr
-    policy_citations: list[PolicyCitationId] = Field(
+    policy_citations: tuple[PolicyCitationId, ...] = Field(
         min_length=1,
         description=(
             "At least one. A policy-relevance claim with no resolvable policy citation is "
@@ -146,7 +146,7 @@ class InformationGap(ContractModel):
     gap_id: GapId
     question: DecisionSupportText
     why_it_matters: DecisionSupportText
-    related_evidence_ids: list[EvidenceId] = Field(default_factory=list)
+    related_evidence_ids: tuple[EvidenceId, ...] = Field(default_factory=tuple)
     blocking: bool = Field(
         default=False,
         description=(
@@ -182,19 +182,19 @@ class ProposedFinding(ContractModel):
         )
     )
 
-    supporting_evidence: list[EvidenceId] = Field(default_factory=list)
-    mitigating_evidence: list[EvidenceId] = Field(default_factory=list)
-    contradicting_evidence: list[EvidenceId] = Field(default_factory=list)
+    supporting_evidence: tuple[EvidenceId, ...] = Field(default_factory=tuple)
+    mitigating_evidence: tuple[EvidenceId, ...] = Field(default_factory=tuple)
+    contradicting_evidence: tuple[EvidenceId, ...] = Field(default_factory=tuple)
 
-    aggravating_factors: list[DecisionSupportText] = Field(default_factory=list)
-    mitigating_factors: list[DecisionSupportText] = Field(
-        default_factory=list,
+    aggravating_factors: tuple[DecisionSupportText, ...] = Field(default_factory=tuple)
+    mitigating_factors: tuple[DecisionSupportText, ...] = Field(
+        default_factory=tuple,
         description=(
             "Whole-person and mitigation analysis is required, not optional (blueprint §8.3.6). "
             "A finding that records only aggravating factors is a red flag in evaluation."
         ),
     )
-    information_gaps: list[InformationGap] = Field(default_factory=list)
+    information_gaps: tuple[InformationGap, ...] = Field(default_factory=tuple)
 
     evidence_confidence: Confidence = Field(
         description="How solid the underlying record is — source reliability and corroboration."

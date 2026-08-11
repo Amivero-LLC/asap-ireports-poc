@@ -138,7 +138,7 @@ class ContradictionRecord(ContractModel):
     contradiction_id: NonEmptyStr
     case_id: CaseId
     topic: NonEmptyStr
-    assertion_evidence_ids: list[EvidenceId] = Field(min_length=2)
+    assertion_evidence_ids: tuple[EvidenceId, ...] = Field(min_length=2)
     description: NonEmptyStr = Field(
         description="Neutral statement of what conflicts. Not an assessment of who is truthful."
     )
