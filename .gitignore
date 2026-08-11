@@ -1,0 +1,35 @@
+# Environment — never commit; the root .env is the source of truth
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Case data — synthetic only in this repo, and never committed by accident
+cases/**/documents/
+!cases/synthetic/**/documents/.gitkeep
+*.pdf
+!blueprint*.pdf
+
+# Local model and embedding caches
+.cache/
+models/
+
+# Build and deploy artifacts
+.aws-sam/
+*.zip
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
