@@ -24,7 +24,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from ireports_domain import RunStatus
+from ireports_spike_harness.bakeoff_v1_contracts import BakeoffRunStatus as RunStatus
 from ireports_spike_harness.gateway import DEFAULT_DSN, connect
 
 SCHEMA = """

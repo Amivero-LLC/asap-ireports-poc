@@ -13,18 +13,15 @@ from typing import Any, get_args, get_origin
 import pytest
 from ireports_domain import (
     ROOT_CONTRACTS,
+    ASAPEnvelope,
     Confidence,
     DecisionDomain,
-    DispositionKind,
     FindingAuthority,
     FindingClassification,
     FindingValidation,
     GeneratedBy,
-    HumanDisposition,
     ModelAlias,
     ProposedFinding,
-    ReasonCode,
-    ReviewerRole,
     RunStatus,
     SpecialistCriterion,
     SpecialistResult,
@@ -286,66 +283,118 @@ def test_the_three_aliases_are_the_whole_set() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ADR-011 — the human review gate has no bypass
+# ADR-022 — iReports has no human interaction; review happens in ASAP
 # ---------------------------------------------------------------------------
 
+REVIEW_FIELD_SUBSTRINGS = (
+    "disposition",
+    "human_review",
+    "human_reviewed",
+    "reviewer_modified",
+    "approved_by",
+    "approval",
+    "release_to_asap",
+    "signed_off",
+)
+"""Field names that would mean iReports had modelled the review it does not perform.
 
-def test_no_path_reaches_delivery_without_human_review() -> None:
-    """Walk the state machine and prove the gate is unavoidable.
+ADR-022 puts review in ASAP, after a run finishes. A field here would either be dead weight or —
+worse — an invitation for the handoff team to build a reviewer workflow into iReports that belongs
+in ASAP. `reviewer_summary` is deliberately absent from this list only because no contract carries
+it any more; if one reappears, the substring "reviewer" is not banned outright because
+`recommended_officer_action` and `ReviewUrgency` are legitimate: they describe what iReports
+proposes *for* a reviewer, not a decision it recorded.
+"""
 
-    Asserting the validator alone would not be enough: a transition table that let
-    VALIDATING jump straight to PACKAGING would satisfy every field-level check while
-    reopening exactly the bypass ADR-011 forbids.
+
+@pytest.mark.parametrize("stem,model", sorted(ROOT_CONTRACTS.items()))
+def test_no_contract_models_a_human_decision(stem: str, model: type[BaseModel]) -> None:
+    """iReports proposes; it does not record what anyone decided.
+
+    The mirror image of the ADR-014 guard above. That one forbids the system from *making* a
+    determination; this one forbids it from *claiming* a human made one.
     """
-    gate = RunStatus.AWAITING_HUMAN_REVIEW
-    reachable_without_gate: set[RunStatus] = {RunStatus.INITIALIZING}
+    schema = model.model_json_schema(mode="serialization")
+    names = _walk_property_names(schema, schema.get("$defs", {}))
+    offenders = {
+        name for name in names if any(bad in name.lower() for bad in REVIEW_FIELD_SUBSTRINGS)
+    }
+    assert not offenders, (
+        f"contract {stem!r} carries field(s) {sorted(offenders)} that model a human decision. "
+        f"ADR-022: review happens in ASAP, after iReports has finished. What an officer decides "
+        f"is ASAP's contract to define, not ours to guess at."
+    )
+
+
+def test_no_run_state_waits_for_a_person() -> None:
+    """A run must be able to go start to finish unattended.
+
+    Under ADR-011 the state machine deliberately contained a state a run could not leave without
+    human action. ADR-022 removed it, because iReports has no reviewer-facing surface at all.
+    """
+    stalled = {s for s in RunStatus if "review" in s.value or "await" in s.value}
+    assert not stalled, (
+        f"run states {sorted(s.value for s in stalled)} imply a run waits for a person; "
+        f"iReports runs unattended (ADR-022)"
+    )
+
+
+def test_every_state_can_reach_a_terminal_state_unattended() -> None:
+    """The property the removed gate would have broken, asserted directly.
+
+    Walking the transition table matters more than checking the enum: a state whose only exit
+    needed an out-of-band actor would strand a run without any field-level check noticing.
+    """
+    terminal = {RunStatus.DELIVERED, RunStatus.FAILED, RunStatus.CANCELLED}
+    for start in RunStatus:
+        reachable: set[RunStatus] = set()
+        frontier = [start]
+        while frontier:
+            current = frontier.pop()
+            for nxt in LEGAL_TRANSITIONS[current]:
+                if nxt not in reachable:
+                    reachable.add(nxt)
+                    frontier.append(nxt)
+        assert reachable & terminal or start in terminal, (
+            f"{start.value!r} cannot reach a terminal state; a run that starts must be able to "
+            f"finish without anyone intervening"
+        )
+
+
+def test_delivery_is_reachable_without_any_human_step() -> None:
+    """The positive case: an unattended run can get all the way to DELIVERED."""
+    reachable: set[RunStatus] = {RunStatus.INITIALIZING}
     frontier = [RunStatus.INITIALIZING]
     while frontier:
         current = frontier.pop()
         for nxt in LEGAL_TRANSITIONS[current]:
-            if nxt is gate or nxt in reachable_without_gate:
-                continue
-            reachable_without_gate.add(nxt)
-            frontier.append(nxt)
+            if nxt not in reachable:
+                reachable.add(nxt)
+                frontier.append(nxt)
+    assert RunStatus.DELIVERED in reachable
 
-    delivery_side = {
-        RunStatus.REVIEW_RECORDED,
-        RunStatus.PACKAGING,
-        RunStatus.DELIVERING,
-        RunStatus.DELIVERED,
-    }
-    leaked = delivery_side & reachable_without_gate
-    assert not leaked, (
-        f"states {sorted(s.value for s in leaked)} are reachable without passing through "
-        f"{gate.value}; ADR-011 requires the review gate to be unavoidable"
+
+def test_budget_exhaustion_still_reaches_a_reviewer() -> None:
+    """Blueprint §8.5 survives ADR-022 with a different mechanism.
+
+    The requirement was never that a budget stop pause in-run — it was that a truncated analysis
+    stay visible instead of vanishing. It now reaches ASAP by being packaged and delivered like
+    any other run, which is why the route is to PACKAGING rather than to FAILED.
+    """
+    exits = LEGAL_TRANSITIONS[RunStatus.INCOMPLETE_DUE_TO_BUDGET]
+    assert RunStatus.PACKAGING in exits
+    assert RunStatus.FAILED not in exits
+
+
+def test_the_envelope_never_claims_to_have_been_reviewed() -> None:
+    """An envelope is what gets reviewed, not the product of a review (ADR-022)."""
+    schema = ASAPEnvelope.model_json_schema(mode="serialization")
+    names = _walk_property_names(schema, schema.get("$defs", {}))
+    assert "human_reviewed" not in names
+    assert "machine_generated" in names, (
+        "the envelope must still assert positively that it is machine output; removing "
+        "human_reviewed without keeping machine_generated would leave its status unstated"
     )
-
-
-def test_budget_exhaustion_routes_to_review_not_to_silent_failure() -> None:
-    """Blueprint §8.5: a budget stop must be visible to a reviewer."""
-    assert RunStatus.AWAITING_HUMAN_REVIEW in LEGAL_TRANSITIONS[RunStatus.INCOMPLETE_DUE_TO_BUDGET]
-
-
-def test_rejected_findings_cannot_be_released() -> None:
-    with pytest.raises(ValidationError, match="release_to_asap is not permitted"):
-        HumanDisposition(
-            disposition_id="dsp_01",
-            finding_id="fnd_01",
-            run_id="run_01",
-            reviewer_id="officer-42",
-            reviewer_role=ReviewerRole.AUTHORIZED_ADJUDICATIVE_OFFICER,
-            reviewed_at=NOW,
-            disposition=DispositionKind.REJECTED,
-            reason_codes=[ReasonCode.UNSUPPORTED_BY_EVIDENCE],
-            reviewer_summary="The cited span does not support the stated observation.",
-            release_to_asap=True,
-        )
-
-
-def test_there_is_no_auto_approval_disposition() -> None:
-    """Every disposition must describe an action a human took."""
-    values = {d.value for d in DispositionKind}
-    assert not any("auto" in v or "system" in v for v in values), values
 
 
 # ---------------------------------------------------------------------------

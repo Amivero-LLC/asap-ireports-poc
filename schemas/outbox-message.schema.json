@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/outbox-message.schema.json",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "2.0.0",
   "$defs": {
     "OutboxStatus": {
       "enum": [
@@ -19,8 +19,8 @@
   "description": "A delivery intent, written in the same transaction that records the approval.\n\nBlueprint \u00a710.7. The envelope is never sent from a model node and never before the human\ngate \u2014 the outbox is the only path, and it is written by the packager after review.",
   "properties": {
     "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Schema Version",
       "type": "string"
     },

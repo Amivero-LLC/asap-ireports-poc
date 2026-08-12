@@ -28,7 +28,10 @@ import sys
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from ireports_domain import ASAPEnvelope, HumanDisposition, ProposedFinding, RunStatus
+from ireports_domain import ASAPEnvelope, ProposedFinding
+
+from ireports_spike_harness.bakeoff_v1_contracts import BakeoffRunStatus as RunStatus
+from ireports_spike_harness.bakeoff_v1_contracts import HumanDisposition
 
 
 @dataclass(frozen=True)

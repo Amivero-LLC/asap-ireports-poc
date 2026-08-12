@@ -21,16 +21,18 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 
-from ireports_domain import (
-    ASAPEnvelope,
+from ireports_domain import ASAPEnvelope, ProposedFinding, RunManifest
+from ireports_spike_harness import port, scenario
+from ireports_spike_harness.bakeoff_v1_contracts import (
+    BakeoffRunStatus as RunStatus,
+)
+from ireports_spike_harness.bakeoff_v1_contracts import (
     DispositionedFinding,
     HumanDisposition,
-    ProposedFinding,
-    RunManifest,
-    RunStatus,
-    is_legal_transition,
 )
-from ireports_spike_harness import port, scenario
+from ireports_spike_harness.bakeoff_v1_contracts import (
+    bakeoff_is_legal_transition as is_legal_transition,
+)
 from ireports_spike_harness.gateway import ModelTimeoutError, StubModelGateway
 
 from . import checkpoint

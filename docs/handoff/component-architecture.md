@@ -25,11 +25,14 @@ to assess that one rule against those passages, and gets back a structured answe
 the exact text it relied on. It does this for every applicable rule, keeping a running count of
 how much work it has done so it cannot run away.
 
-It then stops. It packages what it found and waits for an authorized human officer to review each
-item and record a decision. **The system never decides anything about a person.** It produces
-*proposed* items with evidence attached; a human accepts, rejects, or edits each one. Only after
-that does anything get sent onward to ASAP, and both the original machine version and the
-human-approved version are kept.
+It then packages what it found and hands it to ASAP. **The system never decides anything about a
+person, and it never asks anyone anything** — it runs start to finish with no human involved, and
+what it emits is a set of *proposed* items with evidence attached. An authorized officer reviews
+those proposals **in ASAP**, using ASAP's own tooling, and whatever they decide is recorded there.
+
+That division is the point: iReports is the analysis, ASAP is where judgment happens. An earlier
+version of this architecture put a review pause inside the run itself; it was removed (ADR-022)
+because it modelled a workflow this system does not have.
 
 Everything else in this document is detail about where the pieces of that sit, which ones exist
 today, and which ones were designed but deliberately not built.
@@ -44,14 +47,14 @@ here rather than left to context.
 |---|---|---|
 | **Port** | An interface *we* define and our code calls, so whatever sits behind it can be replaced without changing the callers. | From "ports and adapters." **Not** a network port. Used 50+ times below — if a sentence says "through the port," read it as "through our own interface rather than calling the vendor directly." |
 | **Adapter** | The swappable implementation behind a port. | `litellm` and `bedrock` are two adapters behind one model-access port. Swapping them is a config change, not a code change. |
-| **The spine** | The narrow, end-to-end path: one case in, one human-reviewed package out. | Chosen over building broad-but-shallow features. It is the smallest slice that still touches every genuinely hard part. |
+| **The spine** | The narrow, end-to-end path: one case in, one validated package of proposals out. | Chosen over building broad-but-shallow features. It is the smallest slice that still touches every genuinely hard part. |
 | **Fan out** | Start several small analyses at once — one per rule being checked — then collect the results. | This is the part that is architecturally hard, which is why it is the centre of the scope. |
 | **Criterion** | One specific thing being checked under one named authority (e.g. SEAD-4 Guideline B). | **Not** a risk category or a score bucket. |
 | **Specialist sub-call** | One bounded analysis of one criterion: search, one model call, one structured result. | "Specialist" means scoped to a single criterion, not a separate AI system. |
 | **Deterministic shell** | The ordinary, non-AI code wrapped around each model call that decides what happens next — validation, budgets, loop limits, routing. | The rule it encodes: **the model reasons; the shell decides.** The model never controls flow or judges its own output. |
 | **Tier alias** | A nickname for a *class* of model (`ireports-thinking`) instead of a specific model id. | Lets a model, region, or cloud partition change be a configuration change rather than a code change. |
 | **Proposed finding** | Anything the machine produced that no human has ruled on yet. | Everything this system emits is "proposed." The word is load-bearing, not hedging. |
-| **Disposition** | The record of what an authorized officer decided about a proposed finding — accept, reject, or edit — and why. | This is *the* gate. No disposition, nothing moves. |
+| **Disposition** | What an authorized officer decides about a proposed finding — accept, reject, or edit. | Happens **in ASAP, after iReports has finished**. iReports does not model, record, or wait for it (ADR-022). The word appears in older documents as an in-run step; that is superseded. |
 | **Envelope** | The single typed package handed to ASAP at the end of a run. | Typed = its shape is checked by machine before it is allowed out. |
 | **Checkpoint** | A durable save of the run's state, written before a step finishes. | So a crash can resume from the last good point instead of starting over. |
 | **Durability** | The property that state is written down before a step returns; nothing important lives only in memory. | The thing checkpoints deliver. |
@@ -110,10 +113,12 @@ trusted:
 
 - No universal person-risk score and no aggregate risk level appear on any contract, whatever the
   field is named (ADR-014).
-- Every finding this system produces is a *proposed* finding until an authorized officer records a
-  disposition.
-- Nothing reaches ASAP without that disposition — no bypass, in any profile.
-- Both the machine proposal and the human-approved version are retained.
+- Every finding this system produces is a *proposed* finding. There is no other kind — the type
+  is called `ProposedFinding` and nothing downstream of it can promote it to anything else.
+- Every envelope is pinned `machine_generated: true` and carries no field claiming review,
+  approval, or sign-off. It is un-reviewed by construction (ADR-022).
+- A language guard rejects determinative wording — "is unsuitable", "should be denied",
+  "violated SEAD-4" — on every text field, whether a model or a person wrote it.
 
 These are enforced by validation code and tests, not by convention — meaning a change that broke
 one of them would fail the test suite rather than pass unnoticed.
@@ -129,8 +134,8 @@ synthetic case all the way through, and that path has to do seven things:
    the model's control.
 5. Survive being killed partway through the fan-out, and resume in a *different process* without
    re-running (and re-paying for) a model call that was already in flight.
-6. Stop and wait for an authorized officer to record a disposition.
-7. Emit one typed package, machine-validated before it leaves.
+6. Run to completion unattended — no pause, no prompt, no human in the loop.
+7. Emit one typed package of proposals, machine-validated before it leaves, for review in ASAP.
 
 Item 5 is the genuinely hard one and is the reason the scope is shaped this way.
 
@@ -145,7 +150,8 @@ proven anything. §4 marks what exists; §5 accounts for every piece that does n
 
 Three boundaries matter at this level, and a reader should be able to point at each of them
 without reading past the diagram: where iReports stops and the AWS ingestion pipeline starts,
-where iReports stops and ASAP starts, and where iReports stops and the human reviewer starts.
+where iReports stops and ASAP starts, and — the sharpest of the three — that iReports never
+touches the human reviewer at all.
 
 ```mermaid
 flowchart LR
@@ -157,7 +163,6 @@ flowchart LR
         RETR["packages/retrieval/<br/>retrieval port + mapping module<br/>PLANNED - Phase 2"]
         PG[("PostgreSQL<br/>system of record for<br/>workflow state<br/>PLANNED - Phase 2")]
         OSLOCAL[("Local OpenSearch<br/>dev mirror of the AWS collection<br/>PLANNED - Phase 2")]
-        GATE{{"AWAITING_HUMAN_REVIEW<br/>our run state - no bypass, in any profile<br/>BUILT - state machine in run.py<br/>pause/resume across a process: PLANNED - Phase 3"}}
     end
 
     subgraph AWSSIDE["AWS ingestion pipeline (NOT OURS)"]
@@ -186,14 +191,14 @@ flowchart LR
     GATEWAY -- "tier alias; resolved to a<br/>model id in proxy config (ADR-017)" --> PROXY
     PROXY --> BEDROCK
     GATEWAY -. "bedrock adapter: direct, no proxy (ADR-015)" .-> BEDROCK
-    ORCH --> GATE
-    GATE --> REVIEWER
-    REVIEWER -- "disposition recorded, run resumes" --> GATE
-    GATE -. "validated ASAPEnvelope, written to disk,<br/>only after a disposition" .-> ASAPSYS
+    ORCH -. "validated ASAPEnvelope of proposals,<br/>written to disk (ADR-010)" .-> ASAPSYS
+    ASAPSYS --> REVIEWER
 ```
 
-Every ASAP-bound path in that diagram traverses `GATE`. There is deliberately no edge from `ORCH`
-to `ASAPSYS` — the no-bypass claim below is a property of the graph, not a caption on it.
+Note what iReports has no edge to: **the reviewer.** There is no arrow from anything we build to a
+person, because there is no point in a run where this system asks anyone anything. Our boundary
+ends at the envelope. The officer reaches the proposals through ASAP, which is also where their
+decision is recorded — none of that traffic crosses back into iReports (ADR-022).
 
 **Where the boundaries sit, one sentence each.** In the target deployment iReports **will query**
 the AWS-owned vector collection directly as a consumer, never a producer — `PLANNED`, and
@@ -202,9 +207,9 @@ RETR-01/RETR-02 build against local OpenSearch only (ADR-021 Decision 1). The AW
 pipeline owns extraction, chunking, and production embedding, and iReports's own local ingestion
 exists only to develop against (ADR-007). iReports writes a validated `ASAPEnvelope` to disk; ASAP owns everything that
 happens to that envelope after it is written, including transport, storage, and any downstream
-action (ADR-010). iReports pauses in an explicit `AWAITING_HUMAN_REVIEW` state and cannot proceed
-past it by itself — a human reviewer, not this system, records the disposition that lets a run
-resume (ADR-011).
+action (ADR-010). iReports runs unattended from start to finish and has no reviewer-facing
+surface at all: an authorized officer reviews the proposals in ASAP and records their decision
+there, in ASAP's records, using ASAP's tooling (ADR-022).
 
 Three statements this section makes explicitly, because a reader would otherwise assume the
 opposite:
@@ -241,7 +246,8 @@ fixture-fed specialist would demonstrate a fan-out, not this system.
 
 This opens the `ORCH` box from §2 into the workflow steps a single run passes through — what
 kicks off a sub-agent call, what the sub-agent does with its retrieval query, where budgets are
-checked, and where the run pauses for the human reviewer.
+checked, and where the run ends. Note that it ends by emitting — there is no pause anywhere in it
+(ADR-022).
 
 ```mermaid
 flowchart TD
@@ -258,13 +264,12 @@ flowchart TD
     end
 
     SHELL{"4. Deterministic shell checks<br/>budgets, loop limits, and<br/>no-progress between steps"}
-    BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>routes to human review, not to failure"]
+    BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>still packaged and delivered, not failed"]
     AGG["Aggregate the SpecialistResults<br/>no aggregate score, ever (ADR-014)"]
     STEP5["5. Checkpoint durably,<br/>before the node returns"]
-    STEP6["6. Run enters AWAITING_HUMAN_REVIEW<br/>and pauses"]
-    DISPOSITION["Disposition recorded out of band<br/>by a different process (ADR-011)"]
-    STEP7A["7. Run resumes from the checkpoint"]
-    STEP7B["Emits a validated ASAPEnvelope<br/>written to disk"]
+    STEP6["6. Package the proposals"]
+    STEP7B["7. Emit a validated ASAPEnvelope<br/>written to disk - run is DELIVERED"]
+    ASAPREVIEW["Reviewed in ASAP by an authorized officer<br/>NOT OURS - outside this diagram (ADR-022)"]
 
     STEP1 --> STEP2
     STEP2 -- "per criterion" --> SPECIALIST
@@ -274,16 +279,21 @@ flowchart TD
     SHELL -- "all criteria done" --> AGG
     BUDGETSTOP --> AGG
     AGG --> STEP5 --> STEP6
-    STEP6 --> DISPOSITION --> STEP7A --> STEP7B
+    STEP6 --> STEP7B
+    STEP7B -. "handed off" .-> ASAPREVIEW
 ```
 
 Two properties are drawn rather than described, because they are the reason the spine exists
 (ADR-020): the **fan-out** (`STEP2 -- per criterion --> SPECIALIST`, one instance per criterion)
 and the **loop the limits bound** (`SHELL -- criteria remain --> STEP2`). Note also that the
-budget-stop path rejoins before step 5 — **every** path to `AWAITING_HUMAN_REVIEW` checkpoints
-first, including the truncated one. A path that returned without checkpointing would contradict
-the durability property stated below, and would be the specific way a truncated analysis
-disappears instead of reaching a reviewer.
+budget-stop path rejoins before step 5 — **every** path to delivery checkpoints first, including
+the truncated one. A path that returned without checkpointing would contradict the durability
+property stated below, and would be the specific way a truncated analysis disappears instead of
+reaching ASAP.
+
+The last node is deliberately drawn outside the flow and marked `NOT OURS`. Review is real and it
+matters, but it is not a step in this state machine — the run reaches `DELIVERED` and ends,
+whether or not anyone has looked at the result yet.
 
 **Ordinary code wraps the AI, not the other way round.** This is the "deterministic shell" from
 §0, and it is the central design choice: *the model reasons; the surrounding code decides.*
@@ -296,8 +306,9 @@ choose what happens next, and it does not get to rule on whether its own output 
 Each specialist analysis runs under ceilings — on model calls, tool calls, evidence retrieved,
 tokens, and elapsed time — plus a check for a loop that is still running but no longer producing
 anything new. A step that hits a ceiling does **not** fail. It reports
-`INCOMPLETE_DUE_TO_BUDGET` and routes to human review anyway, because a partial analysis that
-silently vanishes is worse than one a reviewer can see is partial.
+`INCOMPLETE_DUE_TO_BUDGET` and is packaged and delivered anyway rather than failing, because a
+partial analysis that silently vanishes is worse than one a reviewer can see is partial. The
+requirement was never that the run pause — only that the truncated result reach ASAP.
 
 **Durability: what the architecture requires, stated before how any framework provides it.** Three
 requirements, in plain terms: the run's state is written to durable storage before a step
@@ -373,16 +384,23 @@ reason to move the code.
 | Specialist sub-call (criterion-specific tool allowlist) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/specialist.py` | Phase 2, SPEC-01 |
 | Refusal / `StructuredOutputError` logging | `PLANNED` | `packages/orchestration/src/ireports_orchestration/refusal_log.py` | Phase 2, VAL-02 (reduced to logging, ADR-021) |
 
-**Human review, typed output, and delivery.**
+**Typed output, delivery, and validation.**
+
+ADR-022 removed the in-run review gate from this section. What stood here — a human disposition
+contract, a run-state gate, a pause-and-resume across a process boundary, and a no-bypass proof —
+described review as something iReports performed. It does not. Those rows are not `PLANNED` and
+not `DESIGNED-NOT-BUILT`; they are **withdrawn**, because they specified a system that was never
+the right one. §5's designed-not-built list is for work that was correctly specified and cut, and
+mixing these in would misrepresent both.
 
 | Component | Build state | Path | Notes |
 |---|---|---|---|
-| Human disposition contract | `BUILT` | `packages/domain/src/ireports_domain/disposition.py` | `HumanDisposition`, `DispositionedFinding` |
-| Run status state machine (the review gate) | `BUILT` | `packages/domain/src/ireports_domain/run.py` | `AWAITING_HUMAN_REVIEW` is unbypassable by construction (ADR-011) |
-| `ASAPEnvelope` contract | `BUILT` | `packages/domain/src/ireports_domain/asap.py` | Validated; the transport that would deliver it does not ship (DEL-01, §5) |
-| Review pause and resume across a process boundary | `PLANNED` | `apps/api/review.py` | Phase 3, REV-01 |
-| No-bypass proof across the transition table | `PLANNED` | `tests/end_to_end/test_no_bypass.py` | Phase 3, REV-02 |
-| One command, case to human-approved envelope | `PLANNED` | `apps/api/main.py` | Phase 3, DEL-02 |
+| Run status state machine | `BUILT` | `packages/domain/src/ireports_domain/run.py` | No state waits for a person; every state can reach a terminal state unattended (ADR-022) |
+| `ASAPEnvelope` contract | `BUILT` | `packages/domain/src/ireports_domain/asap.py` | Validated; pinned `machine_generated`, carries no review or approval field. The transport that would deliver it does not ship (DEL-01, §5) |
+| Boundary guards in code | `BUILT` | `tests/contract/test_decision_support_boundary.py` | Asserts no contract models a human decision, no run state waits for one, and the envelope never claims review |
+| One command, case to validated envelope | `PLANNED` | `apps/api/main.py` | Phase 3, DEL-02 |
+| Synthetic cases with analyst-identified issues | `PLANNED` | `cases/synthetic/` | Phase 3, VAL-03 — the ground truth agreement is measured against |
+| Agreement scorer — machine findings vs analyst findings | `PLANNED` | `evals/scorers/agreement.py` | Phase 3, VAL-04 — this is what "human validation" means here |
 
 **Evidence base and the handoff package itself.**
 
@@ -403,7 +421,7 @@ reason to move the code.
 | AWS ingestion pipeline (extraction, chunking, production embedding) | `NOT OURS` | — | Owned by the AWS ingestion pipeline team (ADR-007) |
 | AWS OpenSearch-compatible vector collection | `NOT OURS` | — | Owned and populated by AWS ingestion; iReports is a consumer, never a producer (ADR-007) |
 | ASAP | `NOT OURS` | — | The receiving system of record; owns the envelope after delivery (ADR-010) |
-| Authorized human reviewer | `NOT OURS` | — | A person, not a software component; the reviewer role is defined by ADR-011, the reviewer's own tooling is out of scope |
+| Authorized human reviewer | `NOT OURS` | — | A person, not a software component. Reached through ASAP, never through iReports; their tooling, their role model, and the record of what they decide are all ASAP's (ADR-022) |
 
 The tables above are enforced by `tests/architecture/test_build_state_table.py`. When Phase 2 or
 Phase 3 creates a path a `PLANNED` row names, that row must be flipped to `BUILT` in the same
@@ -525,8 +543,9 @@ blocked on account access regardless of anything this project builds.
 
 ## 7. Sources
 
-1. `docs/DECISIONS.md` — ADR-001, ADR-006, ADR-007, ADR-008, ADR-011, ADR-012, ADR-014, ADR-015,
-   ADR-017, ADR-020, ADR-021 `[first-party]`.
+1. `docs/DECISIONS.md` — ADR-001, ADR-006, ADR-007, ADR-008, ADR-012, ADR-014, ADR-015,
+   ADR-017, ADR-020, ADR-021, ADR-022 `[first-party]`. ADR-022 supersedes ADR-011; where an
+   older handoff document describes an in-run review gate, this document is the current one.
 2. `docs/OPEN-QUESTIONS.md` — Q-01, Q-02, Q-03 and their blast radius `[first-party]`.
 3. `.planning/PROJECT.md` and `.planning/ROADMAP.md` — the spine statement, the Phase 1 through
    Phase 3 success criteria, and the Gates section `[first-party]`.

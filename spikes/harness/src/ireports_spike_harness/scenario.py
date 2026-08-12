@@ -33,7 +33,6 @@ from ireports_domain import (
     Confidence,
     DecisionDomain,
     DeliveredFinding,
-    DispositionedFinding,
     EnvelopeAnalysis,
     EnvelopeCase,
     EnvelopeIntegrity,
@@ -51,12 +50,14 @@ from ireports_domain import (
     ProposedFinding,
     RoutingBasis,
     RunManifest,
-    RunStatus,
     ServiceType,
     SourceReliability,
     Subject,
     ValidationOutcome,
 )
+
+from ireports_spike_harness.bakeoff_v1_contracts import BakeoffRunStatus as RunStatus
+from ireports_spike_harness.bakeoff_v1_contracts import DispositionedFinding
 
 from .gateway import StubModelGateway
 
@@ -351,8 +352,8 @@ def package(
                     evidence_confidence=d.proposal.evidence_confidence,
                     analysis_confidence=d.proposal.analysis_confidence,
                     urgency=d.proposal.urgency,
-                    human_disposition=d.disposition.disposition.value,
-                    reviewer_modified=d.disposition.approved_text is not None,
+                    # `human_disposition` and `reviewer_modified` were passed here until
+                    # ADR-022 removed them from DeliveredFinding. No leg asserts on either.
                 )
                 for d in sorted(releasable, key=lambda d: d.proposal.finding_id)
             ],

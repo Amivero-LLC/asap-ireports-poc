@@ -34,14 +34,10 @@ import operator
 import os
 from typing import Annotated, Any, TypedDict
 
-from ireports_domain import (
-    ASAPEnvelope,
-    DispositionedFinding,
-    HumanDisposition,
-    ProposedFinding,
-    RunStatus,
-)
+from ireports_domain import ASAPEnvelope, ProposedFinding
 from ireports_spike_harness import port, scenario
+from ireports_spike_harness.bakeoff_v1_contracts import BakeoffRunStatus as RunStatus
+from ireports_spike_harness.bakeoff_v1_contracts import DispositionedFinding, HumanDisposition
 from ireports_spike_harness.gateway import DEFAULT_DSN, ModelTimeoutError, StubModelGateway, connect
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, RetryPolicy, interrupt

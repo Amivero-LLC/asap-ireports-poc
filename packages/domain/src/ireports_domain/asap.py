@@ -47,7 +47,7 @@ from .common import (
 from .document import SourceReliability
 from .finding import FindingClassification, InformationGap, ReviewUrgency
 
-EnvelopeVersion = Literal["1.0.0"]
+EnvelopeVersion = Literal["2.0.0"]
 """The envelope's own version, versioned independently of the contract set.
 
 Separate from `ContractVersion` on purpose: when Q-04 resolves and the real ASAP specification
@@ -55,7 +55,7 @@ lands, the envelope will almost certainly change while the internal contracts do
 the two would force an unrelated major bump across every contract.
 """
 
-ENVELOPE_VERSION: EnvelopeVersion = "1.0.0"
+ENVELOPE_VERSION: EnvelopeVersion = "2.0.0"
 
 MAX_EXCERPT_CHARS = 2000
 """Upper bound on an embedded excerpt.
@@ -89,11 +89,18 @@ class EvidenceExcerpt(ContractModel):
 
 
 class DeliveredFinding(ContractModel):
-    """One human-approved finding, as ASAP receives it.
+    """One *proposed* finding, as ASAP receives it for review.
 
-    `machine_proposal_finding_id` is retained so the delivered record traces back to the
-    immutable proposal (ADR-011). `human_disposition` is required — there is no shape of this
-    object that represents an undispositioned finding.
+    Named for the act of delivery, not for any approval: ADR-022 places human review in ASAP,
+    after iReports has finished. Every finding in an envelope is therefore un-reviewed by
+    construction, and the officer who reviews it does so in ASAP's tooling, recording the outcome
+    in ASAP's own records.
+
+    An earlier version of this contract carried `human_disposition` and `reviewer_modified` under
+    ADR-011, when review was modelled as an in-run pause. Both are removed — iReports has no
+    disposition to report, and inventing a field for one would ask ASAP to populate a shape we do
+    not own. `machine_proposal_finding_id` stays: it traces the delivered record back to the
+    immutable proposal, which is still how a reader gets from an envelope to the analysis.
     """
 
     finding_id: FindingId
@@ -122,13 +129,6 @@ class DeliveredFinding(ContractModel):
     analysis_confidence: Confidence
     urgency: ReviewUrgency
 
-    human_disposition: NonEmptyStr = Field(
-        description="The DispositionKind value. Required — delivery presupposes a disposition."
-    )
-    reviewer_modified: bool = Field(
-        description="True when the officer changed the wording. Both versions are retained by us."
-    )
-
 
 class EnvelopeCase(ContractModel):
     case_id: CaseId
@@ -141,24 +141,26 @@ class EnvelopeAnalysis(ContractModel):
     """The analysis section.
 
     Note the absent field. Blueprint §10.6's example has a free-text `summary`; a run-level
-    narrative is the most likely place for an aggregate characterization of a person to
-    reappear, which ADR-014 forbids. It is present here only as a reviewer-authored,
-    language-guarded optional field, and it is never machine-generated.
+    narrative is the most likely place for an aggregate characterization of a person to reappear,
+    which ADR-014 forbids. Under ADR-011 it survived here as a reviewer-authored, language-guarded
+    optional field. With review moved to ASAP (ADR-022) there is no reviewer at this point in the
+    pipeline to author one, so the field is gone entirely — which is the stricter outcome.
+
+    `machine_generated` stays pinned to `True` and is now the single most important field on the
+    envelope. It says exactly what an envelope is: machine output, proposed, not yet reviewed by
+    anyone. The companion `human_reviewed: Literal[True]` was removed, because under ADR-022 it
+    would have been false in every envelope this system emits.
     """
 
     run_id: RunId
     policy_pack_ids: tuple[PolicyPackId, ...] = Field(min_length=1)
     model_aliases: tuple[ModelAlias, ...] = Field(min_length=1)
     findings: tuple[DeliveredFinding, ...] = Field(min_length=1)
-    reviewer_summary: DecisionSupportText | None = Field(
-        default=None, description="Reviewer-authored only. Never machine-generated."
-    )
-    machine_generated: Literal[True] = True
-    human_reviewed: Literal[True] = Field(
+    machine_generated: Literal[True] = Field(
         default=True,
         description=(
-            "Structurally pinned. An envelope is only constructible for a reviewed run, so "
-            "`false` has no valid meaning here (ADR-011)."
+            "Structurally pinned. Everything in this envelope is a machine proposal awaiting "
+            "review in ASAP; there is no shape of this object that claims otherwise (ADR-022)."
         ),
     )
 
@@ -171,16 +173,21 @@ class EnvelopeIntegrity(ContractModel):
 
 
 class ASAPEnvelope(ContractModel):
-    """One versioned envelope per approved run (blueprint §10.6)."""
+    """One versioned envelope per completed run (blueprint §10.6).
+
+    "Completed", not "approved": under ADR-022 a run finishes without anyone having reviewed it,
+    and the envelope is what gets reviewed rather than the product of a review.
+    """
 
     envelope_version: EnvelopeVersion = ENVELOPE_VERSION
     schema_version: ContractVersion = CONTRACT_VERSION
     message_id: MessageId
     idempotency_key: NonEmptyStr = Field(
         description=(
-            "Stable across retries and unique per approved payload. Blueprint's convention is "
-            "'{case_id}:{run_id}:approved-v{n}'. Delivery correctness depends on this being "
-            "derived, never random."
+            "Stable across retries and unique per emitted payload. Blueprint's convention is "
+            "'{case_id}:{run_id}:approved-v{n}', which assumed the pre-ADR-022 review gate; "
+            "'{case_id}:{run_id}:v{n}' is the equivalent here. Delivery correctness depends on "
+            "this being derived, never random."
         )
     )
     created_at: UtcDatetime

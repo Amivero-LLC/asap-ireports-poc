@@ -1,4 +1,7 @@
-"""The contracts, exercised as one chain: case → evidence → finding → disposition → envelope.
+"""The contracts, exercised as one chain: case → evidence → finding → envelope → outbox.
+
+The chain had a `disposition` link in it until ADR-022. Review moved to ASAP, so the chain now
+runs end to end with no human step in it — which is the point being asserted, not an omission.
 
 Field-level tests prove each contract is internally consistent. They do not prove the set
 composes, which is the actual question Milestone 1a has to answer — the contracts are the
@@ -16,7 +19,6 @@ from datetime import UTC, datetime
 import pytest
 from ireports_domain import (
     Actor,
-    ApprovedFindingText,
     ASAPEnvelope,
     AuthorityRoute,
     AuthorityRoutingResult,
@@ -26,8 +28,6 @@ from ireports_domain import (
     Confidence,
     DecisionDomain,
     DeliveredFinding,
-    DispositionedFinding,
-    DispositionKind,
     DocumentExpectation,
     EnvelopeAnalysis,
     EnvelopeCase,
@@ -39,7 +39,6 @@ from ireports_domain import (
     FindingClassification,
     FindingValidation,
     GeneratedBy,
-    HumanDisposition,
     ModelAlias,
     OutboxMessage,
     PersonStatus,
@@ -48,11 +47,8 @@ from ireports_domain import (
     PositionRiskLevel,
     PositionSensitivity,
     ProposedFinding,
-    ReasonCode,
     RetrievalMode,
     RetrievalProvenance,
-    ReviewerRole,
-    ReviewSummary,
     ReviewUrgency,
     RoutingBasis,
     RunManifest,
@@ -315,79 +311,31 @@ def test_vector_retrieval_records_its_embedding_model(evidence: EvidenceRecord) 
         RetrievalProvenance(retrieval_mode=RetrievalMode.HYBRID, query_id="q_1")
 
 
-def test_a_run_cannot_reach_packaging_without_review(policy_pack: PolicyPackRef) -> None:
-    with pytest.raises(ValidationError, match="requires human_review_recorded=True"):
-        _run(RunStatus.PACKAGING, policy_pack)
+def test_a_run_reaches_packaging_unattended(policy_pack: PolicyPackRef) -> None:
+    """ADR-022: nothing blocks packaging on a human, because no human is involved in a run.
+
+    The inverse of this assertion held until ADR-022 — a manifest in a delivery-side state was
+    invalid unless it recorded a review. That gate modelled a workflow iReports does not have.
+    """
+    run = _run(RunStatus.PACKAGING, policy_pack)
+    assert run.status is RunStatus.PACKAGING
 
 
 def test_the_machine_proposal_is_immutable(finding: ProposedFinding) -> None:
-    """ADR-011 depends on this: both versions are retained only if one cannot be edited."""
+    """A proposal is a record of what the machine said, so it must not be editable in place.
+
+    ADR-011 needed this to retain "both versions"; under ADR-022 the reason is narrower and still
+    holds — an envelope cites the proposal it came from, and a mutable proposal makes that
+    citation meaningless.
+    """
     with pytest.raises(ValidationError):
         finding.title = "Something else"  # type: ignore[misc]
 
 
-@pytest.fixture
-def bound(finding: ProposedFinding) -> DispositionedFinding:
-    """A finding the officer modified and released — the input the packager consumes."""
-    disposition = HumanDisposition(
-        disposition_id="dsp_01J8ZS",
-        finding_id=finding.finding_id,
-        run_id=RUN_ID,
-        reviewer_id="officer-42",
-        reviewer_role=ReviewerRole.AUTHORIZED_ADJUDICATIVE_OFFICER,
-        reviewed_at=NOW,
-        disposition=DispositionKind.MODIFIED_AND_ACCEPTED,
-        reason_codes=[ReasonCode.MITIGATION_ADDED, ReasonCode.WORDING_NARROWED],
-        reviewer_summary=(
-            "Retained for review; added evidence of completed divestiture and removed the "
-            "unsupported reference to financial dependence."
-        ),
-        approved_text=ApprovedFindingText(
-            version=2,
-            title="Continuing foreign family ties require officer review",
-            observation="The record describes continuing contact with close relatives abroad.",
-            policy_relevance="These facts may be relevant to foreign influence.",
-            recommended_officer_action="Review the cited records before disposition.",
-        ),
-        release_to_asap=True,
-    )
-    return DispositionedFinding(proposal=finding, disposition=disposition)
-
-
-def test_modification_retains_both_versions(bound: DispositionedFinding) -> None:
-    # The approved wording is what delivery carries...
-    assert bound.effective_title == "Continuing foreign family ties require officer review"
-    # ...and the machine proposal is still there, unchanged.
-    assert (
-        bound.proposal.title
-        == "Continuing foreign family and financial ties require officer review"
-    )
-    assert bound.is_releasable
-
-
-def test_disposition_cannot_be_bound_to_the_wrong_finding(finding: ProposedFinding) -> None:
-    other = HumanDisposition(
-        disposition_id="dsp_01",
-        finding_id="fnd_other",
-        run_id=RUN_ID,
-        reviewer_id="officer-42",
-        reviewer_role=ReviewerRole.AUTHORIZED_ADJUDICATIVE_OFFICER,
-        reviewed_at=NOW,
-        disposition=DispositionKind.ACCEPTED,
-        reason_codes=[ReasonCode.ACCURATE_AS_PROPOSED],
-        reviewer_summary="Accurate as proposed.",
-        release_to_asap=True,
-    )
-    with pytest.raises(ValidationError, match="does not match the proposal"):
-        DispositionedFinding(proposal=finding, disposition=other)
-
-
-def _envelope(
-    case: CaseManifest, finding: ProposedFinding, bound: DispositionedFinding, **overrides: object
-) -> ASAPEnvelope:
+def _envelope(case: CaseManifest, finding: ProposedFinding, **overrides: object) -> ASAPEnvelope:
     base: dict[str, object] = {
         "message_id": "msg_01J8ZT",
-        "idempotency_key": f"{CASE_ID}:{RUN_ID}:approved-v2",
+        "idempotency_key": f"{CASE_ID}:{RUN_ID}:v2",
         "created_at": NOW,
         "case": EnvelopeCase(
             case_id=CASE_ID,
@@ -409,10 +357,10 @@ def _envelope(
                     criterion_id=finding.authority.criterion_id,
                     policy_citations=list(finding.authority.policy_citations),
                     classification=finding.classification,
-                    title=bound.effective_title,
-                    observation=bound.effective_observation,
-                    policy_relevance=bound.effective_policy_relevance,
-                    recommended_officer_action=bound.effective_officer_action,
+                    title=finding.title,
+                    observation=finding.observation,
+                    policy_relevance=finding.policy_relevance,
+                    recommended_officer_action=finding.recommended_officer_action,
                     supporting_evidence=[
                         EvidenceExcerpt(
                             evidence_id="ev_101",
@@ -426,8 +374,6 @@ def _envelope(
                     evidence_confidence=finding.evidence_confidence,
                     analysis_confidence=finding.analysis_confidence,
                     urgency=finding.urgency,
-                    human_disposition=bound.disposition.disposition.value,
-                    reviewer_modified=True,
                 )
             ],
         ),
@@ -439,29 +385,26 @@ def _envelope(
 def test_full_chain_reaches_a_delivered_envelope(
     case: CaseManifest,
     finding: ProposedFinding,
-    bound: DispositionedFinding,
     policy_pack: PolicyPackRef,
 ) -> None:
-    """The whole path: reviewed run → releasable finding → envelope → outbox message."""
-    review = ReviewSummary(
-        run_id=RUN_ID,
-        reviewer_id="officer-42",
-        reviewer_role=ReviewerRole.AUTHORIZED_ADJUDICATIVE_OFFICER,
-        completed_at=NOW,
-        dispositions=[bound.disposition],
-    )
-    assert review.covers([finding.finding_id])
-    assert review.releasable_finding_ids == [finding.finding_id]
+    """The whole path: unattended run → proposed finding → envelope → outbox message.
 
+    Under ADR-011 this chain had a human in the middle of it — a `ReviewSummary` covering every
+    proposed finding, and a manifest that refused to reach packaging without one. ADR-022 removes
+    that link: the chain now runs end to end with no human step, and the envelope that comes out
+    is what an officer reviews in ASAP.
+    """
     run = _run(
         RunStatus.PACKAGING,
         policy_pack,
-        human_review_recorded=True,
         proposed_finding_ids=[finding.finding_id],
     )
-    assert run.human_review_recorded
+    assert run.status is RunStatus.PACKAGING
 
-    envelope = _envelope(case, finding, bound)
+    envelope = _envelope(case, finding)
+
+    # The envelope says what it is: machine output, not an approved result (ADR-022).
+    assert envelope.analysis.machine_generated is True
 
     # ADR-010: excerpts *and* references, so a finding is reviewable without a second lookup.
     excerpt = envelope.analysis.findings[0].supporting_evidence[0]
@@ -482,15 +425,15 @@ def test_full_chain_reaches_a_delivered_envelope(
 
 
 def test_idempotency_key_must_be_traceable_to_its_case(
-    case: CaseManifest, finding: ProposedFinding, bound: DispositionedFinding
+    case: CaseManifest, finding: ProposedFinding
 ) -> None:
     """A random key would deliver correctly but be untraceable during an incident."""
     with pytest.raises(ValidationError, match="must begin with the case_id"):
-        _envelope(case, finding, bound, idempotency_key="random-uuid-value")
+        _envelope(case, finding, idempotency_key="random-uuid-value")
 
 
 def test_an_envelope_cannot_be_built_with_no_findings(
-    case: CaseManifest, finding: ProposedFinding, bound: DispositionedFinding
+    case: CaseManifest, finding: ProposedFinding
 ) -> None:
     """An empty envelope would deliver 'nothing found' without a human ever saying so."""
     with pytest.raises(ValidationError, match="at least 1 item"):

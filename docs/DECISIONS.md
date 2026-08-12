@@ -224,7 +224,13 @@ Tracked as Q-04.
 
 ## ADR-011 — Hard human-review gate, single reviewer role
 
-**Date:** 2026-08-10 · **Status:** Accepted
+**Date:** 2026-08-10 · **Status:** Superseded by ADR-022 (2026-08-11)
+
+> **Superseded.** This entry modelled human review as an in-run pause. iReports has no human
+> interaction — it runs unattended and emits output, and review happens afterwards in ASAP. The
+> decision below is retained unedited as the record of what was believed and why; **ADR-022 is
+> what holds.** The decision-support boundary itself did not change: no determination, no
+> aggregate score, everything emitted is a proposal.
 
 **Decision.** A run pauses in an explicit review state. One authorized reviewer role may accept,
 modify, or reject each proposed finding. **Nothing reaches ASAP without a recorded disposition** —
@@ -809,3 +815,71 @@ architecture rather than building the analysis product or evaluating model behav
 3. **`ChunkRecord` and `PolicyRecord` (CONT-02) stay cut.** The indexed record shape lives inside
    the retrieval package rather than being published as a domain contract. Publishing it would mean
    committing a schema against an unconfirmed collection (Q-02) for no consumer outside retrieval.
+
+---
+
+## ADR-022 — Human review happens in ASAP, not inside a run
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Supersedes ADR-011**
+
+**Context.** ADR-011 modelled human review as an in-run pause: a run stops in
+`AWAITING_HUMAN_REVIEW`, an authorized officer records a disposition, and the run resumes. Every
+downstream artifact was built on that shape — two run states, a no-bypass transition table, the
+`HumanDisposition` / `DispositionedFinding` / `ReviewSummary` contracts, and an `ASAPEnvelope`
+whose `human_reviewed` field was pinned to `Literal[True]`.
+
+**That is not the system.** iReports has no reviewer-facing surface and no human interaction of any
+kind. It runs unattended, analyzes a case, and emits its output. Review happens afterwards, in
+ASAP, by an officer using ASAP's own tooling. The pause this project built was a gate in front of a
+door that does not exist here.
+
+The confusion is understandable and worth recording, because the two things it conflated are both
+real. There **is** human judgment involved in this project — but it is *validation*, not
+*adjudication*: synthetic cases carry issues a human analyst already identified, and the measure of
+the system is whether what iReports finds matches what the human found. That is an evaluation
+activity performed against test data, not a step in a production run.
+
+**Decision.**
+
+1. **A run never waits for a human.** `AWAITING_HUMAN_REVIEW` and `REVIEW_RECORDED` are removed
+   from `RunStatus`, along with the `human_review_recorded` flag and the `_delivery_requires_review`
+   validator. A run proceeds from validation to packaging to delivered without stopping.
+2. **iReports does not model disposition.** `HumanDisposition`, `DispositionedFinding`,
+   `ReviewSummary`, `ApprovedFindingText`, `ReviewerRole`, `DispositionKind`, and `ReasonCode` are
+   removed, with their generated schemas. What an officer decides, and how ASAP records it, is
+   ASAP's contract to define — publishing our guess at it would invite a downstream system to
+   implement against a shape we do not own.
+3. **The envelope carries proposals, not approved findings.** `human_reviewed`,
+   `human_disposition`, `reviewer_modified`, and `reviewer_summary` are removed from the
+   `ASAPEnvelope`. An envelope is what iReports proposes for review — it is un-reviewed by
+   construction, which is the opposite of what the pinned `Literal[True]` asserted.
+4. **The decision-support boundary is unchanged, and its enforcement moves.** ADR-014 stands
+   untouched: no aggregate score, no determination, in any contract, under any name. What changes
+   is the mechanism. The boundary used to rest on two legs — a state-machine gate *and* the fact
+   that everything emitted is a proposal. The gate is gone; the second leg now carries it alone,
+   so it is strengthened rather than merely retained (see consequence 2).
+
+**Rationale.** A gate that models a workflow the system does not have is worse than no gate. It
+costs real complexity, it tells a reader the architecture does something it does not, and — most
+seriously — it invites the handoff team to build a reviewer workflow into iReports that belongs in
+ASAP. Removing it makes the boundary between the two systems sharper, not softer.
+
+**Consequences.**
+
+1. **Phase 3 changes content.** "Human gate, typed output, and the handoff" becomes validation and
+   handoff: synthetic cases with analyst-identified issues, scorers that measure agreement between
+   those and what iReports found, and the handoff package. REV-01 and REV-02 are withdrawn rather
+   than cut — they describe a system that was never being built, so they are not owed a
+   designed-not-built entry the way ADR-020's cuts are. This is recorded in `REQUIREMENTS.md`.
+2. **The no-determination rule loses a redundant enforcement and must be tightened.** Under
+   ADR-011, an envelope reaching ASAP had passed a structural gate. Now nothing structural stands
+   between an analysis and ASAP except the shape of what is emitted. Two mechanisms therefore
+   become load-bearing rather than supporting: `ProposedFinding` is the only finding type that
+   exists, and `reject_determinative_language` guards every text field on the way out. Both were
+   already built and tested; the point is that their failure is now unmitigated.
+3. **We give up the ability to prove non-delivery of rejected findings.** ADR-011 let us assert, by
+   walking a transition table, that a rejected finding could not reach ASAP. That assertion now
+   belongs to ASAP and this project cannot make it. **This is a real reduction in what the handoff
+   can claim**, and the package must say so rather than quietly dropping the claim.
+4. **Contract count drops from 14 to 12** and `CONTRACT_VERSION` is bumped, because removing a
+   published contract is a breaking change for any consumer that had started against it.

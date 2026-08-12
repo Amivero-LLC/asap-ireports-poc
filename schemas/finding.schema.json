@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/finding.schema.json",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "2.0.0",
   "$defs": {
     "Confidence": {
       "enum": [
@@ -212,8 +212,8 @@
   "description": "A machine-proposed finding, pending human disposition.\n\nImmutable by construction (`ContractModel` is frozen). ADR-011 requires that both the machine\nproposal and the human-approved version are retained, which only works if the proposal cannot\nbe edited in place.",
   "properties": {
     "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Schema Version",
       "type": "string"
     },

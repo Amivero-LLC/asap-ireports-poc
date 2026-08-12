@@ -29,13 +29,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from ireports_domain import (
+from ireports_domain import ProposedFinding
+
+from ireports_spike_harness.bakeoff_v1_contracts import BakeoffRunStatus as RunStatus
+from ireports_spike_harness.bakeoff_v1_contracts import (
     DispositionKind,
     HumanDisposition,
-    ProposedFinding,
     ReasonCode,
     ReviewerRole,
-    RunStatus,
 )
 
 from . import gateway as gw

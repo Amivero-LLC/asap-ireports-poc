@@ -2,8 +2,9 @@
 
 Contracts come before the orchestration decision on purpose (ROADMAP 1a): they are the interface
 the orchestration choice has to satisfy. A framework that cannot carry this state cheaply through
-a checkpoint, or cannot pause between a proposal and its disposition, is disqualified by these
-types rather than by opinion.
+a checkpoint is disqualified by these types rather than by opinion. An earlier version of this
+note also required pausing between a proposal and its disposition; ADR-022 removed that pause
+along with the disposition contracts, because review happens in ASAP rather than inside a run.
 
 `ROOT_CONTRACTS` is the set published as JSON Schema. It is also what the ADR-014 guard test
 walks, so adding a contract here automatically brings it under that check.
@@ -45,15 +46,6 @@ from .common import (
     ModelAlias,
     ValidationOutcome,
     reject_determinative_language,
-)
-from .disposition import (
-    ApprovedFindingText,
-    DispositionedFinding,
-    DispositionKind,
-    HumanDisposition,
-    ReasonCode,
-    ReviewerRole,
-    ReviewSummary,
 )
 from .document import (
     CanonicalDocument,
@@ -111,8 +103,6 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "authority-routing": AuthorityRoutingResult,
     "finding": ProposedFinding,
     "run": RunManifest,
-    "human-disposition": HumanDisposition,
-    "review-summary": ReviewSummary,
     "asap-envelope": ASAPEnvelope,
     "outbox-message": OutboxMessage,
     "delivery-receipt": DeliveryReceipt,
@@ -128,7 +118,6 @@ __all__ = [
     "ROOT_CONTRACTS",
     "ASAPEnvelope",
     "Actor",
-    "ApprovedFindingText",
     "AuthorityRoute",
     "AuthorityRoutingResult",
     "BudgetConsumption",
@@ -145,8 +134,6 @@ __all__ = [
     "DecisionSupportText",
     "DeliveredFinding",
     "DeliveryReceipt",
-    "DispositionKind",
-    "DispositionedFinding",
     "DocumentBlock",
     "DocumentExpectation",
     "DocumentManifest",
@@ -162,7 +149,6 @@ __all__ = [
     "FindingClassification",
     "FindingValidation",
     "GeneratedBy",
-    "HumanDisposition",
     "InformationGap",
     "ModelAlias",
     "OutboxMessage",
@@ -174,12 +160,9 @@ __all__ = [
     "PositionRiskLevel",
     "PositionSensitivity",
     "ProposedFinding",
-    "ReasonCode",
     "RetrievalMode",
     "RetrievalProvenance",
-    "ReviewSummary",
     "ReviewUrgency",
-    "ReviewerRole",
     "RoutingBasis",
     "RunError",
     "RunManifest",

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/document.schema.json",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "2.0.0",
   "$defs": {
     "DocumentExpectation": {
       "description": "Documents the case is expected to contain.\n\nDrives the completeness checker (blueprint \u00a78.1). An expectation that is not satisfied\nbecomes an information gap, not a silent omission.",
@@ -67,8 +67,8 @@
   "description": "One expected or present document in a case.\n\n`expectation` links a physical document back to what the case said it should contain, which\nis what lets the completeness checker distinguish \"missing\" from \"present but unreadable\" \u2014\ntwo conditions with different consequences for a reviewer.",
   "properties": {
     "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Schema Version",
       "type": "string"
     },

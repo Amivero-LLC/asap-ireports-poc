@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/asap-envelope.schema.json",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "2.0.0",
   "$defs": {
     "Confidence": {
       "enum": [
@@ -25,7 +25,7 @@
     },
     "DeliveredFinding": {
       "additionalProperties": false,
-      "description": "One human-approved finding, as ASAP receives it.\n\n`machine_proposal_finding_id` is retained so the delivered record traces back to the\nimmutable proposal (ADR-011). `human_disposition` is required \u2014 there is no shape of this\nobject that represents an undispositioned finding.",
+      "description": "One *proposed* finding, as ASAP receives it for review.\n\nNamed for the act of delivery, not for any approval: ADR-022 places human review in ASAP,\nafter iReports has finished. Every finding in an envelope is therefore un-reviewed by\nconstruction, and the officer who reviews it does so in ASAP's tooling, recording the outcome\nin ASAP's own records.\n\nAn earlier version of this contract carried `human_disposition` and `reviewer_modified` under\nADR-011, when review was modelled as an in-run pause. Both are removed \u2014 iReports has no\ndisposition to report, and inventing a field for one would ask ASAP to populate a shape we do\nnot own. `machine_proposal_finding_id` stays: it traces the delivered record back to the\nimmutable proposal, which is still how a reader gets from an envelope to the analysis.",
       "properties": {
         "finding_id": {
           "pattern": "^fnd_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
@@ -140,17 +140,6 @@
         },
         "urgency": {
           "$ref": "#/$defs/ReviewUrgency"
-        },
-        "human_disposition": {
-          "description": "The DispositionKind value. Required \u2014 delivery presupposes a disposition.",
-          "minLength": 1,
-          "title": "Human Disposition",
-          "type": "string"
-        },
-        "reviewer_modified": {
-          "description": "True when the officer changed the wording. Both versions are retained by us.",
-          "title": "Reviewer Modified",
-          "type": "boolean"
         }
       },
       "required": [
@@ -168,16 +157,14 @@
         "recommended_officer_action",
         "evidence_confidence",
         "analysis_confidence",
-        "urgency",
-        "human_disposition",
-        "reviewer_modified"
+        "urgency"
       ],
       "title": "DeliveredFinding",
       "type": "object"
     },
     "EnvelopeAnalysis": {
       "additionalProperties": false,
-      "description": "The analysis section.\n\nNote the absent field. Blueprint \u00a710.6's example has a free-text `summary`; a run-level\nnarrative is the most likely place for an aggregate characterization of a person to\nreappear, which ADR-014 forbids. It is present here only as a reviewer-authored,\nlanguage-guarded optional field, and it is never machine-generated.",
+      "description": "The analysis section.\n\nNote the absent field. Blueprint \u00a710.6's example has a free-text `summary`; a run-level\nnarrative is the most likely place for an aggregate characterization of a person to reappear,\nwhich ADR-014 forbids. Under ADR-011 it survived here as a reviewer-authored, language-guarded\noptional field. With review moved to ASAP (ADR-022) there is no reviewer at this point in the\npipeline to author one, so the field is gone entirely \u2014 which is the stricter outcome.\n\n`machine_generated` stays pinned to `True` and is now the single most important field on the\nenvelope. It says exactly what an envelope is: machine output, proposed, not yet reviewed by\nanyone. The companion `human_reviewed: Literal[True]` was removed, because under ADR-022 it\nwould have been false in every envelope this system emits.",
       "properties": {
         "run_id": {
           "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
@@ -209,31 +196,11 @@
           "title": "Findings",
           "type": "array"
         },
-        "reviewer_summary": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Reviewer-authored only. Never machine-generated.",
-          "title": "Reviewer Summary"
-        },
         "machine_generated": {
           "const": true,
           "default": true,
+          "description": "Structurally pinned. Everything in this envelope is a machine proposal awaiting review in ASAP; there is no shape of this object that claims otherwise (ADR-022).",
           "title": "Machine Generated",
-          "type": "boolean"
-        },
-        "human_reviewed": {
-          "const": true,
-          "default": true,
-          "description": "Structurally pinned. An envelope is only constructible for a reviewed run, so `false` has no valid meaning here (ADR-011).",
-          "title": "Human Reviewed",
           "type": "boolean"
         }
       },
@@ -457,17 +424,17 @@
     }
   },
   "additionalProperties": false,
-  "description": "One versioned envelope per approved run (blueprint \u00a710.6).",
+  "description": "One versioned envelope per completed run (blueprint \u00a710.6).\n\n\"Completed\", not \"approved\": under ADR-022 a run finishes without anyone having reviewed it,\nand the envelope is what gets reviewed rather than the product of a review.",
   "properties": {
     "envelope_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Envelope Version",
       "type": "string"
     },
     "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -477,7 +444,7 @@
       "type": "string"
     },
     "idempotency_key": {
-      "description": "Stable across retries and unique per approved payload. Blueprint's convention is '{case_id}:{run_id}:approved-v{n}'. Delivery correctness depends on this being derived, never random.",
+      "description": "Stable across retries and unique per emitted payload. Blueprint's convention is '{case_id}:{run_id}:approved-v{n}', which assumed the pre-ADR-022 review gate; '{case_id}:{run_id}:v{n}' is the equivalent here. Delivery correctness depends on this being derived, never random.",
       "minLength": 1,
       "title": "Idempotency Key",
       "type": "string"

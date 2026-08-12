@@ -22,7 +22,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 # Contract versioning
 # ---------------------------------------------------------------------------
 
-ContractVersion = Literal["1.0.0"]
+ContractVersion = Literal["2.0.0"]
 """The contract set's version, as a type.
 
 Every contract declares `schema_version: ContractVersion`, so a payload written against an
@@ -34,7 +34,7 @@ latter is not a valid type to a type checker — `Literal` needs a literal. `CON
 below is the runtime value, and `_assert_version_agreement` keeps the two from drifting.
 """
 
-CONTRACT_VERSION: ContractVersion = "1.0.0"
+CONTRACT_VERSION: ContractVersion = "2.0.0"
 """Runtime value of `ContractVersion`, for use as a field default and in generated schemas."""
 
 

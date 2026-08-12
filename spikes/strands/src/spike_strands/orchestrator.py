@@ -29,14 +29,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ireports_domain import (
-    ASAPEnvelope,
-    DispositionedFinding,
-    HumanDisposition,
-    ProposedFinding,
-    RunStatus,
-)
+from ireports_domain import ASAPEnvelope, ProposedFinding
 from ireports_spike_harness import port, scenario
+from ireports_spike_harness.bakeoff_v1_contracts import BakeoffRunStatus as RunStatus
+from ireports_spike_harness.bakeoff_v1_contracts import DispositionedFinding, HumanDisposition
 from ireports_spike_harness.gateway import StubModelGateway
 from strands.interrupt import Interrupt
 from strands.multiagent import GraphBuilder

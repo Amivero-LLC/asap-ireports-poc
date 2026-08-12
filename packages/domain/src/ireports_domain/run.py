@@ -2,9 +2,10 @@
 
 Blueprint §8.2 and §10.3. Two properties matter more than the field list:
 
-- **The status enum is the human review gate.** ADR-011 makes review a state transition, not a
-  UI convention, so `AWAITING_HUMAN_REVIEW` is a state a run must pass *through*. There is no
-  status that reaches delivery without it, and no bypass in any profile.
+- **A run never waits for a human.** ADR-022: iReports has no human interaction. It runs
+  unattended and emits proposals; review happens afterwards in ASAP, by an officer using ASAP's
+  tooling. An earlier version of this enum carried `AWAITING_HUMAN_REVIEW` and `REVIEW_RECORDED`
+  under ADR-011, which modelled a pause this system does not have.
 - **State carries identifiers, not transcripts.** Blueprint §8.2 is explicit: large evidence text
   stays in the evidence store and is referenced by id. That keeps checkpoints small and keeps
   case text out of anything that gets serialized widely — which matters directly for the
@@ -39,9 +40,13 @@ from .policy import AuthorityRoutingResult, PolicyPackRef
 class RunStatus(StrEnum):
     """The run state machine.
 
-    The ordering below is the legal progression. `AWAITING_HUMAN_REVIEW` is not skippable:
-    `_delivery_requires_review` enforces that any delivered run recorded a review, and
-    `LEGAL_TRANSITIONS` encodes that no path reaches `DELIVERED` without passing through it.
+    The ordering below is the legal progression. There is no state in which a run waits for a
+    person: `VALIDATING` proceeds straight to `PACKAGING` (ADR-022). `DELIVERED` means iReports
+    emitted an envelope of *proposals* — it does not mean anything has been reviewed, approved, or
+    acted on. Review is ASAP's, and happens after this state machine has finished.
+
+    `INCOMPLETE_DUE_TO_BUDGET` still reaches `PACKAGING` rather than `FAILED`, for the same reason
+    it always did: a truncated analysis must reach a reviewer rather than quietly disappearing.
     """
 
     INITIALIZING = "initializing"
@@ -50,8 +55,6 @@ class RunStatus(StrEnum):
     ANALYZING = "analyzing"
     SYNTHESIZING = "synthesizing"
     VALIDATING = "validating"
-    AWAITING_HUMAN_REVIEW = "awaiting_human_review"
-    REVIEW_RECORDED = "review_recorded"
     PACKAGING = "packaging"
     DELIVERING = "delivering"
     DELIVERED = "delivered"
@@ -65,7 +68,7 @@ LEGAL_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.ROUTING: frozenset(
         {
             RunStatus.RETRIEVING,
-            RunStatus.AWAITING_HUMAN_REVIEW,
+            RunStatus.PACKAGING,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
         }
@@ -91,28 +94,26 @@ LEGAL_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     ),
     RunStatus.VALIDATING: frozenset(
         {
-            RunStatus.AWAITING_HUMAN_REVIEW,
+            RunStatus.PACKAGING,
             RunStatus.ANALYZING,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
         }
     ),
-    RunStatus.AWAITING_HUMAN_REVIEW: frozenset({RunStatus.REVIEW_RECORDED, RunStatus.CANCELLED}),
-    RunStatus.REVIEW_RECORDED: frozenset({RunStatus.PACKAGING, RunStatus.CANCELLED}),
     RunStatus.PACKAGING: frozenset({RunStatus.DELIVERING, RunStatus.FAILED, RunStatus.CANCELLED}),
     RunStatus.DELIVERING: frozenset({RunStatus.DELIVERED, RunStatus.FAILED}),
     RunStatus.DELIVERED: frozenset(),
     RunStatus.FAILED: frozenset(),
     RunStatus.CANCELLED: frozenset(),
-    RunStatus.INCOMPLETE_DUE_TO_BUDGET: frozenset(
-        {RunStatus.AWAITING_HUMAN_REVIEW, RunStatus.CANCELLED}
-    ),
+    RunStatus.INCOMPLETE_DUE_TO_BUDGET: frozenset({RunStatus.PACKAGING, RunStatus.CANCELLED}),
 }
 """Legal state transitions.
 
-`INCOMPLETE_DUE_TO_BUDGET` routes to human review rather than to failure: blueprint §8.5 requires
-that a budget stop produce a visible incomplete result rather than silently omitting work. A
-reviewer must be told the analysis was truncated.
+`INCOMPLETE_DUE_TO_BUDGET` routes to packaging rather than to failure: blueprint §8.5 requires that
+a budget stop produce a visible incomplete result rather than silently omitting work. The envelope
+still goes to ASAP so a reviewer is told the analysis was truncated — under ADR-011 that routing
+went through an in-run review state, but the requirement was never about the pause, only about the
+truncated result staying visible.
 """
 
 
@@ -208,34 +209,10 @@ class RunManifest(ContractModel):
     proposed_finding_ids: tuple[FindingId, ...] = Field(default_factory=tuple)
     errors: tuple[RunError, ...] = Field(default_factory=tuple)
 
-    human_review_recorded: bool = Field(
-        default=False,
-        description=(
-            "Set only by the review gate when a disposition exists for every proposed finding. "
-            "ADR-011: there is no bypass, in any profile, including local development."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _delivery_requires_review(self) -> RunManifest:
-        """The hard gate (ADR-011), expressed as a validation error.
-
-        A `RunManifest` in a delivery-side state with `human_review_recorded=False` is not a
-        valid object. This makes the gate impossible to bypass by constructing the state
-        directly, which is the failure mode a config flag would leave open.
-        """
-        post_review = {
-            RunStatus.REVIEW_RECORDED,
-            RunStatus.PACKAGING,
-            RunStatus.DELIVERING,
-            RunStatus.DELIVERED,
-        }
-        if self.status in post_review and not self.human_review_recorded:
-            raise ValueError(
-                f"run status {self.status.value!r} requires human_review_recorded=True; "
-                "nothing reaches ASAP without a recorded human disposition (ADR-011)"
-            )
-        return self
+    # A `human_review_recorded` flag and a `_delivery_requires_review` validator stood here under
+    # ADR-011, refusing to construct a delivery-side manifest that had not passed an in-run review
+    # gate. ADR-022 removed both: iReports has no such gate, because it has no reviewer. A
+    # `DELIVERED` run means an envelope of proposals was emitted, not that anyone has looked at it.
 
     @model_validator(mode="after")
     def _completion_is_consistent(self) -> RunManifest:

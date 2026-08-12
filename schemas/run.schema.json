@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/run.schema.json",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "2.0.0",
   "$defs": {
     "Actor": {
       "additionalProperties": false,
@@ -86,8 +86,8 @@
       "description": "The complete routing decision for a run \u2014 every domain considered, none omitted.",
       "properties": {
         "schema_version": {
-          "const": "1.0.0",
-          "default": "1.0.0",
+          "const": "2.0.0",
+          "default": "2.0.0",
           "title": "Schema Version",
           "type": "string"
         },
@@ -354,7 +354,7 @@
       "type": "object"
     },
     "RunStatus": {
-      "description": "The run state machine.\n\nThe ordering below is the legal progression. `AWAITING_HUMAN_REVIEW` is not skippable:\n`_delivery_requires_review` enforces that any delivered run recorded a review, and\n`LEGAL_TRANSITIONS` encodes that no path reaches `DELIVERED` without passing through it.",
+      "description": "The run state machine.\n\nThe ordering below is the legal progression. There is no state in which a run waits for a\nperson: `VALIDATING` proceeds straight to `PACKAGING` (ADR-022). `DELIVERED` means iReports\nemitted an envelope of *proposals* \u2014 it does not mean anything has been reviewed, approved, or\nacted on. Review is ASAP's, and happens after this state machine has finished.\n\n`INCOMPLETE_DUE_TO_BUDGET` still reaches `PACKAGING` rather than `FAILED`, for the same reason\nit always did: a truncated analysis must reach a reviewer rather than quietly disappearing.",
       "enum": [
         "initializing",
         "routing",
@@ -362,8 +362,6 @@
         "analyzing",
         "synthesizing",
         "validating",
-        "awaiting_human_review",
-        "review_recorded",
         "packaging",
         "delivering",
         "delivered",
@@ -379,8 +377,8 @@
   "description": "Everything needed to reconstruct why a run produced what it produced.\n\nADR-009 declines an offline replay profile, so reproducibility rests entirely on this record:\nmodel aliases, prompt registry version, policy pack hashes, configuration hash, and\napplication version. If a field needed to explain a past result is missing here, it is not\nrecoverable anywhere else.",
   "properties": {
     "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -502,12 +500,6 @@
       },
       "title": "Errors",
       "type": "array"
-    },
-    "human_review_recorded": {
-      "default": false,
-      "description": "Set only by the review gate when a disposition exists for every proposed finding. ADR-011: there is no bypass, in any profile, including local development.",
-      "title": "Human Review Recorded",
-      "type": "boolean"
     }
   },
   "required": [

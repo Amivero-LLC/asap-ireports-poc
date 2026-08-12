@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/contradiction.schema.json",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "2.0.0",
   "additionalProperties": false,
   "description": "Two pieces of case evidence that cannot both be true.\n\nBlueprint \u00a77.6. A contradiction is surfaced, never resolved by the system \u2014 resolving it is\nan officer judgment about credibility, which sits outside the decision-support boundary.\nAmiLens's recorded gap (no cross-referencing of subject statements against investigator\nfindings) is exactly what this contract exists to close (ADR-002).",
   "properties": {
     "schema_version": {
-      "const": "1.0.0",
-      "default": "1.0.0",
+      "const": "2.0.0",
+      "default": "2.0.0",
       "title": "Schema Version",
       "type": "string"
     },
