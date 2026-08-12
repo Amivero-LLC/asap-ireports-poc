@@ -1,5 +1,16 @@
 # Roadmap
 
+> **Superseded — historical reference only (2026-08-12).**
+>
+> This file describes an older, wider milestone shape and states the orchestration framework as
+> decided. Both are out of date: **ADR-024 keeps custom Python and LangGraph both live** until
+> crash/resume exists, and the project is now framed as an exploratory proof of concept rather
+> than a formal milestone sequence.
+>
+> For current state see [`../README.md`](../README.md) and
+> [`ARCHITECTURE.md`](ARCHITECTURE.md) § What exists. Kept because the sequencing reasoning is
+> still useful to a reader deciding what to build in what order.
+
 Sequenced so that the riskiest architectural claims are settled first and every milestone leaves
 behind an artifact the ASAP program team can act on (ADR-001).
 

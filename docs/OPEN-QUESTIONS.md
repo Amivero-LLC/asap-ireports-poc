@@ -57,11 +57,25 @@ absent there; an endpoint that resolves here may not exist there. The `bedrock` 
 never been run in any partition, so `bedrock-mantle.{region}.api.aws` remains unverified. Whether
 LiteLLM is permitted in the approved environment remains unknown.
 
-**To resolve:** confirm against current AWS GovCloud Bedrock documentation and an actual API call
-in the target account and region — not from a general availability page. The live smoke check is
-the instrument: point it at the target endpoint and paste the resulting matrix into
-`docs/handoff/compatibility-matrix.md` as a second run-of-record, alongside the commercial one
-rather than replacing it.
+**Largely answered 2026-08-12 — see [`AWS.md`](AWS.md), which supersedes this entry.** Most of
+Q-01 turned out to be answerable from AWS documentation, and treating it as unknowable was a
+mistake that cost three cut requirements. What is now documented:
+
+- **Claude Sonnet 5 is available on Bedrock in AWS GovCloud (US-West and US-East)** since
+  2026-07-23; Opus 4.8 since 2026-05.
+- **`bedrock-mantle` endpoints exist in GovCloud US-West only** — our `bedrock` adapter uses
+  `AnthropicBedrockMantle`, so **region choice constrains adapter choice.** US-East needs a
+  `bedrock-runtime` adapter, which is real work.
+- **Claude in Bedrock is FedRAMP High and DoD IL4/IL5 approved** in GovCloud (US).
+
+**What remains open is much smaller:** documented availability is not account entitlement (Bedrock
+model access is granted per account), the concrete inference-profile IDs must come from the target
+account, and whether a LiteLLM proxy is *permitted* in the approved environment is an
+organizational question rather than an AWS one.
+
+**To close the rest:** point the live smoke check at the target endpoint in the target account and
+paste the resulting matrix into `docs/handoff/compatibility-matrix.md` as a second run-of-record,
+alongside the commercial one rather than replacing it.
 
 **Related:** Bedrock's feature surface differs from the first-party Claude API in ways that affect
 design — check per feature rather than assuming parity.

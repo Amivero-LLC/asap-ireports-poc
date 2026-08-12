@@ -970,3 +970,49 @@ for GovCloud. Treat the *ratio* as the finding, not the absolute.
    indexing belong to the AWS ingestion pipeline (ADR-007). What ADR-023 covers starts at "case is
    ready, start the analysis." How that invocation is triggered is an integration question for the
    handoff team, and Q-02 still gates what the index looks like when they get there.
+
+---
+
+## ADR-024 — Both orchestration paths stay live; the framework decision is deferred
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Amends ADR-012**
+
+**Context.** ADR-012 selected LangGraph on 2026-08-11 — correctly, on the evidence it had: all
+three candidates passed all four bake-off legs, and LangGraph cost two lines for durable
+PostgreSQL checkpointing against 56 and 166 for the others. That was a decision about *cost at the
+checkpointing seam*, made before any real analysis code existed.
+
+Since then the runnable demo (`spikes/lambda_demo/`) has run real cases through **both** a
+hand-rolled orchestrator and a LangGraph one, behind one port, sharing one specialist
+implementation. Two things became visible that the bake-off could not show:
+
+1. **The hand-rolled path is a thread pool and a loop.** For one invocation per run with
+   in-process fan-out (ADR-023), the framework is not carrying much. LangGraph's advantage was
+   concentrated in checkpointing, and checkpointing is not yet built.
+2. **Keeping both costs almost nothing.** The port was built as insurance against lock-in. It
+   turns out to be cheap enough to run as the actual arrangement — one shared specialist, two
+   orchestrators, identical output shape.
+
+**Decision.** **Both paths stay live.** Custom Python and LangGraph are developed in parallel
+behind this project's own orchestration port until there is a reason to choose — most likely when
+crash/resume and model-call idempotency (ORCH-02) are built, since that is the seam where the
+frameworks actually differ.
+
+ADR-012 is **not reversed.** Its evidence stands and LangGraph remains the leading candidate. What
+changes is that it is no longer treated as settled, and no code may assume it.
+
+**Consequences.**
+
+1. **The no-import rule is now the working arrangement, not lock-in insurance.** No module that
+   analyzes a case may import LangGraph. This was previously a hedge; it is now load-bearing,
+   because a second implementation genuinely runs. Enforced by
+   `spikes/lambda_demo/test_demo.py::test_nodes_do_not_import_langgraph`.
+2. **Every orchestration feature is owed by both paths.** Budgets, loop limits, fan-out bounds,
+   and eventually checkpointing get built twice — or, better, built once in shared code that both
+   orchestrators call. Where a feature is easy in one and hard in the other, *that is the finding*
+   and it belongs in `docs/LESSONS.md`.
+3. **The decision point is named, not open-ended.** Deferring forever is worse than choosing
+   wrong. The call gets made when idempotent crash/resume works, because that is the capability
+   the framework was selected for in the first place.
+4. **Packaging stays separate per path.** Each is built with only its own dependencies, so neither
+   inflates the other — `spikes/lambda_demo/build.py` already does this.

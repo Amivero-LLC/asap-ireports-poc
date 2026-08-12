@@ -12,10 +12,11 @@ run. `spikes/lambda_fit/` measured whether the shape *packages*; this runs a cas
 1. **One invocation per run, with in-process fan-out** — ADR-023's chosen shape, executing. Three
    specialists fan out inside a single Lambda invocation, bounded by `IREPORTS_DEMO_MAX_PARALLEL`.
    No Step Function, no Lambda per node, no queue between specialists.
-2. **The framework is one adapter behind a port** — ADR-012 chose LangGraph; the same case runs
-   through a thread pool and a loop with no orchestration framework at all, and produces the same
-   *shape* of answer. `specialist.py` does not know a graph exists, and
-   `test_nodes_do_not_import_langgraph` fails if that ever stops being true.
+2. **Both orchestration paths run behind one port (ADR-024)** — custom Python and LangGraph, the
+   same case, the same shared specialist, the same *shape* of answer. The framework decision is
+   deferred until crash/resume exists, so this is the working arrangement rather than a hedge.
+   `specialist.py` does not know a graph exists, and `test_nodes_do_not_import_langgraph` fails if
+   that ever stops being true.
 3. **Evidence before inference, as executable code** — every citation is checked against the case
    before a finding is constructed. A finding citing evidence that is not in the record is dropped,
    not trimmed.

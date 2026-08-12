@@ -476,7 +476,7 @@ and closed it. It appears in §4 as `BUILT`.
 | Component | Build state | Path | Notes |
 |---|---|---|---|
 | Second orchestration adapter, one conformance suite over both | `DESIGNED-NOT-BUILT` | — | ORCH-05. The port plus ORCH-01's no-import test is the lock-in protection; a parallel implementation would double every downstream phase |
-| Outcome-level scorecard comparing both adapters | `DESIGNED-NOT-BUILT` | — | BAKE-01. Needs a second adapter; ADR-012 stands as decided and is no longer under re-test |
+| Outcome-level scorecard comparing both adapters | `DESIGNED-NOT-BUILT` | — | BAKE-01. **Partly overtaken by ADR-024:** both paths are now live and run the same case in `spikes/lambda_demo/`, so a second adapter exists. What is still unbuilt is a scored outcome-level comparison |
 | ADR-012's pre-registered supersession criteria | `DESIGNED-NOT-BUILT` | — | ARCH-05. Existed only to stop a bake-off from choosing its own rubric; the bake-off it would have gated (BAKE-01) is itself cut |
 | Library and framework dependency inventory | `DESIGNED-NOT-BUILT` | — | ARCH-02. The dependency set is small and stable under the narrowed spine |
 | Keyed MAC over serialized checkpoint state, verified on load | `DESIGNED-NOT-BUILT` | — | CKPT-01. The single largest recorded security gap; nothing today detects a tampered checkpoint row that still parses |
