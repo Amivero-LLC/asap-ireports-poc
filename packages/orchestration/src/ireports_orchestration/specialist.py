@@ -62,6 +62,7 @@ from ireports_gateway.port import (
 from ireports_retrieval import RetrievalError, RetrievedSpan, Retriever
 
 from .case import LoadedCase
+from .coercion import cap_rejections, normalize_array
 from .criteria import Criterion
 
 _LOG = logging.getLogger(__name__)
@@ -315,50 +316,6 @@ def _outcome(
     )
 
 
-MAX_UNWRAP_DEPTH = 3
-"""How many layers of re-wrapping to peel before giving up. Three is generous; two were observed."""
-
-
-def _normalize_findings(raw: Any) -> Any:
-    """Coerce the shapes a model actually returns into the array that was requested.
-
-    ADR-018 in practice. All of these came from the *same* schema and the same prompt:
-
-    | Returned | Handling |
-    |---|---|
-    | `[...]` | The requested shape |
-    | `"[...]"` — the array as a JSON string | Parse it |
-    | `{...}` — one finding where an array was asked for | Wrap it |
-    | `{"findings": [...]}` — the envelope repeated inside itself | **Unwrap it** |
-
-    That last one is why this is a loop rather than the two `if`s it used to be. The old code saw a
-    dict and wrapped it, producing `[{"findings": [...]}]` — an "object missing every required
-    field," which it duly rejected. So a response the model had answered correctly, only nested one
-    layer too deep, was recorded as unparseable.
-
-    **It was invisible for weeks** because the rejection said "missing/blank [title, observation,
-    ...]" and stopped there. Adding `keys present:` to that message identified it in a single run.
-    Diagnosability is a feature; a rejection that does not say what it saw cannot be acted on.
-
-    Unwrapping is only attempted when the dict's *sole* key is `findings`. A dict that has a
-    `findings` key alongside real finding fields is ambiguous, and guessing there would risk
-    discarding an actual finding.
-    """
-    for _ in range(MAX_UNWRAP_DEPTH):
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except json.JSONDecodeError:
-                return None
-        elif isinstance(raw, dict) and set(raw) == {"findings"}:
-            raw = raw["findings"]
-        elif isinstance(raw, dict):
-            return [raw]
-        else:
-            return raw
-    return raw
-
-
 def _evidence_block(spans: tuple[RetrievedSpan, ...]) -> str:
     """The retrieved record, as the model sees it.
 
@@ -585,8 +542,8 @@ def _attempt(
             retrieved=retrieved_ids,
         )
 
-    raw_findings = _normalize_findings(
-        payload.get("findings") if isinstance(payload, dict) else None
+    raw_findings = normalize_array(
+        payload.get("findings") if isinstance(payload, dict) else None, "findings"
     )
 
     if not isinstance(raw_findings, list):
@@ -710,7 +667,7 @@ def _attempt(
         case.manifest.case_id,
         run_id,
         findings=tuple(findings),
-        rejected=tuple(rejected),
+        rejected=cap_rejections(rejected),
         resolved_model=response.resolved_model,
         input_tokens=response.usage.input_tokens,
         output_tokens=response.usage.output_tokens,

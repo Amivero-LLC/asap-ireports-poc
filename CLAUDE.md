@@ -105,7 +105,7 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `spikes/lambda_demo/` | The runnable wrapper — case loading off disk, envelope packaging, Lambda handler, `run_case.py`, and the synthetic corpus |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
-| Tests | 216 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 227 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 **Not built:** crash/resume, model-call idempotency, wall-clock and token budgets, authority routing
 from policy packs, ingestion, `apps/`, `evals/`.

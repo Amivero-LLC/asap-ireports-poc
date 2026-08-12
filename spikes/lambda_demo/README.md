@@ -53,21 +53,27 @@ architecture produces: a validated envelope of citation-backed proposals, pinned
 
 ## What came out
 
-`[measured]` 2026-08-11, SAM local, python3.12 arm64, 1024 MB, `ireports-thinking` resolved to
-`anthropic.claude-sonnet-5` through a Bedrock-backed LiteLLM proxy.
+`[measured]` 2026-08-12, SAM local, python3.12 arm64, 1024 MB, `ireports-thinking` resolved to
+`anthropic.claude-sonnet-5` through a Bedrock-backed LiteLLM proxy. Five criteria selected from the
+case, retrieval at k=6, plus the cross-criterion stage.
 
-| Candidate | Wall | Tokens | Findings | Envelope |
-|---|---|---|---|---|
-| hand-rolled | 44.1 s | 19,029 | 5 | valid |
-| langgraph | 32.1 s | 15,089 | 4 | valid |
-| langgraph (2nd run) | 22.4 s | 12,524 | 5 | valid |
+| Candidate | Wall | Tokens | Findings | of which synthesis | Envelope |
+|---|---|---|---|---|---|
+| hand-rolled | 102.6 s | 30,482 | 12 | 3 | valid |
+| langgraph | 121.0 s | 37,298 | 9 | 2 | valid |
 
 **Do not read a comparison into those numbers.** Two orchestrators running a probabilistic
-analysis are two samples, not two evaluations of a function — the second LangGraph run differs from
-the first by more than the two candidates differ from each other. Wall time is dominated by model
+analysis are two samples, not two evaluations of a function — across runs, one candidate differs
+from itself by more than the two candidates differ from each other. Wall time is dominated by model
 latency at `effort: high`, which varies by tens of seconds run to run. What is being demonstrated
 is that **both produce a valid envelope of citation-checked proposals**, which is the claim; the
 timing column is context, not evidence.
+
+**The run before this one produced zero synthesis findings on both paths** — with a valid envelope,
+no error, and 4,547 rejections reading `not an object`. The model had returned synthesis's arrays
+as JSON strings and the loop enumerated them character by character. That is what a live run buys
+that the offline suite cannot: the offline suite tests the shapes we already know about. See
+`docs/LESSONS.md`, "A coercion in a private helper protects one call site".
 
 The findings themselves read like decision support. From one run, on the candor criterion:
 
@@ -172,6 +178,7 @@ graduated to `packages/orchestration/` on 2026-08-12, and their tests went with 
 |---|---|
 | `cases/AMI-SYN-FIN-001/` | The synthetic case: a manifest and 8 citable evidence spans. Edit it and re-run. |
 | `src/lambda_demo/case_loader.py` | Disk → the types `ireports_orchestration` analyses |
+| `out/` | Where a live run writes its envelopes. Gitignored — **open one** |
 | `src/lambda_demo/package.py` | Findings → validated `ASAPEnvelope` |
 | `src/lambda_demo/handler.py` | The Lambda entry point. One invocation, one run, one envelope |
 | `build.py` | Stages one directory per candidate with its own dependency set. **Staging is by path, so a new workspace package must be added here or the container lacks it** |

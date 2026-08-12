@@ -52,6 +52,7 @@ from ireports_gateway.port import (
 )
 
 from .case import LoadedCase
+from .coercion import cap_rejections, normalize_array
 from .criteria import Criterion
 from .specialist import SpecialistOutcome
 
@@ -365,7 +366,30 @@ def synthesize(
             "proposed_at": datetime.now(UTC),
         }
 
-    for index, raw in enumerate(payload.get("contradictions") or []):
+    # **Coerced, not iterated.** On 2026-08-12 the model returned both of these arrays as JSON
+    # *strings*. `enumerate` over a string yields characters, so the loop below produced one
+    # rejection per character — 4,547 of them across the two arrays, zero findings, no error, on
+    # both orchestrators. The specialist path handled the identical shape correctly on the same
+    # run, because the coercion lived in a private helper there and nothing brought it here.
+    raw_contradictions = normalize_array(payload.get("contradictions"), "contradictions")
+    if not isinstance(raw_contradictions, list):
+        # Named as a shape problem, once. Iterating a non-list to find out is what produced the
+        # 4,547 lines, and "the response was a str" is the fact that actually explains the run.
+        rejected.append(
+            "synthesis: 'contradictions' was not an array and could not be coerced to one "
+            f"(got {type(raw_contradictions).__name__}) — no contradictions read"
+        )
+        raw_contradictions = []
+
+    raw_gaps = normalize_array(payload.get("information_gaps"), "information_gaps")
+    if not isinstance(raw_gaps, list):
+        rejected.append(
+            "synthesis: 'information_gaps' was not an array and could not be coerced to one "
+            f"(got {type(raw_gaps).__name__}) — no gaps read"
+        )
+        raw_gaps = []
+
+    for index, raw in enumerate(raw_contradictions):
         if not isinstance(raw, dict):
             rejected.append(f"synthesis/contradiction#{index}: not an object — dropped")
             continue
@@ -416,7 +440,7 @@ def synthesize(
         except (ValueError, KeyError) as exc:
             rejected.append(f"synthesis/contradiction#{index}: rejected by contract — {exc}")
 
-    for index, raw in enumerate(payload.get("information_gaps") or []):
+    for index, raw in enumerate(raw_gaps):
         if not isinstance(raw, dict):
             rejected.append(f"synthesis/gap#{index}: not an object — dropped")
             continue
@@ -459,7 +483,7 @@ def synthesize(
     return SynthesisOutcome(
         findings=tuple(findings),
         overlaps=computed,
-        rejected=tuple(rejected),
+        rejected=cap_rejections(rejected),
         resolved_model=response.resolved_model,
         input_tokens=response.usage.input_tokens,
         output_tokens=response.usage.output_tokens,

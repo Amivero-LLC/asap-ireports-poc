@@ -119,7 +119,16 @@ have produced:
    re-bound to a list in the loop below, harmless by accident of ordering. `mypy` found it on the
    first run. `spikes/` sitting outside the quality gate is a gap, not a convenience.
 
-**What it did not close.** ORCH-01 also wants `durability="sync"` and strict checkpoint
+**And the first live run after it found a fourth thing**, which is the argument for running live
+at all. Synthesis returned both its arrays as JSON *strings*; the loop enumerated the string
+character by character and produced **4,547 rejections and zero synthesis findings**, on both
+paths, with a valid envelope and no error. The specialist path handled the identical shape
+correctly in the same process, because the coercion for it lived in a private helper written
+weeks earlier and never went anywhere else. Now `coercion.py`, imported by both, plus a cap on
+rejection lists — four thousand copies of "not an object" is not a diagnostic, it is what hid the
+two rejections that mattered. See `LESSONS.md`.
+
+**What the graduation did not close.** ORCH-01 also wants `durability="sync"` and strict checkpoint
 deserialization; those need a checkpointer, which is item 7. SPEC-01's tool-allowlist clause is
 *vacuous* rather than met — a specialist has no tool surface. Both stay unchecked in
 `REQUIREMENTS.md`.

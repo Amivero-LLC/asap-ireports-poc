@@ -30,13 +30,16 @@ from ireports_domain import (
 from ireports_gateway import ModelRefusalError, StubGateway
 from ireports_orchestration import (
     CATALOG,
+    MAX_REJECTIONS,
     ORCHESTRATORS,
     EvidenceSpan,
     LoadedCase,
     NoApplicableCriteriaError,
     SpecialistStatus,
     analyze,
+    cap_rejections,
     criteria_for,
+    normalize_array,
 )
 from ireports_retrieval import InMemoryRetriever, RetrievedSpan
 
@@ -748,3 +751,111 @@ def test_the_run_records_what_each_specialist_was_shown(
     """
     result = ORCHESTRATORS["hand-rolled"].run(case, _gateway(_finding()), retriever, RUN_ID)
     assert all(o.retrieved for o in result.outcomes if o.analysed)
+
+
+# ---------------------------------------------------------------------------
+# The shape coercion, shared by both stages
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("key", ["contradictions", "information_gaps"])
+def test_a_synthesis_array_returned_as_a_json_string_is_parsed(
+    case: LoadedCase, retriever: InMemoryRetriever, key: str
+) -> None:
+    """The bug the first post-graduation live run found, pinned.
+
+    The model returned synthesis's arrays as JSON **strings**. The loop enumerated the string
+    character by character, producing one rejection per character — 4,547 across the two arrays,
+    zero findings, no error, on **both** orchestrators. The specialist path handled the identical
+    shape correctly on the same run, because the coercion lived in a private helper there.
+
+    Asserted per array, because fixing one and not the other is precisely how this happened.
+    """
+    # One array arrives as a JSON string, the other as a real array — so this isolates the
+    # coercion to one field at a time, which is the shape the bug had.
+    other = "contradictions" if key == "information_gaps" else "information_gaps"
+    payload: dict[str, Any] = {
+        key: json.dumps([_contradiction()] if key == "contradictions" else []),
+        other: [],
+    }
+
+    gateway = StubGateway(
+        responses={"synthesis": json.dumps(payload)},
+        default=json.dumps({"findings": [_finding()]}),
+    )
+    result = ORCHESTRATORS["hand-rolled"].run(case, gateway, retriever, RUN_ID)
+
+    assert result.synthesis is not None
+    # The give-away is the *count*: one rejection per character is the signature of the bug.
+    assert len(result.synthesis.rejected) < 5, result.synthesis.rejected[:5]
+    if key == "contradictions":
+        assert len(result.synthesis.findings) == 1
+
+
+def test_an_uncoercible_synthesis_array_is_named_once_not_per_character(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """A shape that genuinely cannot be coerced gets **one** rejection naming what it was.
+
+    Not one per element of whatever happened to be iterable. "The response was a str" is the fact
+    that explains the run; four thousand copies of "not an object" is the fact that hides it.
+    """
+    gateway = StubGateway(
+        responses={
+            "synthesis": json.dumps(
+                {"contradictions": "this is prose, not JSON at all", "information_gaps": []}
+            )
+        },
+        default=json.dumps({"findings": [_finding()]}),
+    )
+    result = ORCHESTRATORS["hand-rolled"].run(case, gateway, retriever, RUN_ID)
+
+    assert result.synthesis is not None
+    assert len(result.synthesis.rejected) == 1
+    assert "could not be coerced" in result.synthesis.rejected[0]
+
+
+def test_a_pathological_rejection_count_is_capped_and_says_so() -> None:
+    """Rejections are output, and output has to stay readable to be worth anything.
+
+    The live run put 4,547 rejection strings into the envelope's accounting payload, burying the
+    two that mattered. A cap plus an honest count beats both an unbounded list and a silent
+    truncation — a reader must be able to tell "three were dropped" from "four thousand were, and
+    you are seeing fifty."
+    """
+    capped = cap_rejections([f"reason {i}" for i in range(4547)])
+
+    assert len(capped) == MAX_REJECTIONS + 1
+    assert capped[-1].startswith("... and 4497 more")
+    assert "4547 in total" in capped[-1]
+    # Under the cap, nothing is added — the summary line must not appear on a healthy run.
+    assert cap_rejections(["one", "two"]) == ("one", "two")
+
+
+@pytest.mark.parametrize(
+    ("raw", "key", "expected"),
+    [
+        pytest.param([{"a": 1}], "findings", [{"a": 1}], id="already-a-list"),
+        pytest.param('[{"a": 1}]', "findings", [{"a": 1}], id="the-array-as-a-json-string"),
+        pytest.param({"a": 1}, "findings", [{"a": 1}], id="a-bare-object"),
+        pytest.param({"findings": [{"a": 1}]}, "findings", [{"a": 1}], id="envelope-repeated"),
+        pytest.param({"findings": []}, "findings", [], id="a-nested-empty-array-stays-empty"),
+        pytest.param("prose", "findings", None, id="uncoercible-returns-none-not-empty"),
+        pytest.param(
+            {"findings": [], "title": "x"},
+            "findings",
+            [{"findings": [], "title": "x"}],
+            id="ambiguous-dict-is-wrapped-not-unwrapped",
+        ),
+    ],
+)
+def test_normalize_array_coerces_only_the_documented_shapes(
+    raw: Any, key: str, expected: Any
+) -> None:
+    """**Uncoercible returns `None`, never `[]`.**
+
+    Returning an empty list on failure would turn an unparseable response into a clean empty one,
+    which is the silent under-analysis this whole architecture is built against. The caller has to
+    be able to tell "the model found nothing" from "the model said something I could not read."
+    """
+    assert normalize_array(raw, key) == expected

@@ -8,6 +8,7 @@ turning into "every caller knows about both frameworks."
 from __future__ import annotations
 
 from .case import EvidenceSpan, LoadedCase
+from .coercion import MAX_REJECTIONS, cap_rejections, normalize_array
 from .criteria import CATALOG, Criterion, NoApplicableCriteriaError, criteria_for
 from .port import MAX_PARALLEL, Orchestrator, RunResult, join_and_sort, should_synthesize
 from .registry import ORCHESTRATORS
@@ -17,6 +18,7 @@ from .synthesis import Overlap, SynthesisOutcome, overlaps, synthesize
 __all__ = [
     "CATALOG",
     "MAX_PARALLEL",
+    "MAX_REJECTIONS",
     "ORCHESTRATORS",
     "Criterion",
     "EvidenceSpan",
@@ -29,8 +31,10 @@ __all__ = [
     "SpecialistStatus",
     "SynthesisOutcome",
     "analyze",
+    "cap_rejections",
     "criteria_for",
     "join_and_sort",
+    "normalize_array",
     "overlaps",
     "should_synthesize",
     "synthesize",

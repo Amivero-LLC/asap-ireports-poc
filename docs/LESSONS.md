@@ -74,6 +74,42 @@ already fine.
 **The lesson is about diagnosability, not parsing.** A rejection that does not say what it saw
 cannot be acted on. Spend the extra line.
 
+### A coercion in a private helper protects one call site `[measured]`
+
+The first live run after the orchestration graduated found the nested-envelope bug's sibling, and
+found it the expensive way.
+
+**What happened.** `synthesis.py` asks the same provider, under the same structured-output setting,
+for two arrays. The model returned both as JSON *strings*. `for index, raw in enumerate(payload
+.get("contradictions") or [])` over a string enumerates **characters**, so the loop produced one
+rejection per character:
+
+```
+synthesis/gap#2893: not an object — dropped
+synthesis/gap#2894: not an object — dropped     ← 4,547 of these across the two arrays
+```
+
+Zero synthesis findings. No error, no warning, a valid envelope, and both orchestrators
+independently — because they share the synthesis implementation, so this was never going to be a
+one-path bug.
+
+**The part worth remembering.** On the *same run*, in the *same process*, the specialist path
+handled the identical shape correctly. It had `_normalize_findings`, written when the nested-envelope
+bug was found, and the fix never left that module. Two call sites, one protected, and nothing
+connected them. The fix is `coercion.py` — one `normalize_array` both stages import — not a second
+copy in synthesis.
+
+**And a second failure on top of the first.** The rejection record is supposed to be the diagnostic
+(*Rejections are output, not error logging*, below). Four thousand copies of "not an object" is not
+a diagnostic; it buried the two rejections that mattered and put 4,547 strings into the envelope's
+accounting payload. A non-list is now named **once**, saying what type it actually was, and every
+stage caps its rejection list at 50 with an honest suppressed count. A reader has to be able to
+tell "three findings were dropped" from "four thousand were, and you are seeing fifty."
+
+**Do not return `[]` when coercion fails.** `normalize_array` returns the uncoercible value so the
+caller can name it. Returning an empty list would convert an unreadable response into a clean empty
+one, which is this system's worst failure mode wearing a tidy shape.
+
 ### `output_config.format` is accepted and silently not enforced `[measured]`
 
 **What happened.** Against a Bedrock-backed LiteLLM proxy, `output_config.format` returned HTTP 200
