@@ -68,6 +68,11 @@ mistake that cost three cut requirements. What is now documented:
   `bedrock-runtime` adapter, which is real work.
 - **Claude in Bedrock is FedRAMP High and DoD IL4/IL5 approved** in GovCloud (US).
 
+**Region narrowed 2026-08-12 — GovCloud US-West** `[believed]`, per the project owner, not yet
+confirmed against the account. That is the region carrying `bedrock-mantle`, so the endpoint
+sub-question is closed in our favour: **the `bedrock` adapter works as written** and the
+`bedrock-runtime` fallback ADR-015 scoped is not needed unless the target moves.
+
 **What remains open is much smaller:** documented availability is not account entitlement (Bedrock
 model access is granted per account), the concrete inference-profile IDs must come from the target
 account, and whether a LiteLLM proxy is *permitted* in the approved environment is an

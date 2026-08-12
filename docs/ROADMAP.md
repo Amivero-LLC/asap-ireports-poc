@@ -207,10 +207,11 @@ confidence check before investing in Parts 1–3.
   loop, which stays fast and service-free
 - A short "what runs where" check against `docs/AWS.md`
 
-**Decide early, independently of this list:** GovCloud US-West or US-East. `bedrock-mantle` is
-US-West only, and that decides whether our `bedrock` adapter works as written or needs a
-`bedrock-runtime` sibling — which is real work with its own translation layer for thinking, effort,
-and refusals.
+**Region decided 2026-08-12: GovCloud US-West** `[believed]`, per the project owner, not yet
+confirmed against the account. That is the region where `bedrock-mantle` exists, so **our `bedrock`
+adapter works as written** and the `bedrock-runtime` sibling ADR-015 scoped is not needed. See
+`docs/AWS.md` for what remains open — chiefly that documented availability is not account
+entitlement, and that the adapter has never been run in any partition.
 
 ## 10 · One command, end to end
 

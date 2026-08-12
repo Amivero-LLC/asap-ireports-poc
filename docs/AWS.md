@@ -16,8 +16,23 @@ The architecture is a good fit for GovCloud. The two things that were genuinely 
 on Bedrock, and a managed vector store — are both available, and Claude carries FedRAMP High and
 DoD IL4/5 approval there.
 
-**One constraint decides a design choice: `bedrock-mantle` is US-West only.** Pick the region
-first.
+**Target region: AWS GovCloud (US-West)** — stated by the project owner 2026-08-12, `[believed]`
+not yet confirmed against the account. Everything this design needs exists there, and it is the
+better of the two GovCloud regions for us:
+
+| | US-West | US-East |
+|---|---|---|
+| Claude Sonnet 5 on `bedrock-runtime` | Yes | Yes |
+| Claude Sonnet 5 on `bedrock-mantle` | **Yes** | **No** |
+| OpenSearch Serverless + vector engine | Yes | Yes |
+| Our `bedrock` adapter works as written | **Yes** | No — needs a `bedrock-runtime` sibling |
+
+So the `bedrock-runtime` adapter that ADR-015 named as scoped-but-unbuilt work **is not needed**,
+as long as the region holds. If the target moves to US-East, that work comes back — it needs its
+own translation layer for thinking, effort, and refusals.
+
+**What would confirm it:** an account and region that someone has actually called. See § What is
+still open.
 
 ---
 
@@ -46,8 +61,11 @@ LiteLLM adapter path.
 
 | If you deploy to | Then |
 |---|---|
-| **GovCloud US-West** | The `bedrock` adapter works as written |
+| **GovCloud US-West** ← current target | The `bedrock` adapter works as written |
 | **GovCloud US-East** | It does not. You need a `bedrock-runtime` adapter with its own translation layer for thinking, effort, and refusals — real work, scope it |
+
+**This is the single highest-leverage fact in this document.** It is one line of configuration and
+it decides whether an adapter we already have is deployable or whether a new one has to be built.
 
 ### Compliance
 
@@ -137,6 +155,22 @@ timeout means Lambda retries automatically and you pay for the same model calls 
 exclude the boto3 family — the runtime already has it. Both covered in `docs/LESSONS.md`.
 
 ---
+
+## What is still open
+
+Choosing US-West removes the endpoint question. Four things it does not remove:
+
+1. **Account entitlement.** Documented regional availability is not access — Bedrock model access
+   is granted per account. Nobody has confirmed this account has it.
+2. **Concrete inference-profile IDs**, which have to come from the target account.
+3. **Whether a LiteLLM proxy is permitted in the approved enclave.** An organizational question,
+   not an AWS one. If it is refused, the `bedrock` adapter becomes the only path — which is a
+   config change, not a code change, and is exactly why the tier-alias rule exists.
+4. **The `bedrock` adapter has never been run in any partition.** It is verified as correctly
+   constructed and nothing more. Do not read the green test suite as connectivity.
+
+All four collapse into one action: run the live smoke check against the target account and paste
+the result into `docs/handoff/compatibility-matrix.md` as a second run-of-record.
 
 ## Not evaluated
 
