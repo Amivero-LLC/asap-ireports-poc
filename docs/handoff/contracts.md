@@ -113,9 +113,12 @@ The near-miss tests matter as much as the rejections; an over-broad guard would 
 vaguer, less useful language, and describing the record's own history is exactly what a finding
 is for.
 
-**It is a guard, not a proof.** It cannot catch every possible phrasing and it is not a substitute
-for the human review gate. Its value is that the common failure modes become impossible rather
-than merely discouraged.
+**It is a guard, not a proof — and since ADR-022 it is doing more work than it was designed for.**
+It cannot catch every possible phrasing. Under ADR-011 that was tolerable because an in-run review
+gate stood behind it; that gate is gone, so this validator and the fact that `ProposedFinding` is
+the only finding type are what the decision-support boundary now rests on. Its value is that the
+common failure modes become impossible rather than merely discouraged — but it is a filter, not a
+second opinion.
 
 ---
 
@@ -128,7 +131,7 @@ recorded and this repo's decisions win.
 |---|---|---|---|
 | 1 | §10.3, §10.4 name a concrete model (`case-analysis-sonnet`) | `ModelAlias` enum only | ADR-008. A partition or model-generation change must be a LiteLLM config change, not a contract change. |
 | 2 | §10.6 example uses `evidence_mode: "references_only"` | Bounded excerpts **and** stable references | ADR-010. An excerpt makes a delivered finding reviewable without a second lookup and without depending on ASAP's ability to resolve references into our stores. |
-| 3 | §10.6 has a free-text run-level `summary` | `reviewer_summary`, optional, reviewer-authored only, language-guarded | A machine-written run-level narrative is the most likely place for an aggregate characterization of a person to reappear (ADR-014). |
+| 3 | §10.6 has a free-text run-level `summary` | **No run-level narrative field at all** | A machine-written run-level narrative is the most likely place for an aggregate characterization of a person to reappear (ADR-014). ADR-011 kept it as a reviewer-authored `reviewer_summary`; ADR-022 removed even that, since no reviewer exists at this point in the pipeline. The stricter outcome. |
 | 4 | §10.4 validation field named `schema` | `schema_check` | `schema` shadows a `BaseModel` attribute. Cosmetic. |
 | 5 | §10.2 case example includes a `documents_root` and flat context | Same, plus `position_risk_level` / `position_sensitivity` made **optional** | Routing needs them, but a case genuinely may not have them. Optional-plus-blocking-gap is honest; a required field would force a caller to invent a value, which is exactly the inference §10.2 prohibits. |
 | 6 | §10.5 has a disposition contract | **No disposition contract at all** (ADR-022) | Review happens in ASAP after the run. What an officer decides is ASAP's contract to define; publishing our guess at it would invite a downstream system to implement against a shape we do not own. |

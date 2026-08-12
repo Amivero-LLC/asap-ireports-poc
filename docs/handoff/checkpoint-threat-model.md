@@ -24,9 +24,11 @@ including the hand-rolled one.
 ## 1. What the asset is
 
 A checkpoint is the run's resumable state. In this architecture it holds identifiers, typed
-contract records, node results, and the run's position in the graph. Under ADR-011 it also holds
-proposed findings *before* any human disposition exists — machine output that no authorized officer
-has yet seen.
+contract records, node results, and the run's position in the graph. It also holds proposed
+findings — machine output that no authorized officer has seen. That was true under ADR-011 and is
+**more** true under ADR-022: with review moved to ASAP, *every* finding in a checkpoint is
+un-reviewed by definition, and nothing downstream of the checkpoint will ever mark one otherwise
+inside this system.
 
 Three properties make it worth a threat model of its own rather than a line in a general one.
 
@@ -94,8 +96,8 @@ codebase. A hand-rolled checkpointer does not inherit those CVEs; it inherits th
 | # | Threat | Realistic path | Mitigation |
 |---|---|---|---|
 | T1 | **Code execution on load.** A checkpoint value names a type; the deserializer imports and constructs it. | Any write primitive against the checkpoint tables. | Store plain JSON; restrict deserialization to an allowlist; never `pickle`. §5. |
-| T2 | **Findings altered before review.** A proposed finding's text, citations, or authority is changed between checkpoint write and reviewer read. | Same write primitive; also a stale or restored backup. | Re-validate through the domain contracts; deterministic citation validation before a reviewer sees anything; retain both machine proposal and approved version (ADR-011). |
-| T3 | **The review gate is skipped.** State is edited so a run appears already dispositioned. | Direct row edit setting a status or a disposition list. | The gate is a state transition over `HumanDisposition` records, not a boolean; dispositions are written by the reviewer path, and `package` refuses unless every proposal has one. Row-level integrity (§6) is what makes this detectable rather than merely difficult. |
+| T2 | **Findings altered before delivery.** A proposed finding's text, citations, or authority is changed between checkpoint write and the envelope being emitted. | Same write primitive; also a stale or restored backup. | Re-validate through the domain contracts on load; deterministic citation validation before anything is packaged; contracts are frozen with no mutable container fields, so an in-memory edit after validation is not possible. **Note ADR-022 narrows this:** the "retain both machine proposal and approved version" leg was ADR-011's, and there is no approved version here — ASAP holds it. An alteration before delivery reaches ASAP as though it were ours. |
+| T3 | **A run is made to look further along than it is.** State is edited so a run appears ready to package and deliver. | Direct row edit setting a status. | **Weaker than it was, and stated plainly.** ADR-011's mitigation was a gate over `HumanDisposition` records that `package` refused to pass without; ADR-022 removed that gate, because review happens in ASAP rather than in a run. What remains is the transition table and re-validation on load. Row-level integrity (§6, unbuilt) is what would make an edit detectable. **The compensating control is that iReports no longer claims anything was reviewed** — an envelope is pinned `machine_generated` and carries no approval field, so a forged run state cannot forge a human decision that this system never recorded. |
 | T4 | **Disclosure of case content.** The checkpoint holds case-derived text at rest. | Over-broad database grants, an unencrypted backup, a shared analytics replica. | Encryption at rest, least-privilege grants, retention limits, no replication of checkpoint tables into analytics. Q-08 and Q-09 own the policy side. |
 | T5 | **Cross-run contamination.** One run resumes into another run's state. | A thread/session id collision, or an id supplied from outside. | Run ids are server-generated and never client-supplied. Note `PostgresSaver` truncates `thread_id` at a length-limited column (1b scan §5.1) — a truncating id scheme could *create* collisions. |
 | T6 | **Unbounded state growth.** Checkpoint history accumulates case text indefinitely. | Normal operation. | LangGraph retains every super-step by default — measured at 37,033 bytes of thread storage against a 16,115-byte latest checkpoint for the same three findings `[measured]`. Retention and pruning are a design decision, not a default. |
