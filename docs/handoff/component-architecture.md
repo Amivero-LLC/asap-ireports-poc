@@ -570,9 +570,10 @@ blocked on account access regardless of anything this project builds.
    ADR-017, ADR-020, ADR-021, ADR-022, ADR-023 `[first-party]`. ADR-022 supersedes ADR-011; where an
    older handoff document describes an in-run review gate, this document is the current one.
 2. `docs/OPEN-QUESTIONS.md` — Q-01, Q-02, Q-03 and their blast radius `[first-party]`.
-3. `.planning/PROJECT.md` and `.planning/ROADMAP.md` — the spine statement, the Phase 1 through
+3. `docs/ROADMAP.md` — what to build next and in what order (the GSD planning files it
+   replaced were retired 2026-08-12 and are in git history) — the spine statement, the Phase 1 through
    Phase 3 success criteria, and the Gates section `[first-party]`.
-4. `.planning/REQUIREMENTS.md` § v2 § Cut by ADR-020 — the authoritative list of what is owed a
+4. `docs/REQUIREMENTS.md` § v2 § Cut by ADR-020 — the authoritative list of what is owed a
    `DESIGNED-NOT-BUILT` row and the reason for each `[first-party]`.
 5. `docs/handoff/orchestration-scorecard.md` and `orchestration-scorecard.json` — the measured
    bake-off result that resolved ADR-012, including §5's list of what the bake-off did not measure

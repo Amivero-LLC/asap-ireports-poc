@@ -1,6 +1,7 @@
 """`SpecialistResult` and `SpecialistCriterion`, asserted against D-01 through D-06.
 
-`.planning/phases/01-close-the-architecture-package/01-CONTEXT.md` records six decisions about
+The Phase 1 context notes (retired with the GSD machinery on 2026-08-12; in git history)
+recorded six decisions about
 this contract. Each test below is named for the decision it guards, following
 `test_decision_support_boundary.py`'s one-rule-per-test style — a rule with no test guarding it
 by name is a rule a future change can quietly reopen.

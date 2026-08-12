@@ -18,10 +18,7 @@ from pathlib import Path
 
 from ireports_gateway import build_embedding_gateway
 from ireports_retrieval import IndexableSpan, connect, index_case
-
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-
-from lambda_demo.case_loader import available_cases, load_case  # noqa: E402
+from lambda_demo.case_loader import available_cases, load_case
 
 CASES_DIR = Path(__file__).resolve().parent / "cases"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent

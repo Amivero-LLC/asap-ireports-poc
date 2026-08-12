@@ -100,6 +100,22 @@ routing, policy packs, ingestion, `apps/`, `evals/`.
 
 **Don't scaffold empty directories.** Create one when the first real file lands in it.
 
+## Where things live
+
+Four documents, no fifth. The GSD planning machinery (`.planning/`) was retired 2026-08-12 —
+it described the same work in a second vocabulary that nobody updated, and a stale tracker is
+worse than none because it reads as current.
+
+| File | Answers |
+|---|---|
+| `docs/ROADMAP.md` | What to build next, in order, with what each item taught us |
+| `docs/REQUIREMENTS.md` | How you know a thing is finished |
+| `docs/LESSONS.md` | What already cost someone a day |
+| `docs/ARCHITECTURE.md` | How it is shaped and why |
+
+**Update them in the commit that does the work.** That convention is the only thing keeping them
+honest, and it is exactly the one that failed for the files they replaced.
+
 ## Working here
 
 - Read `docs/DECISIONS.md` before an architectural change. Follow a recorded decision or supersede

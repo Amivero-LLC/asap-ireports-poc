@@ -1,25 +1,27 @@
-# Requirements: asap-ireports
+# Requirements — the acceptance bar
 
-**Defined:** 2026-08-11 · **Pared to the spine:** 2026-08-11 (ADR-020)
-**Core Value:** One command takes a synthetic case, unattended, to a validated typed envelope of
-proposals for review in ASAP,
-with the orchestrator's hard parts exercised and every handoff claim either cited or explicitly
-marked unverified.
+**What this file is for:** "done" means something specific, and this is where that lives.
+[`ROADMAP.md`](ROADMAP.md) says what to build and in what order; this says how you know a thing is
+finished. Two files, no third.
 
-**Source:** derived from `.planning/intel/requirements.md` (extracted from `docs/ROADMAP.md`) plus
-the outstanding work items recorded in `docs/handoff/*`, then narrowed by **ADR-020** to the
-orchestrator spine. The `REQ-{slug}` handles from the intel are carried in each *Traces* line so the
-mapping back to source is not lost.
+**What it is not:** a plan. The GSD planning machinery that used to wrap this — phases, plan files,
+state, progress percentages — was retired on 2026-08-12. It described work in a second vocabulary
+that nobody updated, and a stale tracker is worse than none because it reads as current. The
+requirement IDs survived the cull because acceptance criteria are genuinely useful; the ceremony
+around them was not.
 
-**Scope of v1:** close Milestone 1a, then build and prove the orchestrator spine —
-bounded specialist sub-calls through the gateway port, deterministic ceilings, crash and resume
-without double-paying, a human disposition gate, and a validated typed envelope. Thirteen active
-requirements, down from thirty-three.
+Read the IDs as a checklist, not a contract. If one turns out to be wrong, change it.
 
-**What "cut" means here.** Nothing was deleted. Every requirement ADR-020 removed from v1 appears
-under § v2 § Cut by ADR-020 with its acceptance criteria intact, and Phase 3 is obliged to record it
-in the handoff package as designed-not-built with the reason. A requirement that quietly disappears
-is the failure ADR-001 is written against.
+**Status is maintained by hand, in the commit that does the work.** That convention is the only
+thing keeping this file honest, and it is the same one that failed for the file this replaced —
+so if you find a checkbox disagreeing with the code, believe the code and fix the checkbox.
+
+**Where things stand (2026-08-12).** The architecture-package requirements are closed. Of the
+orchestrator-spine set, retrieval (RETR-01, RETR-02), the refusal path (VAL-02) and the gateway
+port (QUAL-02) are done; the orchestrator and specialist exist but live in `spikes/lambda_demo/`
+rather than `packages/`, so ORCH-01 and SPEC-01 are done in substance and not at the right
+address. Idempotent crash/resume (ORCH-02) and the Lambda timeout proof (LAMB-01) are the
+untouched hard ones — and ORCH-02 is what closes the framework question in ADR-024.
 
 ---
 
@@ -57,10 +59,11 @@ is the failure ADR-001 is written against.
       *Acceptance:* the 15 pre-existing errors in `tests/contract/` are cleared. A handoff document
       that overstates a quality gate is exactly the failure ADR-001 is written against.
       *Traces:* `REQ-fix-mypy-tests-contract` · model-gateway.md §6.
-- [ ] **QUAL-02**: The orchestrator runs on the real `ModelGateway` port.
+- [x] **QUAL-02**: The orchestrator runs on the real `ModelGateway` port.
       *Acceptance:* `spikes/harness/gateway.py`'s separate Postgres-backed instrument is replaced by
       or reconciled with `packages/gateway/`; the bake-off's leg-1 model-call log survives the move.
       *Traces:* `REQ-migrate-spike-to-gateway-port` · model-gateway.md §5.
+  - *Status:* Done — both orchestrators call the real `ModelGateway` port; only the `stub` adapter is offline
 
 ### The orchestrator spine
 
@@ -106,6 +109,9 @@ is the failure ADR-001 is written against.
       `api.smith.langchain.com` **and still succeeds**, because the failure is swallowed.
       *Traces:* `REQ-langsmith-egress-deny` · ADR-012: "any future entry point inherits this
       obligation."
+  - *Status:* **Substance done, wrong address.** Port, both adapters and the no-import test exist in `spikes/lambda_demo/orchestrator.py`, not `packages/orchestration/`. Closing this means graduating the spike
+  - *Status:* **Partial.** Fan-out bound, bounded retry and bounded K are enforced in code. No wall-clock or token ceiling yet — and the wall-clock one is what LAMB-01 depends on
+  - *Status:* **Proven for the bake-off** (`spikes/langgraph/test_langsmith_egress.py`), never re-proven at the demo's entry points
 
 ### Specialist sub-calls
 
@@ -117,7 +123,7 @@ is the failure ADR-001 is written against.
       delivery) are unreachable; the result is a typed `SpecialistResult`, not prose. **Evidence is
       handed in from a synthetic fixture, not retrieved** — RETR-01..03 are cut by ADR-020.
       *Traces:* `REQ-specialist-query` · blueprint §8.3, §8.4 · ADR-020.
-- [ ] **VAL-02** *(reduced by ADR-021)*: A model refusal and a `StructuredOutputError` are **logged**,
+- [x] **VAL-02** *(reduced by ADR-021)*: A model refusal and a `StructuredOutputError` are **logged**,
       never swallowed into an empty result.
       *Acceptance:* the node catches `ModelRefusalError` / `StructuredOutputError` from the gateway
       and logs it with `run_id`, `case_id`, and the criterion. **No `InformationGap` plumbing, no
@@ -127,22 +133,26 @@ is the failure ADR-001 is written against.
       **Known gap, deliberately accepted:** an empty findings list from a refusal is indistinguishable
       at the artifact level from a criterion that came back clean. The distinction lives in the log.
       Owed a designed-not-built entry under HAND-01.
+  - *Status:* Done 2026-08-12 — the node catches, logs `run_id`/`case_id`/criterion, and the run continues. Until then a single refusal killed the entire run
+  - *Status:* **Substance done, wrong type.** Typed per-criterion findings, but via a local `SpecialistOutcome` rather than the published `SpecialistResult` contract
 
 ### Retrieval — PROVISIONAL under Q-02, restored by ADR-021
 
-- [ ] **RETR-01**: Retrieval goes through the port, and every OpenSearch field name, filter, and
+- [x] **RETR-01**: Retrieval goes through the port, and every OpenSearch field name, filter, and
       facet mapping lives in **one module**, explicitly marked PROVISIONAL.
       *Acceptance:* no raw OpenSearch client outside the adapter; a test asserts every field name
       resolves through the mapping module; the module carries a header naming Q-02 and stating that
       the AWS collection's real schema is unconfirmed.
       *Traces:* C-retrieval-through-the-port · ADR-007 · ADR-021 · Q-02. **Q-02 is contained by the
       one-file rule, NOT cleared.**
-- [ ] **RETR-02**: One synthetic case is ingested locally and indexed into local OpenSearch, and the
+- [x] **RETR-02**: One synthetic case is ingested locally and indexed into local OpenSearch, and the
       sub-agent retrieves against it.
       *Acceptance:* a synthetic case is indexed and retrievable by vector + lexical query with a
       mandatory case filter and bounded K. **Vector and lexical only — ADR-006, no graph database, in
       any milestone.** Local ingestion, chunking, and embedding are development only (ADR-007).
       *Traces:* `REQ-synthetic-case-ingest` · ADR-006 · ADR-007 · ADR-021.
+  - *Status:* Done 2026-08-12 — `packages/retrieval/`, hybrid vector + lexical, mandatory case filter, bounded K; a test asserts no field name is written outside `mapping.py`
+  - *Status:* Done 2026-08-12 — `index.py` + `spikes/lambda_demo/index_cases.py`; records the embedding model per document, which is what makes a two-model corpus detectable (Q-03)
 
 ### Validation and typed output
 
