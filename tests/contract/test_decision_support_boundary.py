@@ -407,7 +407,7 @@ MUTABLE_ORIGINS = (list, set, dict)
 `frozen=True` blocks attribute rebinding, not mutation of the object an attribute already
 points at. A `list` field on a frozen model is therefore still appendable, which silently
 defeats any cross-field validator that ran at construction. `CLAUDE.md` requires that both the
-original machine proposal and the human-approved version are retained; a contract whose
+original machine proposal stays exactly as the machine produced it; a contract whose
 sequence field can be appended to after validation does not retain the original.
 
 `tuple[X, ...]` serializes to the same JSON Schema (`{"type": "array", ...}`), so this costs

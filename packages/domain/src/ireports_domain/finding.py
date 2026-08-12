@@ -159,7 +159,7 @@ class ProposedFinding(ContractModel):
     """A machine-proposed finding, pending human disposition.
 
     Immutable by construction (`ContractModel` is frozen). ADR-011 requires that both the machine
-    proposal and the human-approved version are retained, which only works if the proposal cannot
+    proposal and any later revision of it are distinguishable, which only works if the proposal cannot
     be edited in place.
     """
 

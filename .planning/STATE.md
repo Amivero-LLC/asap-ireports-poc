@@ -19,7 +19,8 @@ progress:
 
 See: `.planning/PROJECT.md` (updated 2026-08-11)
 
-**Core value:** One command takes a synthetic case to a **human-approved**, validated typed envelope,
+**Core value:** One command takes a synthetic case, **unattended**, to a validated typed envelope of
+proposals for review in ASAP,
 with the orchestrator's hard parts exercised and every handoff claim cited or explicitly marked
 unverified.
 **Current focus:** Phase 01 — close-the-architecture-package
@@ -37,7 +38,8 @@ requirements → 15.** Cut: the second orchestration adapter and the outcome-lev
 (RETR-01..03, CONT-02), authority routing and policy packs (ROUT-01..02), citation validators
 (VAL-01), the outbox and ASAP mock (DEL-01), the dependency inventory and GovCloud gate (ARCH-02,
 HAND-02..03). **Nothing deleted** — all 18 moved to `REQUIREMENTS.md` § v2 § Cut by ADR-020 with
-acceptance intact, each owed a designed-not-built entry under HAND-01. ADR-011 (disposition gate) and
+acceptance intact, each owed a designed-not-built entry under HAND-01. ADR-011 (disposition gate,
+now superseded by ADR-022) and
 ADR-014 (no aggregate score) were considered for the cut and **explicitly kept** — already structural
 in the shipped contracts, so retaining them costs nothing.
 
@@ -107,7 +109,8 @@ rather than diverging silently. Most load-bearing for current work:
 
 - **ADR-020** — **the buildable scope is the orchestrator spine.** 9 phases → 3; 18 requirements
   moved to v2 with acceptance intact, each owed a designed-not-built entry in the handoff. Retained
-  deliberately: the disposition gate, no-aggregate-score, crash-and-resume, model-call idempotency.
+  deliberately: no-aggregate-score, crash-and-resume, model-call idempotency. (The disposition gate
+  was also retained here, then removed by ADR-022 — iReports has no human interaction.)
 
 - **ADR-021** — **retrieval is back in the spine; the refusal path is a log line.** RETR-01/02
   restored reduced (RETR-03 stays cut); `SpecialistResult` carries no completion status; VAL-02
@@ -118,7 +121,13 @@ rather than diverging silently. Most load-bearing for current work:
   proven the port is cut, so **the no-import test is now the sole lock-in protection** — nodes depend
   on our own port, never `from langgraph import ...`.
 
-- **ADR-011 / ADR-014** — the human disposition gate and the no-aggregate-score rule. Both enforced
+- **ADR-022** — **supersedes ADR-011.** Review happens in ASAP, not inside a run; iReports runs
+  unattended with no human interaction. Removed the two review run states, the disposition
+  contracts, and the envelope's review fields. Contract set bumped to 2.0.0 (12 contracts).
+  REV-01/REV-02 withdrawn; Phase 3 becomes validation + handoff. **Cost:** we can no longer prove
+  by transition table that a rejected finding cannot reach ASAP.
+
+- **ADR-014** — the no-aggregate-score rule. Enforced
   structurally and both NON-NEGOTIABLE.
 
 - **ADR-015 / ADR-018 / ADR-019** — gateway on the official `anthropic` SDK; a refusal raises rather

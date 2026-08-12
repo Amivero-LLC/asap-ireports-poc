@@ -17,8 +17,13 @@ The spine, stated once:
 
 Phase 1 publishes the contract and the boundary the build needs, and makes the entry documents true.
 Phase 2 is the thesis: the orchestrator, the sub-calls, the budgets, the crash, the resume. Phase 3
-closes the loop with the human gate and typed output, and brings the handoff package to a state the
-ASAP program team can act on — including an explicit account of what was designed and not built.
+closes the loop with typed output and a measured comparison against analyst-found issues, and brings
+the handoff package to a state the ASAP program team can act on — including an explicit account of
+what was designed and not built.
+
+**iReports has no human interaction (ADR-022).** It runs unattended and emits proposals; an
+authorized officer reviews them in ASAP. The "human" in this project is a validation activity
+against test data, not a step in a run.
 
 `docs/ROADMAP.md` describes the older, wider milestone shape and is **superseded by this file and by
 ADR-020**. Reconciling it is a Phase 3 obligation.
@@ -74,8 +79,9 @@ blocked on account access regardless.
 - [ ] **Phase 2: Bounded sub-calls that survive a crash** - The orchestrator fans out through the
       gateway port, enforces its own limits, dies mid-fan-out, and resumes without double-paying
 
-- [ ] **Phase 3: Human gate, typed output, and the handoff** - The run pauses for a disposition,
-      resumes, emits a validated envelope, and the package states plainly what was not built
+- [ ] **Phase 3: Validation, typed output, and the handoff** - One unattended command emits a
+      validated envelope, agreement with analyst-found issues is measured, and the package states
+      plainly what was not built
 
 ## Phase Details
 
@@ -193,26 +199,29 @@ distinction lives only in the log. **This is the weakest point in the spine** an
 designed-not-built entry under HAND-01. Refusals are expected in normal operation — adjudicative case
 files routinely discuss criminal conduct, substance use, and foreign contacts.
 
-### Phase 3: Human gate, typed output, and the handoff
+### Phase 3: Validation, typed output, and the handoff
 
-**Goal**: One command takes a synthetic case to a human-approved, validated typed envelope — and the
-ASAP program team receives a package that states plainly what was built, what was designed and not
-built, and what it would cost to be wrong.
+**Goal**: One command takes a synthetic case to a validated typed envelope with no human step in
+it — and we can say, with a number, how well what the machine found matches what a human analyst
+found on the same case. The ASAP program team receives a package that states plainly what was
+built, what was designed and not built, and what it would cost to be wrong.
 **Depends on**: Phase 2
-**Requirements**: REV-01, REV-02, DEL-02, HAND-01
+**Requirements**: DEL-02, VAL-03, VAL-04, HAND-01
 **Success Criteria** (what must be TRUE):
 
-  1. A run pauses in an explicit review state; a disposition is recorded by a **different process**
-     than the one that proposed the finding; the run resumes from the checkpoint.
+  1. One command takes a synthetic case end to end — load, fan-out, budgets, validation, packaging,
+     typed envelope — under a single invocation, **unattended, with no point at which it waits for
+     a person** (ADR-022).
 
-  2. No path in the state machine reaches output without a recorded human disposition — proven by
-     walking the transition table — and no bypass exists in any profile, including local development.
+  2. The emitted envelope is pinned `machine_generated`, carries no field claiming review or
+     approval, and every finding in it is a proposal. No path in the code can promote one.
 
-  3. Both the immutable machine proposal and the human-approved version are retained and separately
-     readable.
+  3. At least one synthetic case carries the issues a human analyst identified, tied to criterion
+     and evidence span, in a form a scorer can read.
 
-  4. One command takes a synthetic case end to end — load, fan-out, budgets, validation, review gate,
-     typed envelope — and produces a human-approved result under a single invocation.
+  4. Agreement is **measured and reported**, per criterion: what both found, what only the machine
+     found, and what **only the human** found — recorded together with the model alias and prompt
+     version that produced it.
 
   5. The handoff package is current: decisions, open questions, contracts and schemas, **and a
      section on what was designed and deliberately not built, with the reason for each** — every
@@ -223,19 +232,22 @@ built, and what it would cost to be wrong.
 
   7. `docs/ROADMAP.md`, which still describes the pre-ADR-020 milestone shape, is reconciled or
      explicitly retired.
-**Plans**: TBD
 
-*No dev-mode auto-approve flag may be added to make criterion 1 convenient.* That affordance is
-exactly the one that survives into production, which is why ADR-011 makes the gate a state transition
-rather than a configuration option. ADR-011 and ADR-014 were both considered for ADR-020's cut and
-both were explicitly kept.
+*Criterion 4 is the one that can embarrass us, which is why it is here.* A scorer that reports only
+precision — of what the machine found, how much was right — will look good while missing issues a
+human caught. The recall number, **what only the human found**, is the one that says whether this
+architecture is worth building on, and it must be reported even when it is bad.
+
+*What this phase no longer contains.* Under ADR-011 this phase was "Human gate, typed output, and
+the handoff", and four of its criteria were about a run pausing for a disposition. ADR-022 removed
+that gate: iReports has no human interaction, and review happens in ASAP afterwards. REV-01 and
+REV-02 are withdrawn — see `REQUIREMENTS.md` § Withdrawn by ADR-022. **The cost is recorded there
+and must reach the handoff:** we can no longer prove by walking a transition table that a rejected
+finding cannot reach ASAP, because that property now belongs to ASAP.
 
 *Criterion 5 is where ADR-020 is paid for.* A narrower build is only defensible if the package is
 honest about the narrowing. Cold start under SAM local is unmeasured and now has no scheduled phase;
 `spikes/test_scorecard.py` still fails the moment a figure is recorded, and that visible gap stays.
-
-*The envelope is written to disk, not delivered.* ADR-010's envelope contract stands and is validated;
-the transactional outbox and the ASAP mock (DEL-01) are cut and documented.
 
 ---
 

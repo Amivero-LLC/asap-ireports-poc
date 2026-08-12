@@ -306,7 +306,11 @@ def validate(findings: list[ProposedFinding]) -> list[ProposedFinding]:
 def package(
     case: CaseManifest, run_id: str, dispositioned: list[DispositionedFinding]
 ) -> ASAPEnvelope:
-    """Build the delivery envelope from human-approved findings only (ADR-011)."""
+    """Build the delivery envelope from released findings only (v1.0.0 / ADR-011 semantics).
+
+    Bake-off-era behaviour, retained deliberately — see `bakeoff_v1_contracts`. Live delivery no
+    longer works this way: ADR-022 removed the disposition step entirely.
+    """
     releasable = [d for d in dispositioned if d.is_releasable]
     if not releasable:
         raise ValueError("package called with no released findings; the review gate did not pass")

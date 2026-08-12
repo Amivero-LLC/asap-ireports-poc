@@ -1,7 +1,8 @@
 # Requirements: asap-ireports
 
 **Defined:** 2026-08-11 · **Pared to the spine:** 2026-08-11 (ADR-020)
-**Core Value:** One command takes a synthetic case to a human-approved, validated typed envelope,
+**Core Value:** One command takes a synthetic case, unattended, to a validated typed envelope of
+proposals for review in ASAP,
 with the orchestrator's hard parts exercised and every handoff claim either cited or explicitly
 marked unverified.
 
@@ -133,28 +134,52 @@ is the failure ADR-001 is written against.
       any milestone.** Local ingestion, chunking, and embedding are development only (ADR-007).
       *Traces:* `REQ-synthetic-case-ingest` · ADR-006 · ADR-007 · ADR-021.
 
-### Human review and typed output
+### Validation and typed output
 
-- [ ] **REV-01**: The run pauses in an explicit review state, an authorized reviewer records a
-      disposition out of band, and the run resumes.
-      *Acceptance:* the pause survives a process boundary — the disposition is recorded by a
-      different process than the one that proposed the finding, and the run resumes from the
-      checkpoint. End-to-end tests drive the review transition explicitly.
-      *Traces:* `REQ-human-review-gate` · ADR-011. **Explicitly retained by ADR-020; NON-NEGOTIABLE.**
-- [ ] **REV-02**: No path reaches output without a recorded human disposition, in **any** profile
-      including local development, and both versions are retained.
-      *Acceptance:* the transition table is walked to prove no path reaches output without passing
-      the gate; a run in any output-side status with `human_review_recorded=False` fails validation;
-      `HumanDisposition` references the immutable proposal by id and carries `approved_text` alongside
-      it. No dev-mode auto-approve flag exists — that affordance is exactly what survives into
-      production.
-      *Traces:* ADR-011 · C-human-disposition-gate (**NON-NEGOTIABLE**) · ADR-020 § retained.
-- [ ] **DEL-02**: One command takes a synthetic case to a human-approved, validated typed envelope.
-      *Acceptance:* load → fan-out → budgets → validation → review gate → validated `ASAPEnvelope`
-      written to disk, in one invocation. **The envelope contract is validated; the transactional
-      outbox and ASAP mock (DEL-01) are cut by ADR-020.**
+*Renamed from "Human review and typed output". REV-01 and REV-02 are **withdrawn** by ADR-022 —
+see § Withdrawn below. They are not cut and not deferred: they specified an in-run review gate for
+a system that has no human interaction at all, so there is nothing to defer.*
+
+- [ ] **DEL-02**: One command takes a synthetic case to a validated typed envelope of proposals.
+      *Acceptance:* load → fan-out → budgets → validation → packaging → validated `ASAPEnvelope`
+      written to disk, in one invocation, **with no human step anywhere in it**. The envelope is
+      pinned `machine_generated` and carries no field claiming review. **The envelope contract is
+      validated; the transactional outbox and ASAP mock (DEL-01) are cut by ADR-020.**
       *Traces:* docs/ROADMAP.md §Milestone 2 Exit (narrowed) · ADR-010 (contract stands, transport
-      does not ship).
+      does not ship) · ADR-022.
+- [ ] **VAL-03**: Synthetic cases carry the issues a human analyst identified, as ground truth.
+      *Acceptance:* at least one synthetic case in `cases/synthetic/` has an `expected/` record
+      naming the issues a human found, each tied to the criterion and the evidence span that
+      supports it, in a form a scorer can read. **Synthetic only — no real case data, ever.**
+      *Traces:* ADR-022 § consequence 1 · blueprint §12.9 (human-factors evaluation).
+- [ ] **VAL-04**: Agreement between machine-found and analyst-found issues is measured, not asserted.
+      *Acceptance:* a scorer compares the `ProposedFinding`s a run emits against the VAL-03 ground
+      truth and reports, per criterion, what both found, what only the machine found, and **what
+      only the human found** — the last being the number that matters most, since a missed issue is
+      the failure mode a demo hides. The figure is recorded with the run's `model_alias` and prompt
+      version, because it is meaningless without them.
+      *Traces:* ADR-022 § consequence 1.
+      **This is what "human validation" means in this project** — an evaluation against test data,
+      not a step in a production run.
+
+### Withdrawn by ADR-022
+
+*Distinct from § v2 § Cut by ADR-020. Those requirements were correctly specified and deliberately
+deferred, and each is owed a designed-not-built entry in the handoff. These two were **wrong**:
+they described a review gate inside a run, and iReports has no human interaction. Nothing is owed
+for them beyond this record of why they are gone.*
+
+- ~~**REV-01**~~: The run pauses in an explicit review state, an authorized reviewer records a
+  disposition out of band, and the run resumes. **Withdrawn 2026-08-11.** Review happens in ASAP,
+  after the run has finished; there is no pause to survive a process boundary.
+- ~~**REV-02**~~: No path reaches output without a recorded human disposition. **Withdrawn
+  2026-08-11.** The property is real but it is now ASAP's to enforce, not ours. What replaced it
+  on our side is narrower and honest: no contract models a human decision, no run state waits for
+  a person, and every envelope is pinned `machine_generated` — all asserted in
+  `tests/contract/test_decision_support_boundary.py`.
+  **Note what this costs.** ADR-011 let us prove, by walking a transition table, that a rejected
+  finding could not reach ASAP. We can no longer make that claim, and the handoff must say so
+  rather than let a reader assume it still holds.
 
 ### Handoff package
 
@@ -272,9 +297,11 @@ originals below. Recorded **unordered and unscoped**.
 | RETR-01 | Phase 2 | Pending (restored, ADR-021) |
 | RETR-02 | Phase 2 | Pending (restored, ADR-021) |
 | QUAL-02 | Phase 2 | Pending |
-| REV-01 | Phase 3 | Pending |
-| REV-02 | Phase 3 | Pending |
+| REV-01 | — | **Withdrawn (ADR-022)** |
+| REV-02 | — | **Withdrawn (ADR-022)** |
 | DEL-02 | Phase 3 | Pending |
+| VAL-03 | Phase 3 | Pending |
+| VAL-04 | Phase 3 | Pending |
 | HAND-01 | Phase 3 | Pending |
 
 **Coverage:**

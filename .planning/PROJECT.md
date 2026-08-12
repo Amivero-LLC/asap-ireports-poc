@@ -14,7 +14,8 @@ demonstrated is a decision that has not been made.
 
 ## Core Value
 
-One command takes a synthetic case to a **human-approved**, validated typed envelope, with the
+One command takes a synthetic case, **unattended**, to a validated typed envelope of proposals for
+review in ASAP, with the
 orchestrator's hard parts exercised and every claim in the handoff package either cited or
 explicitly marked unverified.
 
@@ -52,9 +53,9 @@ Full list with IDs and acceptance in `.planning/REQUIREMENTS.md`. Summary:
       sub-calls through the gateway on tier aliases, deterministic ceilings, crash mid-fan-out and
       resume without double-paying, refusals that never become empty results, LangSmith pinned
       closed (ORCH-01..04, SPEC-01, VAL-02, QUAL-02)
-- [ ] **Phase 3** — Human disposition gate across a process boundary, one command to a validated
+- [ ] **Phase 3** — Measured agreement against analyst-found issues, one command to a validated
       typed envelope, and a handoff package that states plainly what was designed and not built
-      (REV-01..02, DEL-02, HAND-01)
+      (DEL-02, VAL-03..04, HAND-01)
 
 **Cut by ADR-020 and moved to `.planning/REQUIREMENTS.md` § v2 § Cut by ADR-020** — 18 requirements,
 acceptance intact, each owed a designed-not-built entry under HAND-01: the second orchestration
@@ -111,7 +112,7 @@ plus a handoff package, and the risk that deliverable exists to retire is the or
 
 Nine phases became three. **Nothing was deleted** — 18 requirements moved to
 `.planning/REQUIREMENTS.md` § v2 with acceptance intact, and Phase 3 is obliged to record each in the
-handoff as designed-not-built with the reason. **ADR-011 (the human disposition gate) and ADR-014 (no
+handoff as designed-not-built with the reason. **ADR-014 (no
 aggregate score) were considered for the cut and explicitly kept:** both are already structural in the
 shipped contracts with passing tests, so retaining them costs nothing, and cutting them would mean
 deleting working guardrails.
@@ -152,12 +153,15 @@ violate one, stop and raise it.
   otherwise make a final suitability, fitness, credentialing, or national-security eligibility
   determination — it identifies evidence-backed issues for review by an authorized officer.
   Enforced by `DecisionSupportText`'s `AfterValidator` on every narrative field a model writes into.
-  It is a guard, not a proof; the human review gate is the actual control.
+  It is a guard, not a proof. Under ADR-011 the review gate was the actual control; ADR-022
+  removed it, so this guard and the `ProposedFinding` type now carry the boundary alone.
 - **No aggregate score**: no universal person-risk score, no aggregate risk level, no overall
   recommendation field, on **any** contract, whatever it is named (ADR-014). A test walks every
   published schema following `$defs` and rejects such a property. Known drift risk: `ReviewUrgency`
   is a per-finding sequencing hint and is never aggregated.
-- **Human disposition gate**: nothing reaches ASAP without a recorded human disposition. No bypass,
+- **No human decision is modelled here** (ADR-022, supersedes ADR-011): review happens in ASAP
+  after a run finishes. Superseded text follows for the record — nothing reaches ASAP without a
+  recorded human disposition. No bypass,
   in any profile, **including local development**. It is a state transition, not a config flag
   (ADR-011). Both the machine proposal and the approved version are retained.
 - **Models by alias only**: application code names one of three tiers — `ireports-orchestrator`,
@@ -263,7 +267,7 @@ it with a new numbered entry stating what changed and why. Do not silently diver
 <decision id="ADR-008" status="LOCKED" scope="model routing" amended-by="ADR-015,ADR-017">Three model tiers, referenced only by alias: `ireports-orchestrator`, `ireports-thinking`, `ireports-fast`. Application code never names a model. On Bedrock, model ids carry an `anthropic.` prefix. Pin the tested combination in a compatibility matrix.</decision>
 <decision id="ADR-009" status="LOCKED" scope="run profiles">No offline run profile. No recorded-fixture provider, no local LLM server. Bedrock access is required to run the system. Unit and contract tests mock at the gateway boundary. Reproducibility comes from recorded run manifests, not replay.</decision>
 <decision id="ADR-010" status="LOCKED" scope="ASAP delivery">A versioned JSON envelope carrying bounded evidence excerpts plus stable references, delivered through a transactional outbox with idempotency keys and recorded receipts, against a local ASAP mock that validates the schema and simulates status codes, timeouts, and retries. The envelope is our proposal, not an agreed interface (Q-04).</decision>
-<decision id="ADR-011" status="LOCKED" scope="human review">Hard human-review gate, single reviewer role. A run pauses in an explicit review state; one authorized reviewer may accept, modify, or reject each proposed finding. Nothing reaches ASAP without a recorded disposition — no bypass, in any profile, including local development. A dev-mode auto-approve flag is exactly the affordance that survives into production.</decision>
+<decision id="ADR-011" status="SUPERSEDED by ADR-022" scope="human review">SUPERSEDED — iReports has no human interaction; review happens in ASAP after the run. Retained for the record: Hard human-review gate, single reviewer role. A run pauses in an explicit review state; one authorized reviewer may accept, modify, or reject each proposed finding. Nothing reaches ASAP without a recorded disposition — no bypass, in any profile, including local development. A dev-mode auto-approve flag is exactly the affordance that survives into production.</decision>
 <decision id="ADR-012" status="LOCKED" scope="orchestration framework">The orchestration framework is LangGraph, resolved 2026-08-11 on a measured four-leg bake-off. All three candidates passed all four legs, so the decision is about cost, not correctness. Hand-rolled is the recorded runner-up and the fallback if the dependency surface is refused. Conditions carried forward and NOT closed: cold start under SAM local unmeasured; LangSmith stays pinned closed and proven closed at every entry point; the checkpoint blob remains a deserialization trust boundary; nodes depend on our port, never on LangGraph directly.</decision>
 <decision id="ADR-013" status="LOCKED" scope="run model">Interactive analysis, one case at a time, results in minutes. No batch queue in the first milestone. The run model must not assume a single in-process execution — checkpointing and resume are required regardless.</decision>
 <decision id="ADR-014" status="LOCKED" scope="prohibited fields">No universal person-risk score. No contract carries an aggregate risk score, risk level, or overall recommendation field. Findings are per-criterion, per-authority, evidence-backed, and individually dispositioned. Schema review must reject any field that functions as an aggregate score, whatever it is named.</decision>
@@ -272,7 +276,8 @@ it with a new numbered entry stating what changed and why. Do not silently diver
 <decision id="ADR-017" status="LOCKED" scope="gateway routing" amends="ADR-015">`IREPORTS_LITELLM_BASE_URL` is used verbatim; `{base}/v1/messages` is LiteLLM's native Anthropic-format endpoint. `{base}/anthropic/v1/messages` is passthrough to `api.anthropic.com` and returns `401 invalid x-api-key` — a wrong-route error that presents as an authentication error. An optional per-tier alias→model override exists for shared proxies, defaulting to the identity mapping. ADR-008's invariant is untouched.</decision>
 <decision id="ADR-018" status="LOCKED" scope="structured output" amends="ADR-015" partly-superseded-by="ADR-019">A requested schema is verified, not trusted. The gateway raises `StructuredOutputError` if the response is not the requested structure; the diagnostic reports shape only — length, and whether the text is fenced — never the text itself. Stripping the Markdown fence was rejected. Milestone 2 surfaces `StructuredOutputError` to the reviewer as an `InformationGap` (`blocking=True`).</decision>
 <decision id="ADR-019" status="LOCKED" scope="structured output mechanism" supersedes="ADR-015 mechanism, ADR-018 diagnosis">Structured output is a single tool call, and no tier needs Opus. `output_config.format` is measured unreliable everywhere including Opus 4.8. A `response_schema` is sent as one tool and the gateway returns that tool call's validated input. Not sent: `strict: true`, forced `tool_choice`, `output_config.format`. Development mapping is Sonnet 4.6 / Sonnet 5 / Haiku 4.5, verified end to end. This is a per-endpoint finding — re-run the live smoke check before assuming it transfers.</decision>
-<decision id="ADR-020" status="LOCKED" scope="buildable scope" amends="ADR-003, ADR-007, ADR-010, ADR-012 carried conditions">The buildable scope is the orchestrator spine: one command loads a synthetic case, fans out to bounded specialist sub-calls through the `ModelGateway` port on tier aliases, enforces budgets and loop limits in the deterministic shell, survives a crash mid-fan-out and resumes in a separate process without double-paying for an in-flight model call, pauses for a recorded human disposition, and emits a validated typed envelope. Nine phases become three; 18 requirements move to v2 with acceptance intact and are owed a designed-not-built entry in the handoff. Retained deliberately: ADR-011's disposition gate and ADR-014's no-aggregate-score rule (already structural, cutting them would delete working guardrails), crash-and-resume across a process boundary, model-call idempotency (ORCH-02), and refusal-never-becomes-empty (VAL-02). ADR-012 stands and is no longer under re-test; the port is the sole lock-in protection. Cold start under SAM local remains unmeasured with no scheduled phase, and that gap stays visible.</decision>
+<decision id="ADR-022" status="LOCKED" scope="human review" supersedes="ADR-011">Human review happens in ASAP, not inside a run. iReports has no human interaction: it runs unattended and emits proposals. AWAITING_HUMAN_REVIEW and REVIEW_RECORDED, the disposition contracts, and the envelope's human_reviewed / human_disposition / reviewer_modified / reviewer_summary fields are all removed. The decision-support boundary is unchanged — no determination, no aggregate score — but its enforcement now rests solely on ProposedFinding being the only finding type and on the determinative-language guard, since the state-machine gate is gone. REV-01 and REV-02 are withdrawn, not cut. Cost: we can no longer prove by walking a transition table that a rejected finding cannot reach ASAP; that property is ASAP's now.</decision>
+<decision id="ADR-020" status="LOCKED" scope="buildable scope" amends="ADR-003, ADR-007, ADR-010, ADR-012 carried conditions">The buildable scope is the orchestrator spine: one command loads a synthetic case, fans out to bounded specialist sub-calls through the `ModelGateway` port on tier aliases, enforces budgets and loop limits in the deterministic shell, survives a crash mid-fan-out and resumes in a separate process without double-paying for an in-flight model call, pauses for a recorded human disposition, and emits a validated typed envelope. Nine phases become three; 18 requirements move to v2 with acceptance intact and are owed a designed-not-built entry in the handoff. Retained deliberately: ADR-014's no-aggregate-score rule (already structural, cutting them would delete working guardrails), crash-and-resume across a process boundary, model-call idempotency (ORCH-02), and refusal-never-becomes-empty (VAL-02). ADR-012 stands and is no longer under re-test; the port is the sole lock-in protection. Cold start under SAM local remains unmeasured with no scheduled phase, and that gap stays visible.</decision>
 <decision id="ADR-021" status="LOCKED" scope="spine composition" amends="ADR-020">Retrieval returns to the spine because the sub-agent's RAG search is what the sub-agent does — a fixture-fed specialist demonstrates a fan-out, not this system. RETR-01 and RETR-02 restored reduced: local OpenSearch, one synthetic case indexed, every field name in one module marked PROVISIONAL against Q-02. RETR-03 stays cut as model-evaluation work; Q-03 remains a documented unknown. ADR-006 untouched — vector and lexical only, no graph database, in any milestone. `SpecialistResult` carries the criterion, the provenance, and the proposed findings with citations, and **no completion-status field**. VAL-02 reduces from a wired `InformationGap` path to a log line: the gateway already raises `ModelRefusalError` on `stop_reason` so a refusal cannot become `""`, but the reviewer-facing distinction between "refused" and "came back clean" now lives only in the log. That is the weakest point in the spine and is owed a designed-not-built entry under HAND-01.</decision>
 </decisions>
 
@@ -283,7 +288,8 @@ it before building on an assumption. Q-01, Q-02, and Q-03 are GATE items — see
 ---
 *Last updated: 2026-08-11 — **ADR-020: pared to the orchestrator spine, 9 phases → 3, 33 v1
 requirements → 15.** Nothing deleted; 18 requirements moved to v2 with acceptance intact and are owed
-designed-not-built entries in the handoff. ADR-011 and ADR-014 explicitly retained. Previously
+designed-not-built entries in the handoff. ADR-014 explicitly retained; ADR-011 later superseded
+by ADR-022. Previously
 restructured the same day to a port-first dual-adapter bake-off (now cut). Originally created from
 the `/gsd-new-project` ingest of 12 source documents (`.planning/intel/SYNTHESIS.md`,
 `.planning/INGEST-CONFLICTS.md`).*
