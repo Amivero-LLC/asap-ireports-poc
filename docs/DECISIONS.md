@@ -921,13 +921,24 @@ enough to be load-bearing:
 4. **ARCH-03 is closed with a measurement, and ADR-012 stands.**
 
 **The measurement** `[measured]` — `spikes/lambda_fit/`, SAM local, python3.12 arm64, 1024 MB,
-median of 5 runs, reproducible via `measure_coldstart.py`:
+reproducible via `measure_coldstart.py`:
 
-| Candidate | Import (median) | vs control | Unzipped | Zipped |
+| Candidate | Import (typical) | vs control | Unzipped | Zipped |
 |---|---|---|---|---|
-| hand-rolled | **0.478 s** | 1.0× | 30.1 MB | 9.1 MB |
-| **langgraph** | **1.565 s** | **3.27×** | 68.9 MB | 19 MB |
-| strands | 1.459 s | 3.05× | 79.7 MB | 34 MB |
+| hand-rolled | ~0.5 s | 1× | 30.1 MB | 9.1 MB |
+| **langgraph** | **~1.6–2.3 s** | **~3×** | 68.9 MB | 19 MB |
+| strands | ~1.5–1.8 s | ~3× | 79.7 MB | 34 MB |
+
+**The precision here is lower than a stopwatch implies, and that is stated rather than smoothed.**
+Three runs on the same machine gave LangGraph medians of 1.565 s, 1.974 s and 2.303 s, with samples
+from 1.49 s to 5.78 s, as host load varied. The candidate ratio moved between 2.84× and 4.03×. An
+early version of this entry quoted 1.565 s and 3.27× as though they were stable; they are a
+low-load snapshot. **Package size is the load-independent number and is what Lambda limits are
+checked against.**
+
+The conclusion is robust across that whole spread, which is why the imprecision does not undermine
+it: at the *worst* observed ratio and median, LangGraph costs roughly 1.5–1.8 s more per cold
+start than a framework-free control.
 
 **ADR-012 does not reopen.** LangGraph costs ~1.1 s more per cold start than a framework-free
 control, on a workload where one specialist model call runs tens of seconds and cold starts occur

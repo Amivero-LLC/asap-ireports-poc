@@ -21,13 +21,22 @@ container. Building on the host would measure a package that cannot run.
 
 ## What was measured
 
-`[measured]` SAM local, python3.12 arm64, 1024 MB, median of 5 runs:
+`[measured]` SAM local, python3.12 arm64, 1024 MB.
 
-| Candidate | Import (median) | vs control | Unzipped | Zipped |
+| Candidate | Import (typical) | vs control | Unzipped | Zipped |
 |---|---|---|---|---|
-| hand-rolled | 0.478 s | 1.0× | 30.1 MB | 9.1 MB |
-| **langgraph** | 1.565 s | 3.27× | 68.9 MB | 19 MB |
-| strands | 1.459 s | 3.05× | 79.7 MB | 34 MB |
+| hand-rolled | ~0.5 s | 1× | 30.1 MB | 9.1 MB |
+| **langgraph** | **~1.6–2.3 s** | **~3×** | 68.9 MB | 19 MB |
+| strands | ~1.5–1.8 s | ~3× | 79.7 MB | 34 MB |
+
+**Do not quote these to three decimals.** Import time is sensitive to host load, and three runs on
+the same machine produced medians of 1.565 s, 1.974 s and 2.303 s for LangGraph — with individual
+samples from 1.49 s to 5.78 s. The candidate ratio, which is the finding, moved between 2.84× and
+4.03×. `coldstart.json` records one low-load reference run; treat it as a reference point, not a
+constant.
+
+**The package sizes are the trustworthy numbers.** They do not vary with load at all, and they are
+what a Lambda limit is actually checked against.
 
 **ADR-012 stands.** LangGraph costs about a second more per cold start than a framework-free
 control, on a workload where one specialist model call takes tens of seconds and cold starts happen

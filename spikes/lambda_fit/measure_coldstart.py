@@ -83,15 +83,22 @@ def main() -> int:
     event = SPIKE_DIR / "event.json"
     event.write_text("{}\n")
 
+    # Interleave candidates round-robin rather than finishing one before starting the next.
+    #
+    # This is not a style preference. Grouped runs took ~10 minutes end to end, and host load
+    # drifted across them: a re-run on a loaded machine moved LangGraph +26% while the hand-rolled
+    # control barely changed, pushing the ratio from 3.27x to 4.03x. That spread was measuring the
+    # laptop, not the dependency tree. Round-robin spreads any drift across all candidates, so the
+    # ratio — which is the actual finding — stays comparable even when absolute numbers wander.
+    samples: dict[str, list[tuple[float, int]]] = {label: [] for label in FUNCTIONS}
+    for _ in range(args.runs):
+        for label, function in FUNCTIONS.items():
+            samples[label].append(invoke(function, event))
+
     results: dict[str, object] = {}
     for label, function in FUNCTIONS.items():
-        imports: list[float] = []
-        billed: list[int] = []
-        for _ in range(args.runs):
-            i, b = invoke(function, event)
-            imports.append(i)
-            billed.append(b)
-
+        imports = [s[0] for s in samples[label]]
+        billed = [s[1] for s in samples[label]]
         pkg = BUILD_DIR / function
         results[label] = {
             "import_seconds_median": round(statistics.median(imports), 3),

@@ -46,11 +46,16 @@ def test_no_candidate_was_disqualified() -> None:
 COLD_START_CEILING_SECONDS = 3.0
 """The point at which LangGraph's import cost would be worth re-arguing.
 
-Not a performance budget — a tripwire. At the measured 1.57s against a hand-rolled control of
-0.48s, LangGraph costs about a second of extra cold start, on a workload where a single specialist
-model call runs tens of seconds and cold starts happen on scale-up rather than per request. That
-is affordable. At 3s it stops being obviously affordable and the ADR-012 trade deserves a fresh
-look rather than an inherited answer.
+Not a performance budget — a tripwire on the *recorded reference figure*, not on live timing. At
+roughly 1.6-2.3s against a hand-rolled control of ~0.5s, LangGraph costs one to two seconds of
+extra cold start, on a workload where a single specialist model call runs tens of seconds and cold
+starts happen on scale-up rather than per request. That is affordable. At 3s it stops being
+obviously affordable and the ADR-012 trade deserves a fresh look.
+
+**The stored figure is a low-load reference, not a stable constant.** Repeat runs on a loaded
+machine produced LangGraph medians up to 2.3s and individual samples to 5.8s. If you re-measure
+and record a higher number, that is the measurement being noisy before it is the dependency tree
+getting heavier — check host load before concluding anything.
 """
 
 
@@ -90,9 +95,10 @@ def test_langgraph_is_not_disproportionately_heavier_than_the_control() -> None:
     assert control and langgraph, sorted(by_name)
     ratio = langgraph / control
     assert ratio < 5.0, (
-        f"LangGraph imports {ratio:.1f}x slower than the hand-rolled control (measured 3.3x at "
-        "the time of ADR-023). Past 5x, the dependency-weight objection ADR-012 dismissed is "
-        "worth re-arguing."
+        f"LangGraph imports {ratio:.1f}x slower than the hand-rolled control. Observed range at "
+        "the time of ADR-023 was 2.8x-4.0x across runs, so this tripwire has less headroom than "
+        "it looks: a reading past 5x is more likely a contended host than a real regression. "
+        "Check load, re-measure interleaved, and only then re-argue ADR-012."
     )
 
 
