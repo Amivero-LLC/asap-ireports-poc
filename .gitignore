@@ -33,3 +33,8 @@ models/
 .DS_Store
 .idea/
 .vscode/
+
+# spikes/lambda_fit build artifacts — regenerate with build.py + `sam build --use-container`
+spikes/lambda_fit/.stage/
+spikes/lambda_fit/.aws-sam/
+spikes/lambda_fit/event.json

@@ -66,6 +66,7 @@ HAND_ROLLED = CandidateScore(
         distributions=0,
         installed_megabytes=0,
         known_vulnerabilities=0,
+        cold_start_seconds=0.478,
     ),
     judged=JudgedQualities(
         budget_and_allowlist_enforcement=Judgement.ADEQUATE,
@@ -126,6 +127,7 @@ LANGGRAPH = CandidateScore(
         distributions=31,
         installed_megabytes=18,
         known_vulnerabilities=0,
+        cold_start_seconds=1.565,
     ),
     judged=JudgedQualities(
         budget_and_allowlist_enforcement=Judgement.ADEQUATE,
@@ -200,6 +202,7 @@ STRANDS = CandidateScore(
         distributions=42,
         installed_megabytes=47,
         known_vulnerabilities=0,
+        cold_start_seconds=1.459,
     ),
     judged=JudgedQualities(
         budget_and_allowlist_enforcement=Judgement.ADEQUATE,

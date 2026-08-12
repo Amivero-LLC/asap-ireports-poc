@@ -140,7 +140,7 @@ is no longer happening. The port itself is still built in Phase 2 — ORCH-01 is
 enforces its own ceilings, dies mid-fan-out, and resumes in a different process without re-running an
 in-flight model call — with no analysis node aware of LangGraph.
 **Depends on**: Phase 1
-**Requirements**: ORCH-01, ORCH-02, ORCH-03, ORCH-04, SPEC-01, VAL-02, RETR-01, RETR-02, QUAL-02
+**Requirements**: LAMB-01, ORCH-01, ORCH-02, ORCH-03, ORCH-04, SPEC-01, VAL-02, RETR-01, RETR-02, QUAL-02
 **Success Criteria** (what must be TRUE):
 
   1. `packages/orchestration/` exposes this project's own port with a LangGraph adapter behind it,
@@ -198,6 +198,18 @@ list that is indistinguishable at the artifact level from a criterion that came 
 distinction lives only in the log. **This is the weakest point in the spine** and is owed a
 designed-not-built entry under HAND-01. Refusals are expected in normal operation — adjudicative case
 files routinely discuss criminal conduct, substance use, and foreign contacts.
+
+*Lambda fit is part of this phase, not a separate concern (ADR-023).* The target shape is one
+invocation per run with in-process fan-out, and the 15-minute ceiling is survived by the same
+mechanism ORCH-02 already owes: stop at `max_wall_clock_seconds`, checkpoint, return, resume in the
+next invocation. **A Lambda timeout is a crash mid-fan-out.** LAMB-01 proves that across an
+invocation boundary with 0 duplicate paid calls — which matters more under Lambda than locally,
+because Lambda retries automatically and a timeout without idempotency re-pays for every model call.
+
+The packaging half is already done: `spikes/lambda_fit/` measured cold start under SAM local and
+closed ARCH-03 (LangGraph 1.565s vs a 0.478s framework-free control; ADR-012 stands).
+
+---
 
 ### Phase 3: Validation, typed output, and the handoff
 

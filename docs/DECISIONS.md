@@ -883,3 +883,79 @@ ASAP. Removing it makes the boundary between the two systems sharper, not softer
    can claim**, and the package must say so rather than quietly dropping the claim.
 4. **Contract count drops from 14 to 12** and `CONTRACT_VERSION` is bumped, because removing a
    published contract is a breaking change for any consumer that had started against it.
+
+---
+
+## ADR-023 — Lambda fit: one invocation per run, and the cold-start number that closes ARCH-03
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Closes ARCH-03 (cut by ADR-020)** · **Amends ADR-004**
+
+**Context.** ADR-004 commits to AWS GovCloud with a Lambda/SAM adapter "built and exercised," but
+nothing was ever built or exercised, and ADR-020 cut ARCH-03 — the cold-start measurement — leaving
+the scorecard's largest hole open with no scheduled phase. Two questions had gone unanswered long
+enough to be load-bearing:
+
+1. **Does an orchestrator that fans out to sub-agents fit Lambda at all?** A 15-minute ceiling and
+   a fan-out of paid model calls look like a bad match.
+2. **Does LangGraph's dependency weight disqualify it on cold start?** The scorecard names this as
+   the one outstanding measurement that could reopen ADR-012.
+
+**Decision.**
+
+1. **The target shape is one Lambda invocation per run, with in-process fan-out.** The orchestrator
+   and its specialist sub-calls run inside a single invocation; LangGraph is a library executing in
+   that process, and fan-out is async concurrency bounded by `max_parallel_specialists`. Step
+   Functions with a Lambda per node is **rejected as the primary shape** — it moves control flow out
+   of the framework ADR-012 selected and splits the deterministic shell across Python and ASL, which
+   is a large cost to buy a ceiling this workload can already survive.
+2. **The 15-minute ceiling is survived by the mechanism already owed, not by a new one.** ORCH-02
+   requires that a crash mid-fan-out resume in a separate process without re-running an in-flight
+   model call. **A Lambda timeout is that crash.** `max_wall_clock_seconds` is already a first-class
+   budget on `Budgets`; the shell stops before the ceiling, checkpoints, and returns, and the next
+   invocation resumes from the checkpoint. No new architecture is required — but note the
+   dependency in consequence 3.
+3. **LocalStack is permitted in an opt-in profile.** `CLAUDE.md` excludes it "in the default
+   profile," which governs the everyday `pytest` loop and is unchanged. Proving the trigger chain
+   (upload → extract → chunk → index → start analysis) needs service emulation that SAM local does
+   not provide, and that is a legitimate opt-in.
+4. **ARCH-03 is closed with a measurement, and ADR-012 stands.**
+
+**The measurement** `[measured]` — `spikes/lambda_fit/`, SAM local, python3.12 arm64, 1024 MB,
+median of 5 runs, reproducible via `measure_coldstart.py`:
+
+| Candidate | Import (median) | vs control | Unzipped | Zipped |
+|---|---|---|---|---|
+| hand-rolled | **0.478 s** | 1.0× | 30.1 MB | 9.1 MB |
+| **langgraph** | **1.565 s** | **3.27×** | 68.9 MB | 19 MB |
+| strands | 1.459 s | 3.05× | 79.7 MB | 34 MB |
+
+**ADR-012 does not reopen.** LangGraph costs ~1.1 s more per cold start than a framework-free
+control, on a workload where one specialist model call runs tens of seconds and cold starts occur
+on scale-up rather than per request. Package size is comfortably inside both Lambda limits
+(250 MB unzipped, 50 MB zipped). The dependency-weight objection was the strongest argument against
+LangGraph and it does not survive contact with the number.
+
+**What the number is not.** `sam local invoke` reports an `Init Duration` of ~0.05 ms for every
+candidate; it does not emulate Lambda's init/invoke split and that field is meaningless. The figure
+above is `import_seconds`, timed inside the handler module around the orchestrator import, on
+macOS arm64 Docker. It is an **indicative comparison between candidates on identical footing**, not
+a production cold-start figure `[unverified]` — a real one needs a deploy to Lambda, gated on Q-01
+for GovCloud. Treat the *ratio* as the finding, not the absolute.
+
+**Consequences.**
+
+1. **Strands is the heaviest package at 79.7 MB unzipped / 34 MB zipped**, approaching the 50 MB
+   zipped limit before any application code. Recorded because it constrains a candidate this
+   project no longer plans to use, and a future reader may be considering it fresh.
+2. **`spikes/lambda_fit/` is retained and runs in the suite**, like the other spikes. Its two
+   guard tests assert the figures stay under a 3 s ceiling and that LangGraph stays within 5× the
+   control — tripwires on the reasoning, not performance budgets.
+3. **The timeout-resume proof is owed and not yet built.** Consequence 2 of the decision above is
+   an argument, not a demonstration: it depends on ORCH-02, which is unbuilt and measured at 11/24
+   duplicate paid calls for LangGraph today. **Under Lambda this is worse than on a laptop**,
+   because Lambda retries automatically — a timeout without idempotency means paying for the same
+   model calls again on every retry. Phase 2 (LAMB-01) proves it under Lambda semantics.
+4. **The trigger chain is not ours and is not proven here.** Upload, extraction, chunking, and
+   indexing belong to the AWS ingestion pipeline (ADR-007). What ADR-023 covers starts at "case is
+   ready, start the analysis." How that invocation is triggered is an integration question for the
+   handoff team, and Q-02 still gates what the index looks like when they get there.

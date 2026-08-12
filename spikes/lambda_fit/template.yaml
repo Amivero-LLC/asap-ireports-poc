@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Cold-start and packaging measurement for the three ADR-012 bake-off candidates (ARCH-03).
+  One function per candidate, each staged by build.py with only its own dependency set, so the
+  package sizes below are comparable rather than sharing a common tree.
+
+  This template exists to be measured, not deployed. It has no event sources: the trigger chain
+  (S3 upload, extraction, chunking, indexing) is a separate question and belongs to whoever owns
+  the AWS ingestion pipeline (ADR-007).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    # 1024 MB is the smallest size at which CPU allocation stops being the dominant term in an
+    # import-heavy cold start. Measuring at 128 MB would report a number about throttling.
+    MemorySize: 1024
+    # The real ceiling is 900. Kept explicit so nobody reads the default 3 as meaningful.
+    Timeout: 900
+    Architectures:
+      - arm64
+
+Resources:
+  HandRolledFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .stage/handrolled/
+      Handler: app.handler
+      Environment:
+        Variables:
+          CANDIDATE: handrolled
+
+  LangGraphFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .stage/langgraph/
+      Handler: app.handler
+      Environment:
+        Variables:
+          CANDIDATE: langgraph
+
+  StrandsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .stage/strands/
+      Handler: app.handler
+      Environment:
+        Variables:
+          CANDIDATE: strands

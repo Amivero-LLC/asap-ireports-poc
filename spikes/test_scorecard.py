@@ -43,17 +43,57 @@ def test_no_candidate_was_disqualified() -> None:
         assert candidate.disqualifying_findings == [], candidate.candidate
 
 
-def test_cold_start_is_null_and_stays_visible() -> None:
-    """The largest gap in the scorecard, asserted so it cannot be forgotten quietly.
+COLD_START_CEILING_SECONDS = 3.0
+"""The point at which LangGraph's import cost would be worth re-arguing.
 
-    When the SAM local packaging leg is run, this test fails and forces the recommendation to be
-    re-examined against the new number rather than left standing by default.
+Not a performance budget — a tripwire. At the measured 1.57s against a hand-rolled control of
+0.48s, LangGraph costs about a second of extra cold start, on a workload where a single specialist
+model call runs tens of seconds and cold starts happen on scale-up rather than per request. That
+is affordable. At 3s it stops being obviously affordable and the ADR-012 trade deserves a fresh
+look rather than an inherited answer.
+"""
+
+
+def test_cold_start_is_measured_and_within_the_ceiling() -> None:
+    """The gap ARCH-03 left open, now closed — and kept from silently reopening.
+
+    This test previously asserted `cold_start_seconds is None`, so that recording any figure would
+    fail the suite and force the ADR-012 recommendation to be re-read against it. That has now
+    happened: `spikes/lambda_fit/` measures import cost under SAM local, the figures are in the
+    scorecard, and the recommendation was re-examined and stands (ADR-023).
+
+    The test's job flips accordingly. It no longer guards an absence; it guards the conclusion.
     """
     for candidate in SCORECARD.candidates:
-        assert candidate.footprint.cold_start_seconds is None, (
-            f"{candidate.candidate} now has a cold-start measurement; re-read the ADR-012 "
-            "recommendation against it before updating this test"
+        measured = candidate.footprint.cold_start_seconds
+        assert measured is not None, (
+            f"{candidate.candidate} has no cold-start figure. ARCH-03 is closed and every "
+            "candidate is expected to carry one; regenerate with spikes/lambda_fit/."
         )
+        assert measured < COLD_START_CEILING_SECONDS, (
+            f"{candidate.candidate} cold start is {measured}s, at or above the "
+            f"{COLD_START_CEILING_SECONDS}s ceiling. Re-read the ADR-012 recommendation against "
+            "this number before raising the ceiling — that trade was decided at ~1.5s."
+        )
+
+
+def test_langgraph_is_not_disproportionately_heavier_than_the_control() -> None:
+    """The specific comparison ADR-012 turns on, asserted rather than remembered.
+
+    ADR-012 chose LangGraph on cost, not correctness — all three candidates passed all four legs.
+    Dependency weight was the open risk, and a Lambda cold start is where weight is felt. If that
+    ratio grows materially, the reasoning behind the choice is worth revisiting.
+    """
+    by_name = {c.candidate: c.footprint.cold_start_seconds for c in SCORECARD.candidates}
+    control = by_name.get("hand-rolled")
+    langgraph = by_name.get("langgraph")
+    assert control and langgraph, sorted(by_name)
+    ratio = langgraph / control
+    assert ratio < 5.0, (
+        f"LangGraph imports {ratio:.1f}x slower than the hand-rolled control (measured 3.3x at "
+        "the time of ADR-023). Past 5x, the dependency-weight objection ADR-012 dismissed is "
+        "worth re-arguing."
+    )
 
 
 def test_published_json_matches_the_python() -> None:

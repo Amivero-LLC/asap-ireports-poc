@@ -35,7 +35,7 @@
         "distributions": 0,
         "installed_megabytes": 0,
         "known_vulnerabilities": 0,
-        "cold_start_seconds": null
+        "cold_start_seconds": 0.478
       },
       "judged": {
         "budget_and_allowlist_enforcement": "adequate",
@@ -87,7 +87,7 @@
         "distributions": 31,
         "installed_megabytes": 18,
         "known_vulnerabilities": 0,
-        "cold_start_seconds": null
+        "cold_start_seconds": 1.565
       },
       "judged": {
         "budget_and_allowlist_enforcement": "adequate",
@@ -142,7 +142,7 @@
         "distributions": 42,
         "installed_megabytes": 47,
         "known_vulnerabilities": 0,
-        "cold_start_seconds": null
+        "cold_start_seconds": 1.459
       },
       "judged": {
         "budget_and_allowlist_enforcement": "adequate",

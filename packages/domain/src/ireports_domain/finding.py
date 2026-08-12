@@ -158,9 +158,8 @@ class InformationGap(ContractModel):
 class ProposedFinding(ContractModel):
     """A machine-proposed finding, pending human disposition.
 
-    Immutable by construction (`ContractModel` is frozen). ADR-011 requires that both the machine
-    proposal and any later revision of it are distinguishable, which only works if the proposal cannot
-    be edited in place.
+    Immutable by construction (`ContractModel` is frozen). An envelope cites the proposal it came
+    from, and that citation is meaningless if the proposal can be edited in place after the fact.
     """
 
     schema_version: ContractVersion = CONTRACT_VERSION

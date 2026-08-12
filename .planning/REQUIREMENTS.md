@@ -81,6 +81,16 @@ is the failure ADR-001 is written against.
       *Traces:* `REQ-model-call-idempotency` · scorecard §4 · blueprint §8.5. **Owed by all three
       bake-off candidates and built by none. The most expensive item ADR-020 retained, retained
       because durable orchestration of paid sub-calls is not proven if resuming double-pays.**
+- [ ] **LAMB-01**: A run that exhausts its wall-clock budget inside Lambda checkpoints, returns,
+      and resumes in a *new invocation* without re-paying for an in-flight model call.
+      *Acceptance:* under SAM local with a wall-clock budget set below the work required, the first
+      invocation returns having checkpointed; a second invocation resumes from that checkpoint and
+      completes; the duplicate-model-call probe reports **0 duplicate paid calls** across the
+      boundary. **This is ORCH-02 under Lambda semantics and cannot be built before it.**
+      *Traces:* ADR-023 § consequence 3 · ADR-004 · scorecard §4.
+      **Why it matters more here than on a laptop:** Lambda retries automatically, so a timeout
+      without idempotency re-pays for every model call on every retry. `spikes/lambda_fit/` proves
+      the packaging half; this proves the half that costs money.
 - [ ] **ORCH-03**: Budgets and loop limits are enforced by the deterministic shell, not requested of
       the model.
       *Acceptance:* per-specialist ceilings on model calls, tool calls, retrieved evidence, tokens,
@@ -209,7 +219,7 @@ HAND-01.**
 |---|---|---|
 | **ORCH-05** | A second, hand-rolled adapter behind the same port, with one conformance suite over both | The port plus ORCH-01's no-import test is the lock-in protection; a parallel implementation doubles every downstream phase |
 | **BAKE-01** | Outcome-level scorecard comparing both adapters over the full seam-walk | Needs two adapters; ADR-012 stands as decided |
-| **ARCH-03** | Cold start and packaging measured under SAM local | Was scoped to the bake-off verdict. **Remains unmeasured with no scheduled phase**; `spikes/test_scorecard.py` still fails the moment a figure is recorded, keeping the gap visible |
+| ~~**ARCH-03**~~ | ~~Cold start and packaging measured under SAM local~~ | **CLOSED 2026-08-11 by ADR-023, not by the cut.** Measured in `spikes/lambda_fit/`: hand-rolled 0.478s, LangGraph 1.565s (3.27x), Strands 1.459s; packages 9.1/19/34 MB zipped. ADR-012 stands. The tripwire test now guards the conclusion instead of the absence |
 | **ARCH-05** | ADR-012's supersession criteria pre-registered before the build | Existed only to stop a bake-off from choosing its own rubric |
 | **ARCH-02** | Library and framework inventory with versions and rationale | Dependency set is small and stable under the spine |
 | **CKPT-01** | Keyed MAC over serialized checkpoint state, verified on load | **The single largest recorded security gap** (threat-model §6). Converts T2 and T3 from difficult to detectable |
@@ -290,6 +300,7 @@ originals below. Recorded **unordered and unscoped**.
 | QUAL-01 | — | Done (2026-08-11) |
 | ORCH-01 | Phase 2 | Pending |
 | ORCH-02 | Phase 2 | Pending |
+| LAMB-01 | Phase 2 | Pending |
 | ORCH-03 | Phase 2 | Pending |
 | ORCH-04 | Phase 2 | Pending |
 | SPEC-01 | Phase 2 | Pending |
