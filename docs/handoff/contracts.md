@@ -220,5 +220,11 @@ figure that goes stale without anyone noticing.
 | `generate_schemas.py --check` | schemas/ is current (12 contracts) |
 | `bandit -r packages` | 0 high, 0 medium severity (3 low-severity false positives, §5) |
 
-These gates are run by hand. There is no CI workflow in this repository yet, so nothing runs them
-on a push — treat the figures as of the date above, not as a live signal.
+**These gates now run on every push** (`.github/workflows/quality.yml`), so a drift between the
+models and `schemas/`, or a lockfile that no longer matches `pyproject.toml`, fails the build
+rather than waiting to be noticed. The counts above are still a dated observation — CI proves the
+gates pass, not that a number written into prose is current.
+
+They were run by hand until 2026-08-11, and it showed: the schema-currency gate sat failing across
+several commits, and four published figures drifted in a single day. That is what the workflow
+exists to stop.
