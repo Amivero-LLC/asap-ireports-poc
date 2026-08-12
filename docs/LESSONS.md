@@ -213,6 +213,41 @@ production cold-start figure.
 
 ---
 
+## Retrieval
+
+### Scope citation checks to what the model was shown `[measured]`
+
+Before retrieval, a specialist saw the whole case and citations were checked against it. With
+retrieval those are different sets, and keeping the check at case scope would let a model cite a
+span it was never given — which is indistinguishable from a lucky hallucination and passes silently.
+
+Check against the retrieved set. And record it: `SpecialistOutcome.retrieved` is what makes "why did
+the financial criterion miss this?" answerable, and the answer is usually that retrieval never
+surfaced the span.
+
+### Fixing one context-stuffing site does not fix the others `[measured]`
+
+Specialists were switched to retrieval; synthesis was left pasting the whole case. At 430 tokens
+that was invisible. On the first 35,000-token case the synthesis call exhausted `max_tokens` while
+thinking and returned no text at all — and took the run down with it, because it had no failure
+containment either.
+
+Two lessons, one incident: **grep for every place that builds a prompt from the full corpus**, and
+**a stage that calls a model needs the same containment as every other stage.** The refusal fix from
+item 3 was applied one layer down and not carried up.
+
+### Estimate token savings from the spans you actually retrieve `[measured]`
+
+Predicted 7× fewer input tokens from retrieval; measured **3.0×** (69,139 against ~209,664 for
+paste-everything, six calls on a 35k-token case).
+
+The gap: I costed k=6 at the corpus *average* span size. Retrieval does not return average spans —
+it returns the large, content-rich ones, because those are what match. Cost k from the biggest
+plausible spans, not the mean.
+
+Also worth separating: output tokens (25,632 here, thinking at `effort=high`) are unaffected by
+retrieval. Only the input side moves.
+
 ## Orchestration
 
 ### Every type LangGraph inspects must resolve from module scope `[measured]`

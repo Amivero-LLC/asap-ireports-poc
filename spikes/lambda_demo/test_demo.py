@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from ireports_domain import ASAPEnvelope, DecisionDomain, FindingClassification
 from ireports_gateway import ModelRefusalError, StubGateway
+from ireports_retrieval import InMemoryRetriever, RetrievedSpan
 from lambda_demo import handler as handler_module
 from lambda_demo.case_loader import LoadedCase, load_case
 from lambda_demo.criteria import CATALOG, NoApplicableCriteriaError, criteria_for
@@ -35,6 +36,31 @@ RUN_ID = "run_test_0001"
 @pytest.fixture
 def case():
     return load_case(CASE_DIR)
+
+
+@pytest.fixture
+def retriever(case):
+    """Every span, ignoring the query.
+
+    **Not a retriever, and no test here may claim otherwise.** It returns the whole case, which is
+    exactly the behaviour retrieval replaced — so it keeps orchestration tests offline and free,
+    and proves nothing about relevance. Retrieval behaviour is tested in `tests/retrieval/`,
+    against a real cluster.
+    """
+    return InMemoryRetriever(
+        tuple(
+            RetrievedSpan(
+                evidence_id=s.evidence_id,
+                document_id=s.document_id,
+                title=s.title,
+                text=s.text,
+                page_number=s.page_number,
+                source_type=s.source_type,
+                score=1.0,
+            )
+            for s in case.spans
+        )
+    )
 
 
 def _finding(**overrides: Any) -> dict[str, Any]:
@@ -86,7 +112,7 @@ def test_nodes_do_not_import_langgraph() -> None:
         )
 
 
-def test_both_orchestrators_produce_the_same_findings(case) -> None:
+def test_both_orchestrators_produce_the_same_findings(case, retriever) -> None:
     """Same case, same stub, two orchestrators, identical output.
 
     With a real model the two candidates return different analyses — they are two runs of a
@@ -94,7 +120,7 @@ def test_both_orchestrators_produce_the_same_findings(case) -> None:
     turns "similar" into "identical" and makes the port's claim checkable at all.
     """
     results = {
-        name: orchestrator.run(case, _gateway(_finding()), RUN_ID)
+        name: orchestrator.run(case, _gateway(_finding()), retriever, RUN_ID)
         for name, orchestrator in ORCHESTRATORS.items()
     }
     shapes = {
@@ -131,7 +157,7 @@ def test_criteria_come_from_the_case_not_a_constant(case) -> None:
     assert len(criteria_for(_manifest(case, policy_pack_ids=("sead4-current",)))) < len(both)
 
 
-def test_both_orchestrators_fan_out_to_the_width_the_case_asks_for(case) -> None:
+def test_both_orchestrators_fan_out_to_the_width_the_case_asks_for(case, retriever) -> None:
     """The runtime width reaches both implementations, not just the selection function.
 
     Asserted on `outcomes` rather than `findings`: a criterion that produces no findings still ran,
@@ -146,7 +172,7 @@ def test_both_orchestrators_fan_out_to_the_width_the_case_asks_for(case) -> None
     assert expected < len(CATALOG)  # otherwise this test proves nothing
 
     for name, orchestrator in ORCHESTRATORS.items():
-        result = orchestrator.run(narrowed, _gateway(_finding()), RUN_ID)
+        result = orchestrator.run(narrowed, _gateway(_finding()), retriever, RUN_ID)
         assert len(result.outcomes) == expected, f"{name} fanned out to the wrong width"
         assert result.criteria == criteria_for(narrowed.manifest)
 
@@ -166,20 +192,24 @@ def test_a_case_with_no_applicable_criteria_raises(case) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_unresolvable_citation_drops_the_finding(case) -> None:
+def test_unresolvable_citation_drops_the_finding(case, retriever) -> None:
     """Evidence before inference. A citation that does not resolve is not trimmed — it is fatal.
 
     Trimming would leave an observation standing on evidence nobody can open, which is precisely
     the failure this architecture exists to prevent.
     """
     outcome = analyze(
-        CATALOG[0], case, _gateway(_finding(supporting_evidence=["ev_001", "ev_999"])), RUN_ID
+        CATALOG[0],
+        case,
+        _gateway(_finding(supporting_evidence=["ev_001", "ev_999"])),
+        retriever,
+        RUN_ID,
     )
     assert outcome.findings == ()
     assert any("ev_999" in reason for reason in outcome.rejected)
 
 
-def test_determinative_language_is_rejected_by_the_contract(case) -> None:
+def test_determinative_language_is_rejected_by_the_contract(case, retriever) -> None:
     """The prompt asks; the type enforces.
 
     ADR-022 removed the in-run review gate, so `reject_determinative_language` and the
@@ -194,13 +224,14 @@ def test_determinative_language_is_rejected_by_the_contract(case) -> None:
                 policy_relevance="The record shows the subject violated SEAD-4 Guideline B.",
             )
         ),
+        retriever,
         RUN_ID,
     )
     assert outcome.findings == ()
     assert any("rejected by contract" in reason for reason in outcome.rejected)
 
 
-def test_a_span_cited_in_both_roles_is_demoted_and_recorded(case) -> None:
+def test_a_span_cited_in_both_roles_is_demoted_and_recorded(case, retriever) -> None:
     """Observed behaviour, resolved deterministically rather than by dropping a good finding.
 
     Supporting wins because it is the basis of the observation, and the adjustment is written
@@ -210,6 +241,7 @@ def test_a_span_cited_in_both_roles_is_demoted_and_recorded(case) -> None:
         CATALOG[0],
         case,
         _gateway(_finding(supporting_evidence=["ev_001"], mitigating_evidence=["ev_001"])),
+        retriever,
         RUN_ID,
     )
     assert len(outcome.findings) == 1
@@ -226,7 +258,7 @@ def test_a_span_cited_in_both_roles_is_demoted_and_recorded(case) -> None:
         pytest.param('{"findings": "[{\\"title\\": \\"x\\"}]"}', id="a-string-holding-a-stub"),
     ],
 )
-def test_malformed_model_output_never_crashes_the_shell(case, payload: str) -> None:
+def test_malformed_model_output_never_crashes_the_shell(case, payload: str, retriever) -> None:
     """A requested schema is verified, not trusted (ADR-018).
 
     Every shape here has been returned by a real model against this exact schema. None of them
@@ -234,7 +266,7 @@ def test_malformed_model_output_never_crashes_the_shell(case, payload: str) -> N
     one must also leave a reason behind — a silently empty result is indistinguishable from a
     clean analysis, which is the worst outcome this system can produce.
     """
-    outcome = analyze(CATALOG[0], case, StubGateway(default=payload), RUN_ID, attempts=1)
+    outcome = analyze(CATALOG[0], case, StubGateway(default=payload), retriever, RUN_ID, attempts=1)
     assert outcome.findings == ()
     assert outcome.rejected  # rejected with a reason, not silently empty
 
@@ -248,7 +280,9 @@ def test_malformed_model_output_never_crashes_the_shell(case, payload: str) -> N
         pytest.param("NESTED_EMPTY", 0, id="a-nested-empty-array-is-genuinely-empty"),
     ],
 )
-def test_the_two_observed_shape_coercions(case, payload: str | None, expected: int) -> None:
+def test_the_two_observed_shape_coercions(
+    case, payload: str | None, expected: int, retriever
+) -> None:
     """`findings` comes back as a JSON string or a bare object roughly one call in three.
 
     Both are recoverable without guessing at content, so both are coerced rather than rejected —
@@ -266,7 +300,7 @@ def test_the_two_observed_shape_coercions(case, payload: str | None, expected: i
         text = json.dumps({"findings": _finding()})
     else:
         text = payload
-    outcome = analyze(CATALOG[0], case, StubGateway(default=text), RUN_ID, attempts=1)
+    outcome = analyze(CATALOG[0], case, StubGateway(default=text), retriever, RUN_ID, attempts=1)
     assert len(outcome.findings) == expected
 
 
@@ -275,9 +309,9 @@ def test_the_two_observed_shape_coercions(case, payload: str | None, expected: i
 # ---------------------------------------------------------------------------
 
 
-def test_envelope_is_machine_generated_and_unreviewed(case) -> None:
+def test_envelope_is_machine_generated_and_unreviewed(case, retriever) -> None:
     """ADR-022: iReports emits proposals and records no human decision, ever."""
-    result = ORCHESTRATORS["hand-rolled"].run(case, _gateway(_finding()), RUN_ID)
+    result = ORCHESTRATORS["hand-rolled"].run(case, _gateway(_finding()), retriever, RUN_ID)
     envelope = build_envelope(case, result.findings, RUN_ID)
 
     assert envelope.analysis.machine_generated is True
@@ -322,9 +356,27 @@ def test_handler_refuses_a_candidate_it_was_not_packaged_for() -> None:
         handler_module.handler({"case_id": "AMI-SYN-FIN-001", "candidate": other})
 
 
-def test_handler_returns_an_envelope(monkeypatch) -> None:
+def _offline_retrieval(monkeypatch, retriever) -> None:
+    """Stop the handler reaching a real OpenSearch.
+
+    The handler builds its own retriever, so an un-patched handler test silently opened a
+    connection to the local cluster — which made an "offline" test depend on a running container
+    and on whatever happened to be indexed in it. It passed or failed based on the state of a
+    Docker volume. Both the client and the embedder are replaced here.
+    """
+    monkeypatch.setattr("ireports_retrieval.connect", lambda *a, **k: None, raising=True)
+    monkeypatch.setattr(
+        "ireports_retrieval.OpenSearchRetriever", lambda *a, **k: retriever, raising=True
+    )
+    monkeypatch.setattr(
+        "ireports_gateway.build_embedding_gateway", lambda *a, **k: None, raising=True
+    )
+
+
+def test_handler_returns_an_envelope(monkeypatch, retriever) -> None:
     """The whole path, offline: event in, validated envelope out."""
     monkeypatch.setattr(handler_module, "CASES_DIR", CASE_DIR.parent)
+    _offline_retrieval(monkeypatch, retriever)
     monkeypatch.setattr(
         "ireports_gateway.build_gateway", lambda *a, **k: _gateway(_finding()), raising=True
     )
@@ -336,13 +388,14 @@ def test_handler_returns_an_envelope(monkeypatch) -> None:
     assert ASAPEnvelope.model_validate(payload["envelope"])
 
 
-def test_handler_reports_an_empty_run_rather_than_crashing(monkeypatch) -> None:
+def test_handler_reports_an_empty_run_rather_than_crashing(monkeypatch, retriever) -> None:
     """A run where nothing survives validation still has to return its rejection record.
 
     That record is the only explanation of *why* nothing survived. Raising here would discard it
     and, under Lambda, trigger an automatic retry that pays for the same model calls again.
     """
     monkeypatch.setattr(handler_module, "CASES_DIR", CASE_DIR.parent)
+    _offline_retrieval(monkeypatch, retriever)
     monkeypatch.setattr(
         "ireports_gateway.build_gateway",
         lambda *a, **k: _gateway(_finding(supporting_evidence=["ev_999"])),
@@ -392,13 +445,13 @@ def _contradiction(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def test_overlap_is_computed_not_inferred(case) -> None:
+def test_overlap_is_computed_not_inferred(case, retriever) -> None:
     """The most useful thing the fan-in produces, and it costs nothing.
 
     Which findings rest on the same span is set arithmetic. Asking a model would be slower, cost
     money, and be occasionally wrong about something with an exact answer.
     """
-    result = ORCHESTRATORS["hand-rolled"].run(case, _synth_gateway(), RUN_ID)
+    result = ORCHESTRATORS["hand-rolled"].run(case, _synth_gateway(), retriever, RUN_ID)
     assert result.synthesis is not None
 
     # The stub gives every criterion the same finding on ev_001, so ev_001 spans every criterion.
@@ -407,9 +460,9 @@ def test_overlap_is_computed_not_inferred(case) -> None:
     assert len(found["ev_001"].criterion_ids) == len(result.criteria) > 1
 
 
-def test_synthesis_findings_reach_the_envelope(case) -> None:
+def test_synthesis_findings_reach_the_envelope(case, retriever) -> None:
     result = ORCHESTRATORS["hand-rolled"].run(
-        case, _synth_gateway(contradictions=[_contradiction()]), RUN_ID
+        case, _synth_gateway(contradictions=[_contradiction()]), retriever, RUN_ID
     )
     contradictions = [
         f for f in result.findings if f.classification is FindingClassification.CONTRADICTION
@@ -440,25 +493,29 @@ def test_synthesis_findings_reach_the_envelope(case) -> None:
         ),
     ],
 )
-def test_synthesis_is_validated_like_everything_else(case, override, expected: str) -> None:
+def test_synthesis_is_validated_like_everything_else(
+    case, override, expected: str, retriever
+) -> None:
     """The second stage gets no more trust than the first.
 
     A contradiction naming a criterion nobody analysed, or resting on one span, or citing evidence
     that is not in the case, is dropped with a reason — same shell, same rules.
     """
     result = ORCHESTRATORS["hand-rolled"].run(
-        case, _synth_gateway(contradictions=[_contradiction(**override)]), RUN_ID
+        case, _synth_gateway(contradictions=[_contradiction(**override)]), retriever, RUN_ID
     )
     assert result.synthesis is not None
     assert not result.synthesis.findings
     assert any(expected in reason for reason in result.synthesis.rejected)
 
 
-def test_both_orchestrators_synthesize_identically(case) -> None:
+def test_both_orchestrators_synthesize_identically(case, retriever) -> None:
     """The second stage is a real graph edge in one and a second statement in the other."""
     shapes = {}
     for name, orchestrator in ORCHESTRATORS.items():
-        result = orchestrator.run(case, _synth_gateway(contradictions=[_contradiction()]), RUN_ID)
+        result = orchestrator.run(
+            case, _synth_gateway(contradictions=[_contradiction()]), retriever, RUN_ID
+        )
         assert result.synthesis is not None, name
         shapes[name] = (
             [f.finding_id for f in result.synthesis.findings],
@@ -489,7 +546,7 @@ class _RefusesOne(StubGateway):
         return super().complete(request)
 
 
-def test_one_refusal_does_not_kill_the_run(case) -> None:
+def test_one_refusal_does_not_kill_the_run(case, retriever) -> None:
     """Regression. Until 2026-08-12 it did, on both paths.
 
     `gateway.complete` was called bare, so a refusal raised through the thread pool or the graph
@@ -501,13 +558,14 @@ def test_one_refusal_does_not_kill_the_run(case) -> None:
         result = orchestrator.run(
             case,
             _RefusesOne("candor_specialist", default=json.dumps({"findings": [_finding()]})),
+            retriever,
             RUN_ID,
         )
         assert len(result.outcomes) == len(result.criteria), name
         assert result.findings, f"{name} lost the surviving specialists' work"
 
 
-def test_a_refused_criterion_is_not_a_clean_one(case) -> None:
+def test_a_refused_criterion_is_not_a_clean_one(case, retriever) -> None:
     """The distinction the architecture exists to protect.
 
     A criterion nobody could analyse and a criterion that came back clean both have zero findings.
@@ -516,6 +574,7 @@ def test_a_refused_criterion_is_not_a_clean_one(case) -> None:
     result = ORCHESTRATORS["hand-rolled"].run(
         case,
         _RefusesOne("candor_specialist", default=json.dumps({"findings": [_finding()]})),
+        retriever,
         RUN_ID,
     )
     by_node = {o.criterion.node_id: o for o in result.outcomes}
@@ -527,20 +586,20 @@ def test_a_refused_criterion_is_not_a_clean_one(case) -> None:
 
     # And a criterion that genuinely found nothing is still COMPLETED, not conflated with it.
     clean = ORCHESTRATORS["hand-rolled"].run(
-        case, StubGateway(default=json.dumps({"findings": []})), RUN_ID
+        case, StubGateway(default=json.dumps({"findings": []})), retriever, RUN_ID
     )
     assert all(o.status is SpecialistStatus.COMPLETED for o in clean.outcomes)
     assert all(o.analysed for o in clean.outcomes)
 
 
-def test_a_refusal_is_not_retried(case) -> None:
+def test_a_refusal_is_not_retried(case, retriever) -> None:
     """ADR-015: a refusal is not a transport failure and must not be retried blindly."""
     gateway = _RefusesOne("candor_specialist", default=json.dumps({"findings": []}))
-    ORCHESTRATORS["hand-rolled"].run(case, gateway, RUN_ID)
+    ORCHESTRATORS["hand-rolled"].run(case, gateway, retriever, RUN_ID)
     assert gateway.refusals == 1, "a refused criterion was asked again"
 
 
-def test_synthesis_runs_once_not_once_per_specialist(case) -> None:
+def test_synthesis_runs_once_not_once_per_specialist(case, retriever) -> None:
     """The trap that cost a `join` node, and would have been silent.
 
     A conditional edge leaving a `Send`-dispatched node fires **once per dispatch**, and each
@@ -556,12 +615,12 @@ def test_synthesis_runs_once_not_once_per_specialist(case) -> None:
             responses={"synthesis": json.dumps({"contradictions": [], "information_gaps": []})},
             default=json.dumps({"findings": [_finding()]}),
         )
-        orchestrator.run(case, gateway, RUN_ID)
+        orchestrator.run(case, gateway, retriever, RUN_ID)
         calls = [c for c in gateway.calls if c.node_id == "synthesis"]
         assert len(calls) == 1, f"{name} ran synthesis {len(calls)} times"
 
 
-def test_both_paths_skip_synthesis_on_the_same_condition(case) -> None:
+def test_both_paths_skip_synthesis_on_the_same_condition(case, retriever) -> None:
     """The routing policy is shared code, so the two paths cannot drift.
 
     If each orchestrator decided this separately, two runs of the same case would produce
@@ -569,6 +628,56 @@ def test_both_paths_skip_synthesis_on_the_same_condition(case) -> None:
     """
     for name, orchestrator in ORCHESTRATORS.items():
         gateway = StubGateway(default=json.dumps({"findings": []}))
-        result = orchestrator.run(case, gateway, RUN_ID)
+        result = orchestrator.run(case, gateway, retriever, RUN_ID)
         assert result.synthesis is None, f"{name} ran synthesis with nothing to reason across"
         assert not any(c.node_id == "synthesis" for c in gateway.calls), name
+
+
+def test_a_citation_to_an_unretrieved_span_is_dropped(case) -> None:
+    """Citations are checked against what the specialist was **shown**, not what the case holds.
+
+    With retrieval these differ, and the distinction is the whole point. A model that cites a span
+    it was never given has not recalled the record — it has guessed, and a guess that happens to
+    name a real evidence id is indistinguishable from analysis unless this check is scoped to the
+    retrieved set.
+
+    Here the case contains ev_002 and retrieval deliberately does not surface it.
+    """
+    shown = InMemoryRetriever(
+        tuple(
+            RetrievedSpan(
+                evidence_id=s.evidence_id,
+                document_id=s.document_id,
+                title=s.title,
+                text=s.text,
+                page_number=s.page_number,
+                source_type=s.source_type,
+                score=1.0,
+            )
+            for s in case.spans
+            if s.evidence_id == "ev_001"
+        )
+    )
+    assert any(s.evidence_id == "ev_002" for s in case.spans), "fixture no longer proves anything"
+
+    outcome = analyze(
+        CATALOG[0],
+        case,
+        _gateway(_finding(supporting_evidence=["ev_002"])),
+        shown,
+        RUN_ID,
+        attempts=1,
+    )
+    assert outcome.findings == ()
+    assert any("ev_002" in reason for reason in outcome.rejected)
+    assert outcome.retrieved == ("ev_001",)
+
+
+def test_the_run_records_what_each_specialist_was_shown(case, retriever) -> None:
+    """Provenance. Two specialists on one case now read different records.
+
+    "Why did the financial criterion miss this?" is unanswerable without knowing what it was given,
+    and the answer is often that retrieval never surfaced the span.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(case, _gateway(_finding()), retriever, RUN_ID)
+    assert all(o.retrieved for o in result.outcomes if o.analysed)

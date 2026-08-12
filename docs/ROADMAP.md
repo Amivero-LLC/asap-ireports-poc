@@ -120,20 +120,38 @@ you.
 
 # Part 2 · Make the specialists real
 
-## 5 · Retrieval
+## 5 · Retrieval ✅ done 2026-08-12
 
-Specialists are currently handed evidence from a file. A specialist that retrieves its own evidence
-is the actual architecture — the fixture version demonstrates a fan-out, not this system.
+Specialists retrieve their own evidence instead of being handed the whole case. OpenSearch in
+compose, Titan embeddings through an `EmbeddingGateway` port, hybrid vector + lexical, mandatory
+case filter, k=6.
 
-- Vector + lexical query against local OpenSearch, **mandatory case filter**, bounded K
-- One synthetic case indexed and retrieved against
-- Every field name, filter, and facet in **one module**, so swapping to the real AWS collection
-  schema is a single-file edit. Its header should say the schema is unconfirmed
-- No graph database, ever (ADR-006)
+**Measured on a real 35k-token case** (`CASE-TEST-001`, langgraph, one run):
 
-**Write down, don't solve:** if the query-time embedding model differs from the one that populated
-the AWS collection, nothing errors — retrieval just gets quietly worse. Local retrieval quality never
-predicts AWS retrieval quality.
+| | |
+|---|---|
+| Input tokens | **69,139** — against ~209,664 if every call got the whole case |
+| Ratio | **3.0× fewer input tokens** |
+| Output tokens | 25,632 (thinking at `effort=high`, unaffected by retrieval) |
+| Findings | 18 — 14 specialist, 4 cross-criterion |
+
+I estimated 7× beforehand and was wrong: retrieval preferentially surfaces the *large* ROI chapters
+(~2,000 tokens each), not the average span. 3× is the honest figure.
+
+**Citations are now checked against what the specialist was shown**, not against the whole case.
+With retrieval those differ, and validating against the case would let a model cite a span it never
+saw — indistinguishable from a lucky hallucination.
+
+**Two bugs the first real run found**, both invisible at 430 tokens:
+
+1. **Synthesis was still pasting the entire case.** It exhausted `max_tokens` while thinking and
+   returned no text. Now scoped to the spans the findings actually cite, as bounded excerpts.
+2. **A synthesis failure killed the run** — the same containment gap fixed one layer down in item
+   3, in a place I had not looked. Contained now.
+
+And a reporting bug worth naming: the summary said `synthesis skipped — nothing to reason across`
+when synthesis had **run and failed**. Both states inferred from one null. Same shape as
+refused-versus-clean, one layer up.
 
 ## 6 · Multi-step specialists
 

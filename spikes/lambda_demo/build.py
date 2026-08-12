@@ -38,10 +38,16 @@ CASES = SPIKE_DIR / "cases"
 SHARED_SOURCE: tuple[tuple[Path, str], ...] = (
     (REPO_ROOT / "packages" / "domain" / "src" / "ireports_domain", "ireports_domain"),
     (REPO_ROOT / "packages" / "gateway" / "src" / "ireports_gateway", "ireports_gateway"),
+    (REPO_ROOT / "packages" / "retrieval" / "src" / "ireports_retrieval", "ireports_retrieval"),
     (SPIKE_DIR / "src" / "lambda_demo", "lambda_demo"),
 )
 
-BASE_REQUIREMENTS = ("pydantic>=2.12", "anthropic[bedrock]>=0.121.0")
+BASE_REQUIREMENTS = (
+    "pydantic>=2.12",
+    "anthropic[bedrock]>=0.121.0",
+    "httpx>=0.27",
+    "opensearch-py>=3.0,<4",
+)
 
 CANDIDATES: dict[str, tuple[str, ...]] = {
     # The control adds nothing to the dependency tree — a thread pool and a loop.

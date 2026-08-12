@@ -25,6 +25,7 @@ person would be the determination this system must never make, wearing a helpful
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -41,11 +42,20 @@ from ireports_domain import (
     ReviewUrgency,
     ValidationOutcome,
 )
-from ireports_gateway.port import Message, ModelGateway, ModelRequest
+from ireports_domain.asap import MAX_EXCERPT_CHARS
+from ireports_gateway.port import (
+    GatewayError,
+    Message,
+    ModelGateway,
+    ModelRefusalError,
+    ModelRequest,
+)
 
 from .case_loader import LoadedCase
 from .criteria import Criterion
 from .specialist import SpecialistOutcome
+
+_LOG = logging.getLogger(__name__)
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -161,6 +171,12 @@ class SynthesisOutcome:
     resolved_model: str | None
     input_tokens: int = 0
     output_tokens: int = 0
+    failed: bool = False
+    """Whether the stage ran and failed, as opposed to not running.
+
+    Inferring this from `resolved_model is None` conflated the two, and the run summary duly
+    reported a hard failure as "skipped — nothing to reason across". Same shape of mistake as
+    refused-versus-clean, one layer up: two different facts that happen to share a null."""
 
 
 def overlaps(outcomes: tuple[SpecialistOutcome, ...]) -> tuple[Overlap, ...]:
@@ -221,27 +237,70 @@ def synthesize(
     This function assumes it was called because it should have been.
     """
     computed = overlaps(outcomes)
+    all_findings = [f for o in outcomes for f in o.findings]
     known_spans = {s.evidence_id for s in case.spans}
     by_criterion = {c.criterion_id: c for c in criteria}
 
+    # **Only the spans the findings actually rest on.** This used to paste the whole case, which
+    # was harmless at 430 tokens and fatal at 35,000: on the first real case the synthesis call
+    # exhausted max_tokens while thinking and returned no text at all.
+    #
+    # It is also the right scope on its own terms. This stage reasons *across findings*, so the
+    # evidence it needs is the evidence those findings cite — anything else is a span no analyst
+    # thought relevant, and including it invites the model to start a fresh analysis rather than
+    # look for what one criterion could not see.
+    cited = {e for f in all_findings for e in (*f.supporting_evidence, *f.mitigating_evidence)}
+    record = tuple(s for s in case.spans if s.evidence_id in cited)
+
+    # Bounded excerpts, not whole chapters. A cited span here is an entire ROI chapter — up to
+    # ~7,900 characters — and fourteen findings citing a dozen of them produced a prompt large
+    # enough that the model exhausted its output budget while thinking and returned nothing.
+    #
+    # Synthesis does not need the full text: the findings already carry each analyst's observation,
+    # and this stage judges whether those observations conflict. The excerpt is corroboration, not
+    # the input. Reusing the envelope's own excerpt bound keeps one number in one place.
     prompt = (
         f"CASE: {case.manifest.case_id}\n\n"
         f"CRITERIA ANALYSED: {sorted(by_criterion)}\n\n"
         f"FINDINGS FROM SINGLE-CRITERION ANALYSTS\n\n{_findings_block(outcomes)}\n\n"
-        f"THE RECORD (cite by bracketed id)\n\n"
-        + "\n\n".join(f"[{s.evidence_id}] {s.text}" for s in case.spans)
+        f"THE EVIDENCE THOSE FINDINGS CITE ({len(record)} spans; cite by bracketed id)\n\n"
+        + "\n\n".join(
+            f"[{s.evidence_id}] {s.title}\n{s.text[:MAX_EXCERPT_CHARS]}"
+            + ("\n…[truncated]" if len(s.text) > MAX_EXCERPT_CHARS else "")
+            for s in record
+        )
         + "\n\nReport only what is invisible from a single criterion."
     )
 
-    response = gateway.complete(
-        ModelRequest(
-            alias=ModelAlias.THINKING,
-            messages=(Message(role="user", content=prompt),),
-            system=SYSTEM,
-            response_schema=RESPONSE_SCHEMA,
-            node_id="synthesis",
+    # Contained, exactly like the specialist path. A synthesis failure must not discard every
+    # specialist's completed, paid-for work — which is what it did on the first real case, and is
+    # the same class of bug ADR-021 §3 fixed one layer down.
+    try:
+        response = gateway.complete(
+            ModelRequest(
+                alias=ModelAlias.THINKING,
+                messages=(Message(role="user", content=prompt),),
+                system=SYSTEM,
+                response_schema=RESPONSE_SCHEMA,
+                node_id="synthesis",
+            )
         )
-    )
+    except (GatewayError, ModelRefusalError) as exc:
+        _LOG.warning(
+            "synthesis failed",
+            extra={
+                "run_id": run_id,
+                "case_id": case.manifest.case_id,
+                "error": type(exc).__name__,
+            },
+        )
+        return SynthesisOutcome(
+            findings=(),
+            overlaps=computed,
+            rejected=(f"synthesis: {type(exc).__name__} — cross-criterion stage NOT run ({exc})",),
+            resolved_model=None,
+            failed=True,
+        )
 
     findings: list[ProposedFinding] = []
     rejected: list[str] = []

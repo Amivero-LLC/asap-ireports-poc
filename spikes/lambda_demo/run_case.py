@@ -48,6 +48,9 @@ FUNCTIONS: dict[str, str] = {
 # environment": a container that inherits the host's variables acquires whatever else happens to
 # be exported — AWS session tokens, unrelated API keys — and none of that belongs in a demo.
 ENV_PREFIXES = ("IREPORTS_",)
+
+DEFAULT_CONTAINER_OPENSEARCH = "http://host.docker.internal:9201"
+"""Where the compose stack's OpenSearch lives *from inside a SAM container*."""
 ENV_EXCLUDE = frozenset(
     {
         # Postgres for the bake-off's crash/resume legs. This demo has no checkpointer, and a DSN
@@ -94,6 +97,16 @@ def _env_vars_payload() -> dict[str, dict[str, str]]:
         raise SystemExit(
             "no IREPORTS_* variables are set, so the gateway has nothing to authenticate with.\n"
             "Run this as:  uv run --env-file .env python spikes/lambda_demo/run_case.py"
+        )
+
+    # The container cannot reach the host's OpenSearch at localhost. Rewritten here rather than in
+    # .env, so a developer's host-side tooling keeps working unchanged.
+    if "IREPORTS_OPENSEARCH_URL" in declared:
+        candidates.setdefault("IREPORTS_OPENSEARCH_URL", DEFAULT_CONTAINER_OPENSEARCH)
+        candidates["IREPORTS_OPENSEARCH_URL"] = (
+            candidates["IREPORTS_OPENSEARCH_URL"]
+            .replace("localhost", "host.docker.internal")
+            .replace("127.0.0.1", "host.docker.internal")
         )
 
     forwarded = {k: v for k, v in candidates.items() if k in declared}
@@ -193,7 +206,9 @@ def _report(payload: dict[str, Any], out_file: Path | None) -> None:
         )
     synthesis = payload.get("synthesis")
     if synthesis:
-        if not synthesis["ran"]:
+        if synthesis.get("failed"):
+            print("  synthesis   RAN AND FAILED — see the rejection below")
+        elif not synthesis["ran"]:
             print("  synthesis   skipped — fewer than two findings to reason across")
         else:
             print(f"  synthesis    {synthesis['findings']} cross-criterion findings")

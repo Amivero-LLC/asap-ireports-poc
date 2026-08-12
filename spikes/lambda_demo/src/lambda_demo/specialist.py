@@ -47,8 +47,9 @@ from ireports_gateway.port import (
     ModelRefusalError,
     ModelRequest,
 )
+from ireports_retrieval import RetrievalError, RetrievedSpan, Retriever
 
-from .case_loader import EvidenceSpan, LoadedCase
+from .case_loader import LoadedCase
 from .criteria import Criterion
 
 _LOG = logging.getLogger(__name__)
@@ -177,6 +178,12 @@ class SpecialistOutcome:
     input_tokens: int
     output_tokens: int
     status: SpecialistStatus = SpecialistStatus.COMPLETED
+    retrieved: tuple[str, ...] = ()
+    """The evidence ids this specialist was actually shown.
+
+    Provenance, and it is not decoration: with retrieval, two specialists on the same case read
+    different records. "Why did the financial criterion miss this?" is unanswerable without knowing
+    what it was given, and the answer is often that retrieval never surfaced the span."""
 
     @property
     def analysed(self) -> bool:
@@ -227,11 +234,15 @@ def _normalize_findings(raw: Any) -> Any:
     return raw
 
 
-def _evidence_block(spans: tuple[EvidenceSpan, ...]) -> str:
+def _evidence_block(spans: tuple[RetrievedSpan, ...]) -> str:
+    """The retrieved record, as the model sees it.
+
+    The title is included because it carries real signal on this corpus — "SF86 — 22. Financial
+    Record — Delinquent Debt" tells the model what it is reading in a way the first line of a
+    7,000-character chapter does not.
+    """
     return "\n\n".join(
-        f"[{s.evidence_id}] (source: {s.source_reliability}, {s.document_id} p.{s.page_number})\n"
-        f"{s.text}"
-        for s in spans
+        f"[{s.evidence_id}] {s.title} ({s.document_id}, p.{s.page_number})\n{s.text}" for s in spans
     )
 
 
@@ -252,12 +263,25 @@ def _not_analysed(criterion: Criterion, status: SpecialistStatus, reason: str) -
     )
 
 
+DEFAULT_K = 6
+"""Spans retrieved per criterion.
+
+Six is a judgement, not a measurement. On this corpus a span is a whole ROI chapter — up to ~7,900
+characters — so six is already a large prompt, and the ranked list falls off sharply after the
+first two or three. Tuning it against a corpus this small would be fitting noise.
+
+What it replaced: every specialist receiving all 34 spans of a 35,000-token case, five
+times over."""
+
+
 def analyze(
     criterion: Criterion,
     case: LoadedCase,
     gateway: ModelGateway,
+    retriever: Retriever,
     run_id: str,
     attempts: int = 2,
+    k: int = DEFAULT_K,
 ) -> SpecialistOutcome:
     """One criterion, typed and citation-checked findings out.
 
@@ -276,13 +300,50 @@ def analyze(
     and already-paid-for work. Under Lambda that is worse still, because the invocation is retried
     automatically and every model call is paid for again — into the same refusal.
     """
-    outcome = _attempt(criterion, case, gateway, run_id)
+    # Retrieve once, outside the retry loop. A retry exists because the model returned an
+    # unusable *shape*, not because the record changed — re-running the query would cost an
+    # embedding call to get the identical spans back.
+    try:
+        spans = retriever.retrieve(case_id=case.manifest.case_id, query=criterion.question, k=k)
+    except RetrievalError as exc:
+        _LOG.warning(
+            "retrieval failed",
+            extra={
+                "run_id": run_id,
+                "case_id": case.manifest.case_id,
+                "criterion_id": criterion.criterion_id,
+                "error": type(exc).__name__,
+            },
+        )
+        return _not_analysed(
+            criterion,
+            SpecialistStatus.FAILED,
+            f"{criterion.criterion_id}: retrieval failed ({exc}) — criterion NOT analysed",
+        )
+
+    if not spans:
+        # Not an error, and not silence either: the criterion was asked and the record had nothing
+        # to say. Recorded as such so it is distinguishable from a criterion that was never run.
+        return SpecialistOutcome(
+            criterion=criterion,
+            findings=(),
+            rejected=(
+                f"{criterion.criterion_id}: retrieval returned no spans for this criterion — "
+                "nothing in the record matched",
+            ),
+            resolved_model="",
+            input_tokens=0,
+            output_tokens=0,
+            status=SpecialistStatus.COMPLETED,
+        )
+
+    outcome = _attempt(criterion, case, spans, gateway, run_id)
     for _ in range(attempts - 1):
         # A refusal or a transport failure is not fixed by asking again, and ADR-015 is explicit
         # that a refusal must not be retried blindly.
         if outcome.findings or not outcome.analysed:
             return outcome
-        retry = _attempt(criterion, case, gateway, run_id)
+        retry = _attempt(criterion, case, spans, gateway, run_id)
         # Keep the retry's findings, but carry both attempts' rejections so the record shows the
         # first attempt happened and why it produced nothing.
         outcome = SpecialistOutcome(
@@ -293,6 +354,7 @@ def analyze(
             input_tokens=outcome.input_tokens + retry.input_tokens,
             output_tokens=outcome.output_tokens + retry.output_tokens,
             status=retry.status,
+            retrieved=retry.retrieved,
         )
     return outcome
 
@@ -300,10 +362,11 @@ def analyze(
 def _attempt(
     criterion: Criterion,
     case: LoadedCase,
+    spans: tuple[RetrievedSpan, ...],
     gateway: ModelGateway,
     run_id: str,
 ) -> SpecialistOutcome:
-    """One criterion, one model call."""
+    """One criterion, one model call, over the spans retrieval surfaced for it."""
     prompt = (
         f"CASE: {case.manifest.case_id} — position: "
         f"{case.manifest.case_context.position_title}\n\n"
@@ -311,8 +374,8 @@ def _attempt(
         f"Authority: {criterion.policy_id} ({criterion.decision_domain.value})\n"
         f"Criterion: {criterion.criterion_id}\n"
         f"Question: {criterion.question}\n\n"
-        f"RECORD ({len(case.spans)} spans; cite by the bracketed id)\n\n"
-        f"{_evidence_block(case.spans)}\n\n"
+        f"RECORD ({len(spans)} spans retrieved for this criterion; cite by the bracketed id)\n\n"
+        f"{_evidence_block(spans)}\n\n"
         "Analyze the record against this criterion only. Other criteria are analyzed separately."
     )
 
@@ -360,7 +423,11 @@ def _attempt(
             f"{criterion.criterion_id}: {type(exc).__name__} — criterion NOT analysed",
         )
 
-    known = {s.evidence_id for s in case.spans}
+    # **What the specialist was shown, not what the case contains.** With retrieval these differ,
+    # and validating against the whole case would let a model cite a span it never saw — which is
+    # indistinguishable from a lucky hallucination and passes silently.
+    known = {s.evidence_id for s in spans}
+    retrieved_ids = tuple(s.evidence_id for s in spans)
     findings: list[ProposedFinding] = []
     rejected: list[str] = []
 
@@ -377,6 +444,7 @@ def _attempt(
             resolved_model=response.resolved_model,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
+            retrieved=retrieved_ids,
         )
 
     raw_findings = _normalize_findings(
@@ -394,6 +462,7 @@ def _attempt(
             resolved_model=response.resolved_model,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
+            retrieved=retrieved_ids,
         )
 
     for index, raw in enumerate(raw_findings):
@@ -503,4 +572,5 @@ def _attempt(
         resolved_model=response.resolved_model,
         input_tokens=response.usage.input_tokens,
         output_tokens=response.usage.output_tokens,
+        retrieved=retrieved_ids,
     )

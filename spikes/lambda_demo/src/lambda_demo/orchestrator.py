@@ -28,6 +28,7 @@ from typing import Annotated, Protocol, TypedDict
 
 from ireports_domain import ProposedFinding
 from ireports_gateway.port import ModelGateway
+from ireports_retrieval import Retriever
 
 from .case_loader import LoadedCase
 from .criteria import Criterion, criteria_for
@@ -100,7 +101,9 @@ class Orchestrator(Protocol):
 
     name: str
 
-    def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult: ...
+    def run(
+        self, case: LoadedCase, gateway: ModelGateway, retriever: Retriever, run_id: str
+    ) -> RunResult: ...
 
 
 def should_synthesize(outcomes: list[SpecialistOutcome]) -> bool:
@@ -149,12 +152,14 @@ class HandRolledOrchestrator:
 
     name = "hand-rolled"
 
-    def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult:
+    def run(
+        self, case: LoadedCase, gateway: ModelGateway, retriever: Retriever, run_id: str
+    ) -> RunResult:
         started = datetime.now(UTC)
         criteria = criteria_for(case.manifest)
 
         def one(criterion: Criterion) -> SpecialistOutcome:
-            return analyze(criterion, case, gateway, run_id)
+            return analyze(criterion, case, gateway, retriever, run_id)
 
         # `pool.map` is the barrier. The second stage needs every specialist's findings, and
         # exiting the context manager is what guarantees they are all in — one line, no primitive.
@@ -209,7 +214,9 @@ class LangGraphOrchestrator:
 
     name = "langgraph"
 
-    def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult:
+    def run(
+        self, case: LoadedCase, gateway: ModelGateway, retriever: Retriever, run_id: str
+    ) -> RunResult:
         from langgraph.graph import END, START, StateGraph
         from langgraph.types import Send
 
@@ -234,7 +241,7 @@ class LangGraphOrchestrator:
 
         def specialist_node(criterion: Criterion) -> dict[str, list[SpecialistOutcome]]:
             # Takes a Criterion, not FanOutState — see the class docstring.
-            return {"outcomes": [analyze(criterion, case, gateway, run_id)]}
+            return {"outcomes": [analyze(criterion, case, gateway, retriever, run_id)]}
 
         def synthesis_node(state: FanOutState) -> dict[str, list[SynthesisOutcome]]:
             """The second stage. Reads every specialist's output from accumulated state.

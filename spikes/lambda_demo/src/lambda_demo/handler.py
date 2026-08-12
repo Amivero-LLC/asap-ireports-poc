@@ -125,11 +125,16 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
     # Built here, not at module scope: a missing or malformed model configuration should surface
     # as this invocation's error, with the offending variable named, rather than as an init
     # failure that Lambda reports without the message.
-    from ireports_gateway import build_gateway
+    from ireports_gateway import build_embedding_gateway, build_gateway
+    from ireports_retrieval import OpenSearchRetriever, connect
 
     gateway = build_gateway()
+    # `IREPORTS_OPENSEARCH_URL` matters here: inside a SAM container `localhost` is the container,
+    # not the host, so a local cluster is reached at `host.docker.internal`. Left to configuration
+    # rather than detected, because the same code has to point at an AWS collection unchanged.
+    retriever = OpenSearchRetriever(connect(), build_embedding_gateway())
 
-    result = ORCHESTRATORS[CANDIDATE].run(case, gateway, run_id)
+    result = ORCHESTRATORS[CANDIDATE].run(case, gateway, retriever, run_id)
     _log(
         "run_complete",
         run_id=run_id,
@@ -164,6 +169,7 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
                 "node_id": o.criterion.node_id,
                 "criterion_id": o.criterion.criterion_id,
                 "status": o.status.value,
+                "retrieved": list(o.retrieved),
                 "findings": len(o.findings),
                 "rejected": len(o.rejected),
             }
@@ -173,8 +179,8 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
 
     if result.synthesis is not None:
         payload["synthesis"] = {
-            # None means the stage short-circuited without paying for a call.
             "ran": result.synthesis.resolved_model is not None,
+            "failed": result.synthesis.failed,
             "findings": len(result.synthesis.findings),
             "rejected": list(result.synthesis.rejected),
             # Computed, not inferred — which findings rest on the same span. This is the part that
