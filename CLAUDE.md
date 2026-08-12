@@ -99,10 +99,10 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema in `schemas/` |
 | `packages/gateway/` | `ModelGateway` port — `litellm` (proven live), `bedrock` (never run), `stub`. Plus an `EmbeddingGateway`, Titan via the proxy |
 | `packages/retrieval/` | OpenSearch hybrid vector + lexical, mandatory case filter, bounded K. **All field names in `mapping.py`** (Q-02) |
-| `spikes/lambda_demo/` | The runnable demo — criteria routing, both orchestrators, synthesis, real model calls, validated envelopes, Lambda handler |
+| `spikes/lambda_demo/` | The runnable demo — criteria routing, retrieval-backed specialists, both orchestrators, synthesis, validated envelopes, Lambda handler |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
-| Tests | 205 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 207 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 **Not built:** crash/resume, model-call idempotency, wall-clock and token budgets, authority routing
 from policy packs, ingestion, `apps/`, `evals/`.
@@ -111,6 +111,13 @@ from policy packs, ingestion, `apps/`, `evals/`.
 live in `spikes/lambda_demo/` and use a local `SpecialistOutcome` rather than the published
 `SpecialistResult` contract. Graduating them into `packages/orchestration/` is what closes ORCH-01
 and SPEC-01 — see `docs/REQUIREMENTS.md`.
+
+**To run the demo you need Docker up** — OpenSearch holds the indexed cases:
+
+```bash
+docker compose -f infrastructure/docker/compose.yaml up -d
+uv run --env-file .env python spikes/lambda_demo/index_cases.py   # a few embedding calls
+```
 
 **Don't scaffold empty directories.** Create one when the first real file lands in it.
 
