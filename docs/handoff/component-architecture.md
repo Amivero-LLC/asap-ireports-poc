@@ -160,7 +160,7 @@ flowchart LR
         DOMAIN["packages/domain/<br/>contracts + JSON Schema<br/>BUILT"]
         GATEWAY["packages/gateway/<br/>ModelGateway port<br/>litellm + bedrock adapters<br/>BUILT"]
         ORCH["packages/orchestration/<br/>our port + LangGraph adapter<br/>PLANNED - Phase 2"]
-        RETR["packages/retrieval/<br/>retrieval port + mapping module<br/>PLANNED - Phase 2"]
+        RETR["packages/retrieval/<br/>retrieval port + mapping module<br/>BUILT"]
         PG[("PostgreSQL<br/>system of record for<br/>workflow state<br/>PLANNED - Phase 2")]
         OSLOCAL[("Local OpenSearch<br/>dev mirror of the AWS collection<br/>PLANNED - Phase 2")]
     end
@@ -379,8 +379,8 @@ reason to move the code.
 | Model-call idempotency | `PLANNED` | `packages/orchestration/src/ireports_orchestration/idempotency.py` | Phase 2, ORCH-02; the most expensive item ADR-020 retained |
 | Deterministic budget/loop-limit shell | `PLANNED` | `packages/orchestration/src/ireports_orchestration/budget.py` | Phase 2, ORCH-03 |
 | LangSmith egress-deny at every entry point | `PLANNED` | `packages/orchestration/src/ireports_orchestration/egress.py` | Phase 2, ORCH-04; extends `spikes/langgraph/test_langsmith_egress.py`'s negative control |
-| Retrieval port and OpenSearch mapping module | `PLANNED` | `packages/retrieval/src/ireports_retrieval/mapping.py` | Phase 2, RETR-01; header must name Q-02 as unconfirmed |
-| Local ingestion of one synthetic case into OpenSearch | `PLANNED` | `packages/retrieval/src/ireports_retrieval/ingest.py` | Phase 2, RETR-02; development only (ADR-007) |
+| Retrieval port and OpenSearch mapping module | `BUILT` | `packages/retrieval/src/ireports_retrieval/mapping.py` | RETR-01. Hybrid vector + lexical, mandatory case filter, bounded K. Header names Q-02; a test asserts no field name is written outside this module |
+| Local ingestion of synthetic cases into OpenSearch | `BUILT` | `packages/retrieval/src/ireports_retrieval/index.py` | RETR-02. Development only (ADR-007) — AWS owns chunking and embedding in production. Records the embedding model per document so a corpus embedded by two models is detectable (Q-03) |
 | Specialist sub-call (criterion-specific tool allowlist) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/specialist.py` | Phase 2, SPEC-01 |
 | Refusal / `StructuredOutputError` logging | `PLANNED` | `packages/orchestration/src/ireports_orchestration/refusal_log.py` | Phase 2, VAL-02 (reduced to logging, ADR-021) |
 

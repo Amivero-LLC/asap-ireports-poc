@@ -43,6 +43,43 @@ DEFAULT_SOURCE = REPO_ROOT.parent / "amilens-localdev" / "tests" / "fixtures" / 
 _UNMASKED_SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 
 
+_HEADING = re.compile(r"^#{1,3}\s+(.+?)\s*$", re.MULTILINE)
+_SECTION = re.compile(r"^Section\s+(\d+):\s*(?:Section\s+\d+:\s*)?(.+)$", re.IGNORECASE)
+
+
+def _derive_title(chunk: dict[str, Any]) -> str:
+    """A title that says what the chunk contains.
+
+    ROI chapters arrive with real titles ("Law Enforcement (XIII)"). SF-86 chunks all arrive titled
+    `sf86.pdf`, which is worse than useless twice over: retrieval results become unreadable, and
+    since the title is embedded alongside the text, five chunks share an identical meaningless
+    prefix.
+
+    This cost real time. Retrieval was ranking the *correct* chunk first for both the foreign-
+    influence and financial queries, and because every hit rendered as "sf86.pdf" it looked like a
+    relevance failure. I nearly retuned a working query. The section headings inside the content
+    say exactly what is there — Sections 22-24 are the financial record, Sections 13-15 the foreign
+    contacts — so they become the title.
+
+    The source doubles its headings ("Section 22: Section 22: Financial Record"); that is stripped.
+    """
+    given = (chunk.get("title") or "").strip()
+    if given and "." not in given:  # a real title, not a filename
+        return given
+
+    sections: list[str] = []
+    for heading in _HEADING.findall(chunk.get("content") or ""):
+        match = _SECTION.match(heading.strip())
+        if match:
+            sections.append(f"{match.group(1)}. {match.group(2).strip()}")
+
+    if not sections:
+        return given or "Case document"
+    kind = str((chunk.get("metadata") or {}).get("document_type") or "document").upper()
+    shown = "; ".join(sections[:4])
+    return f"{kind} — {shown}" + (" …" if len(sections) > 4 else "")
+
+
 def _document_id(chunk: dict[str, Any]) -> str:
     """One document id per source document, stable across runs.
 
@@ -79,7 +116,7 @@ def convert(source: Path) -> tuple[dict[str, Any], dict[str, Any]]:
                 # Everything here is a synthetic investigative record. Recording it uniformly is
                 # more honest than deriving a reliability we have no basis for.
                 "source_reliability": "investigative_record",
-                "title": chunk.get("title") or "",
+                "title": _derive_title(chunk),
                 "source_type": chunk.get("sourceType") or "case_document",
                 "text": text,
             }

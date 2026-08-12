@@ -34,6 +34,8 @@ class EvidenceSpan:
     page_number: int
     source_reliability: str
     text: str
+    title: str = ""
+    source_type: str = "case_document"
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,8 @@ def load_case(root: Path) -> LoadedCase:
             page_number=int(s["page_number"]),
             source_reliability=s["source_reliability"],
             text=s["text"],
+            title=s.get("title", ""),
+            source_type=s.get("source_type", "case_document"),
         )
         for s in raw["spans"]
     )

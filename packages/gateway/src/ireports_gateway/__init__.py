@@ -26,6 +26,14 @@ from .adapters import (
     build_gateway,
 )
 from .config import DEFAULT_EFFORT, AdapterKind, GatewayConfig
+from .embeddings import (
+    EMBEDDING_ALIAS,
+    EmbeddingGateway,
+    EmbeddingResponse,
+    LiteLLMEmbeddingGateway,
+    StubEmbeddingGateway,
+    build_embedding_gateway,
+)
 from .port import (
     Effort,
     GatewayConfigurationError,
@@ -43,12 +51,16 @@ from .port import (
 
 __all__ = [
     "DEFAULT_EFFORT",
+    "EMBEDDING_ALIAS",
     "AdapterKind",
     "BedrockGateway",
     "Effort",
+    "EmbeddingGateway",
+    "EmbeddingResponse",
     "GatewayConfig",
     "GatewayConfigurationError",
     "GatewayError",
+    "LiteLLMEmbeddingGateway",
     "LiteLLMGateway",
     "Message",
     "ModelGateway",
@@ -59,6 +71,8 @@ __all__ = [
     "ModelUnavailableError",
     "ModelUsage",
     "StructuredOutputError",
+    "StubEmbeddingGateway",
     "StubGateway",
+    "build_embedding_gateway",
     "build_gateway",
 ]

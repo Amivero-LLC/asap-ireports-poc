@@ -1,0 +1,21 @@
+[project]
+name = "ireports-retrieval"
+version = "0.1.0"
+description = "Retrieval against an OpenSearch-compatible vector collection. All mappings in one module."
+requires-python = ">=3.12"
+dependencies = [
+    "ireports-domain",
+    "ireports-gateway",
+    "opensearch-py>=3.0,<4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ireports_retrieval"]
+
+[tool.uv.sources]
+ireports-domain = { workspace = true }
+ireports-gateway = { workspace = true }

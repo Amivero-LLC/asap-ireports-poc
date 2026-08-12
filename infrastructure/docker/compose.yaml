@@ -1,14 +1,16 @@
-# Local substrate for the Milestone 1c orchestration bake-off.
-#
-# PostgreSQL only. The spike measures orchestration control flow — durable resume,
-# human-in-the-loop interrupt, timeout survival, bounded fan-out — none of which needs
-# OpenSearch, Jaeger, or a model. Adding services here would make the bake-off slower to
-# run without making it measure more.
+# Local substrate: PostgreSQL for the bake-off, OpenSearch for retrieval.
 #
 #   docker compose -f infrastructure/docker/compose.yaml up -d
 #   docker compose -f infrastructure/docker/compose.yaml down -v
 #
-# Port 5436 avoids the other local stacks in this workspace (aether uses 5435).
+# OpenSearch stands in for the AWS Serverless vector collection this system consumes in
+# production (ADR-007). The point of running it locally is **architectural parity** — the same
+# k-NN engine, the same index shape, the same hybrid query — so that code written against it does
+# not need rewriting against AWS. What local parity cannot give you is retrieval *quality*: the
+# corpus is small and the collection's real schema is unconfirmed (Q-02), so no number measured
+# here predicts AWS behaviour.
+#
+# Ports avoid the other local stacks in this workspace (aether uses 5435).
 
 name: ireports-spike
 
@@ -40,5 +42,36 @@ services:
       - -c
       - max_connections=50
 
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: ireports-spike-opensearch
+    environment:
+      # Single node: this mirrors the *shape* of the AWS collection, not its topology. A cluster
+      # locally would test replication, which AWS operates and we do not.
+      discovery.type: single-node
+      # Local-only substrate holding synthetic data. The security plugin adds TLS and a password
+      # policy that buy nothing here and cost every developer twenty minutes on first run — the
+      # AWS collection's auth is IAM/SigV4 and is not emulated by it either way.
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9201:9200"
+    healthcheck:
+      # Indexing starts the moment this reports healthy, and a red cluster accepts writes that
+      # then fail to become searchable — which reads as a retrieval bug rather than a startup one.
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ulimits:
+      memlock: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - spike_osdata:/usr/share/opensearch/data
+
 volumes:
   spike_pgdata:
+  spike_osdata:

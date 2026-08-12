@@ -94,6 +94,13 @@ class GatewayConfig:
 
     effort: dict[ModelAlias, Effort] | None = None
 
+    embedding_model_override: str | None = None
+    """The embedding model group on the proxy, from `IREPORTS_LITELLM_MODEL_EMBEDDING`.
+
+    Separate from `litellm_models` because that map is keyed by `ModelAlias`, and an embedding
+    model is not one of ADR-008's three reasoning tiers. Forcing it into that enum would imply
+    application code could ask a *specialist* for `ireports-embedding`, which is meaningless."""
+
     @classmethod
     def from_env(cls) -> GatewayConfig:
         raw_adapter = _env("MODEL_ADAPTER", AdapterKind.LITELLM.value) or ""
@@ -129,6 +136,7 @@ class GatewayConfig:
             bedrock_base_url=_env("BEDROCK_BASE_URL"),
             bedrock_models=cls._models_from_env("BEDROCK_MODEL_"),
             effort=effort,
+            embedding_model_override=_env("LITELLM_MODEL_EMBEDDING"),
         )
         config.validate()
         return config
@@ -189,6 +197,14 @@ class GatewayConfig:
     def litellm_model_for(self, alias: ModelAlias) -> str:
         """The alias itself unless an override names a model group on the proxy (ADR-017)."""
         return (self.litellm_models or {}).get(alias) or alias.value
+
+    def embedding_model(self) -> str:
+        """The alias unless an override names a model group on the proxy (ADR-017).
+
+        Same rule as the text tiers: application code names a tier, and where that tier is
+        resolved is a configuration question, not a code one.
+        """
+        return self.embedding_model_override or "ireports-embedding"
 
     def bedrock_model_for(self, alias: ModelAlias) -> str:
         model_id = (self.bedrock_models or {}).get(alias)
