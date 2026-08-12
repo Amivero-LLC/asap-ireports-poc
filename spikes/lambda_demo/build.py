@@ -39,6 +39,10 @@ SHARED_SOURCE: tuple[tuple[Path, str], ...] = (
     (REPO_ROOT / "packages" / "domain" / "src" / "ireports_domain", "ireports_domain"),
     (REPO_ROOT / "packages" / "gateway" / "src" / "ireports_gateway", "ireports_gateway"),
     (REPO_ROOT / "packages" / "retrieval" / "src" / "ireports_retrieval", "ireports_retrieval"),
+    (
+        REPO_ROOT / "packages" / "orchestration" / "src" / "ireports_orchestration",
+        "ireports_orchestration",
+    ),
     (SPIKE_DIR / "src" / "lambda_demo", "lambda_demo"),
 )
 

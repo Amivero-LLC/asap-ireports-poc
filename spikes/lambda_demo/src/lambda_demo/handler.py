@@ -32,8 +32,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ireports_orchestration import ORCHESTRATORS
+
 from .case_loader import available_cases, load_case
-from .orchestrator import ORCHESTRATORS
 from .package import build_envelope
 
 CANDIDATE = os.environ.get("CANDIDATE", "hand-rolled")

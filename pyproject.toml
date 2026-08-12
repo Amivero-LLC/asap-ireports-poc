@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "ireports-domain",
     "ireports-gateway",
+    "ireports-orchestration",
     "ireports-retrieval",
     "lambda-demo",
     "ireports-spike-harness",
@@ -22,6 +23,7 @@ members = ["packages/*", "spikes/harness", "spikes/handrolled", "spikes/langgrap
 lambda-demo = { workspace = true }
 ireports-domain = { workspace = true }
 ireports-gateway = { workspace = true }
+ireports-orchestration = { workspace = true }
 ireports-retrieval = { workspace = true }
 ireports-spike-harness = { workspace = true }
 spike-handrolled = { workspace = true }

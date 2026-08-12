@@ -98,6 +98,32 @@ cleanly, and you only find out by counting.
 weighed that and kept it out of the contract, so a reviewer in ASAP still cannot tell. The gap is
 narrowed to the operator, not closed — closing it means superseding ADR-021 on purpose.
 
+## 3b · The reference implementation, at its own address ✅ done 2026-08-12
+
+Criteria, specialists, synthesis and both orchestrators moved from `spikes/lambda_demo/` into
+`packages/orchestration/`, and specialists now return the published `SpecialistResult` contract
+instead of a local dataclass. `spikes/lambda_demo/` is what it should have been all along: case
+loading off disk, envelope packaging, a Lambda handler, and the synthetic corpus.
+
+Not a feature — an address change — but three things fell out of it that a pure move would not
+have produced:
+
+1. **The contract validates now.** `SpecialistResult` re-checks that every finding's run id, case
+   id, and authority agree with the criterion the sub-call was pointed at. The local dataclass
+   checked nothing; the invariant was true by construction and unasserted.
+2. **A fourth path asymmetry.** `packages/` is under `mypy --strict` and `spikes/` is not. The
+   hand-rolled adapter needed no change. The LangGraph adapter needed four suppressions, because
+   the `Send` pattern LangGraph's own documentation prescribes matches none of `add_node`'s
+   overloads. See `LESSONS.md`.
+3. **A real bug the tests could not see** — a variable in `synthesis.py` bound to a set and then
+   re-bound to a list in the loop below, harmless by accident of ordering. `mypy` found it on the
+   first run. `spikes/` sitting outside the quality gate is a gap, not a convenience.
+
+**What it did not close.** ORCH-01 also wants `durability="sync"` and strict checkpoint
+deserialization; those need a checkpointer, which is item 7. SPEC-01's tool-allowlist clause is
+*vacuous* rather than met — a specialist has no tool surface. Both stay unchecked in
+`REQUIREMENTS.md`.
+
 ## 4 · Budgets as control flow
 
 Ceilings on model calls, tokens, and wall clock — per node and per run — that **change what the
@@ -115,6 +141,9 @@ item 7 is impossible.
 
 **Tells us:** whether early termination mid-fan-out is clean in both, or whether one of them fights
 you.
+
+**Next up.** Budgets are the immediate item, and the wall-clock ceiling is the prerequisite for
+item 7's Lambda half.
 
 ---
 

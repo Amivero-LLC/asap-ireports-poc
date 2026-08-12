@@ -58,7 +58,7 @@ Globals:
         # Mirrors Budgets.max_parallel_specialists. Unbounded fan-out over paid model calls is
         # the failure budgets exist to prevent, and it is worse here than on a laptop: a Lambda
         # timeout is retried automatically, so a runaway fan-out is paid for more than once.
-        IREPORTS_DEMO_MAX_PARALLEL: "3"
+        IREPORTS_MAX_PARALLEL: "3"
         IREPORTS_LITELLM_MODEL_EMBEDDING: ""
         # Inside a SAM container `localhost` is the container, not the host, so a local cluster is
         # reached at host.docker.internal. Configuration rather than detection, because the same

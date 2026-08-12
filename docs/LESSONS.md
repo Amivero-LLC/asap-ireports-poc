@@ -39,8 +39,8 @@ Every shape below came from the *same* schema and the same prompt:
 | `{...}` — one finding where an array was asked for | Wrap it |
 | `{"findings": [...]}` — **the envelope repeated inside itself** | **Unwrap it** |
 
-See `spikes/lambda_demo/src/lambda_demo/specialist.py`; all of them are pinned as test cases in
-`test_demo.py`.
+See `packages/orchestration/src/ireports_orchestration/specialist.py`; all of them are pinned as
+test cases in `tests/orchestration/test_orchestration.py`.
 
 ### The nested-envelope shape caused silent under-analysis for weeks `[measured]`
 
@@ -381,6 +381,35 @@ The LangGraph version is not worse — arguably better, because the graph shape 
 the work is variable, which is the property a checkpoint needs (a checkpoint refers to node names
 that must still exist on resume). But it is a *structural* change where the other path had none,
 and that asymmetry is the kind of evidence ADR-024's decision should rest on.
+
+### LangGraph's documented `Send` pattern does not survive `mypy --strict` `[measured]`
+
+Graduating the orchestration out of `spikes/` and into `packages/` moved it under the same
+`mypy --strict` gate the rest of the repo runs. The hand-rolled adapter needed **no change**. The
+LangGraph adapter produced four errors, and every one of them is the framework's typing
+disagreeing with the framework's own documented pattern:
+
+| Error | What it is |
+|---|---|
+| `add_node("specialist", specialist_node)` matches no overload | The overloads assume a node receives the graph **state**. A `Send`-dispatched node receives the *sent payload* — a `Criterion` — which is exactly what LangGraph's docs prescribe |
+| `add_node("join", join)` matches no overload either | And **not** for that reason: `join` takes `FanOutState` like any ordinary node. `synthesis_node`, same parameter type, different return type, resolves fine. Whatever separates them is invisible at the call site |
+| `StateGraph` needs type arguments | Generic in four parameters at runtime; written unparameterised in every example |
+| Two router callables cannot be annotated at all | `Send` and `END` are not resolvable from module scope under postponed annotations (see the module-scope lesson above), and an unannotated function is a `--strict` error by definition |
+
+So the four suppressions in `langgraph_adapter.py` are load-bearing rather than lazy, and each
+carries its reason. **This is a cost, not a verdict** — the thing that decides ADR-024 is durable
+checkpointing, which none of this touches. But it is the fourth asymmetry in a row, and all four
+favour the hand-rolled path on simplicity.
+
+### Moving code into a type-checked tree finds bugs the tests did not `[measured]`
+
+The same move surfaced a variable in `synthesis.py` used as a set of the spans all findings rest
+on, then re-bound in a loop below to a list of one contradiction's spans. Harmless by accident of
+ordering — the set is finished with before the loop starts — and invisible to every test, because
+the behaviour was correct. `mypy` reported it as an incompatible assignment on the first run.
+
+The lesson is not about that variable. It is that `spikes/` being outside the quality gate is a
+real gap, and the moment code stops being a spike it should stop being exempt.
 
 ### The concurrent-write reducer is the whole trick
 

@@ -51,7 +51,7 @@ from ireports_gateway.port import (
     ModelRequest,
 )
 
-from .case_loader import LoadedCase
+from .case import LoadedCase
 from .criteria import Criterion
 from .specialist import SpecialistOutcome
 
@@ -231,7 +231,7 @@ def synthesize(
 ) -> SynthesisOutcome:
     """One model call across every specialist's findings, plus the computed overlaps.
 
-    **Whether this stage should run at all is not decided here.** `orchestrator.should_synthesize`
+    **Whether this stage should run at all is not decided here.** `port.should_synthesize`
     owns that, so the two orchestration paths cannot drift into disagreeing about it — and a
     second copy of the rule living in this module would be exactly that drift waiting to happen.
     This function assumes it was called because it should have been.
@@ -369,18 +369,22 @@ def synthesize(
         if not isinstance(raw, dict):
             rejected.append(f"synthesis/contradiction#{index}: not an object — dropped")
             continue
-        cited = [e for e in raw.get("conflicting_evidence", []) or [] if e in known_spans]
+        # Named `conflicting`, not `cited`: `cited` is the set of spans the *findings* rest on,
+        # computed above and used to scope the prompt. Reusing the name shadowed it with a list of
+        # one contradiction's spans — harmless by accident of ordering, and caught the moment this
+        # module moved into a `mypy --strict` tree.
+        conflicting = [e for e in raw.get("conflicting_evidence", []) or [] if e in known_spans]
         unknown = [e for e in raw.get("conflicting_evidence", []) or [] if e not in known_spans]
         if unknown:
             rejected.append(
                 f"synthesis/contradiction#{index}: cited unknown evidence {unknown} — dropped"
             )
             continue
-        if len(cited) < 2:
+        if len(conflicting) < 2:
             # The contract requires two, and a "contradiction" resting on one span is not one.
             rejected.append(
                 f"synthesis/contradiction#{index}: needs two conflicting spans, got "
-                f"{len(cited)} — dropped"
+                f"{len(conflicting)} — dropped"
             )
             continue
         authority = _authority(str(raw.get("criterion_id", "")))
@@ -403,8 +407,8 @@ def synthesize(
                     # First span is the assertion, the rest are what conflicts with it. The
                     # contract counts supporting + contradicting >= 2, so this satisfies it while
                     # keeping the roles honest.
-                    supporting_evidence=cited[:1],
-                    contradicting_evidence=cited[1:],
+                    supporting_evidence=conflicting[:1],
+                    contradicting_evidence=conflicting[1:],
                     evidence_confidence=Confidence.MODERATE,
                     analysis_confidence=Confidence.MODERATE,
                 )

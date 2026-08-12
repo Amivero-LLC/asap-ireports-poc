@@ -18,6 +18,16 @@ code rather than something the model is asked to be careful about:
    decision-support phrasing, but `DecisionSupportText` enforces it. If the model writes "the
    subject is unsuitable", constructing the `ProposedFinding` raises and the finding is dropped
    with the reason recorded. The prompt is a request; the type is the control.
+4. **The return value is the published `SpecialistResult` contract** (CONT-01), not a local shape.
+   That is not bookkeeping: constructing it re-checks that every finding's run id, case id, and
+   authority agree with the criterion the sub-call was pointed at — a validation pass the demo's
+   local dataclass never performed.
+
+**What is deliberately *not* on that contract:** whether the call completed. ADR-021 §2 kept
+completion status out of `SpecialistResult` on purpose, so `SpecialistStatus` lives on the local
+`SpecialistOutcome` wrapper instead. The consequence is real and is not hidden: a reviewer reading
+an envelope in ASAP cannot tell a refused criterion from a clean one. Closing that gap means
+superseding ADR-021 deliberately, not widening this contract in passing.
 """
 
 from __future__ import annotations
@@ -38,6 +48,8 @@ from ireports_domain import (
     ModelAlias,
     ProposedFinding,
     ReviewUrgency,
+    SpecialistCriterion,
+    SpecialistResult,
     ValidationOutcome,
 )
 from ireports_gateway.port import (
@@ -49,10 +61,16 @@ from ireports_gateway.port import (
 )
 from ireports_retrieval import RetrievalError, RetrievedSpan, Retriever
 
-from .case_loader import LoadedCase
+from .case import LoadedCase
 from .criteria import Criterion
 
 _LOG = logging.getLogger(__name__)
+
+PROMPT_VERSION = "specialist-v1"
+"""Named once and used for both the per-finding provenance and the result's own.
+
+Two literals would drift, and provenance that disagrees with itself about which prompt produced a
+finding is worse than none — it reads as authoritative."""
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -165,14 +183,24 @@ class SpecialistStatus(StrEnum):
 
 @dataclass(frozen=True)
 class SpecialistOutcome:
-    """What one specialist produced, including what was thrown away and why.
+    """What one specialist produced: the published contract, plus what the run needs around it.
 
-    The rejects are not an error path — they are the deterministic shell doing its job, and a
-    demo that hid them would misrepresent where the safety actually lives.
+    **`result` is the deliverable; everything else is operational.** `SpecialistResult` (CONT-01)
+    is the contract a consumer sees — the criterion analysed, the provenance, and the findings.
+    The other fields are facts about *this run of this node* that ADR-021 §2 deliberately kept out
+    of that contract: whether the call completed, what the shell threw away, what it cost, and
+    which spans it was shown. Putting them here rather than on the contract is the ADR being
+    followed, not worked around.
+
+    The rejects are not an error path — they are the deterministic shell doing its job, and a run
+    that hid them would misrepresent where the safety actually lives.
     """
 
+    result: SpecialistResult
     criterion: Criterion
-    findings: tuple[ProposedFinding, ...]
+    """The *routing* type, not the contract's. Carries `node_id` and the question text, which the
+    orchestrator and the prompt need and a consumer of findings does not."""
+
     rejected: tuple[str, ...]
     resolved_model: str
     input_tokens: int
@@ -186,8 +214,105 @@ class SpecialistOutcome:
     what it was given, and the answer is often that retrieval never surfaced the span."""
 
     @property
+    def findings(self) -> tuple[ProposedFinding, ...]:
+        """The contract's findings, read through the outcome.
+
+        A property rather than a duplicated field: two copies of the same list is how a result
+        and its envelope start disagreeing about what was found."""
+        return self.result.findings
+
+    @property
     def analysed(self) -> bool:
         return self.status is SpecialistStatus.COMPLETED
+
+
+def _specialist_criterion(criterion: Criterion) -> SpecialistCriterion:
+    """The routing type, narrowed to the four fields the contract identifies a criterion by.
+
+    `node_id` and `question` do not cross: one is a graph label, the other is prompt text, and
+    neither is part of what a finding is answerable to."""
+    return SpecialistCriterion(
+        decision_domain=criterion.decision_domain,
+        policy_pack_id=criterion.policy_pack_id,
+        policy_id=criterion.policy_id,
+        criterion_id=criterion.criterion_id,
+    )
+
+
+def _outcome(
+    criterion: Criterion,
+    case_id: str,
+    run_id: str,
+    findings: tuple[ProposedFinding, ...],
+    rejected: tuple[str, ...],
+    resolved_model: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    status: SpecialistStatus = SpecialistStatus.COMPLETED,
+    retrieved: tuple[str, ...] = (),
+) -> SpecialistOutcome:
+    """Build the contract and wrap it. **Every return from this module goes through here.**
+
+    `SpecialistResult` re-checks that each finding's run id, case id, and authority agree with the
+    result's own — a real validation pass the demo's local dataclass never performed. It should
+    never fire, because the findings below are constructed from this same criterion; if it does,
+    that is a defect in this module.
+
+    It is caught rather than raised for the reason ADR-021 §3 gives one layer up: a specialist
+    that raises takes down every *other* specialist's completed, already-paid-for work. So a
+    contract violation is demoted to a `FAILED` criterion carrying the message, which is loud in
+    the run's rejection record and cheap to see. Losing one criterion to a bug is bad; losing five
+    and the money spent on them is worse.
+    """
+    try:
+        result = SpecialistResult(
+            run_id=run_id,
+            case_id=case_id,
+            criterion=_specialist_criterion(criterion),
+            generated_by=GeneratedBy(
+                node=criterion.node_id,
+                model_alias=ModelAlias.THINKING,
+                prompt_version=PROMPT_VERSION,
+            ),
+            findings=findings,
+        )
+    except ValueError as exc:
+        _LOG.error(
+            "specialist result failed its own contract",
+            extra={
+                "run_id": run_id,
+                "case_id": case_id,
+                "criterion_id": criterion.criterion_id,
+                "error": type(exc).__name__,
+            },
+        )
+        return _outcome(
+            criterion,
+            case_id,
+            run_id,
+            findings=(),
+            rejected=(
+                *rejected,
+                f"{criterion.criterion_id}: findings did not satisfy SpecialistResult — "
+                f"{exc}. This is a defect in the specialist, not the model.",
+            ),
+            resolved_model=resolved_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            status=SpecialistStatus.FAILED,
+            retrieved=retrieved,
+        )
+
+    return SpecialistOutcome(
+        result=result,
+        criterion=criterion,
+        rejected=rejected,
+        resolved_model=resolved_model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        status=status,
+        retrieved=retrieved,
+    )
 
 
 MAX_UNWRAP_DEPTH = 3
@@ -246,19 +371,24 @@ def _evidence_block(spans: tuple[RetrievedSpan, ...]) -> str:
     )
 
 
-def _not_analysed(criterion: Criterion, status: SpecialistStatus, reason: str) -> SpecialistOutcome:
+def _not_analysed(
+    criterion: Criterion, case_id: str, run_id: str, status: SpecialistStatus, reason: str
+) -> SpecialistOutcome:
     """A criterion that was not analysed, carrying why.
+
+    Still produces a `SpecialistResult` — with no findings, and naming the criterion it was
+    pointed at. That is the whole reason CONT-01 wraps findings rather than returning a bare list
+    (D-05): a result with zero findings still says what was checked.
 
     Zero tokens because nothing was billed, and `resolved_model` is empty because no model served
     it. Both are true and both matter for the budget record.
     """
-    return SpecialistOutcome(
-        criterion=criterion,
+    return _outcome(
+        criterion,
+        case_id,
+        run_id,
         findings=(),
         rejected=(reason,),
-        resolved_model="",
-        input_tokens=0,
-        output_tokens=0,
         status=status,
     )
 
@@ -317,6 +447,8 @@ def analyze(
         )
         return _not_analysed(
             criterion,
+            case.manifest.case_id,
+            run_id,
             SpecialistStatus.FAILED,
             f"{criterion.criterion_id}: retrieval failed ({exc}) — criterion NOT analysed",
         )
@@ -324,16 +456,15 @@ def analyze(
     if not spans:
         # Not an error, and not silence either: the criterion was asked and the record had nothing
         # to say. Recorded as such so it is distinguishable from a criterion that was never run.
-        return SpecialistOutcome(
-            criterion=criterion,
+        return _outcome(
+            criterion,
+            case.manifest.case_id,
+            run_id,
             findings=(),
             rejected=(
                 f"{criterion.criterion_id}: retrieval returned no spans for this criterion — "
                 "nothing in the record matched",
             ),
-            resolved_model="",
-            input_tokens=0,
-            output_tokens=0,
             status=SpecialistStatus.COMPLETED,
         )
 
@@ -345,10 +476,11 @@ def analyze(
             return outcome
         retry = _attempt(criterion, case, spans, gateway, run_id)
         # Keep the retry's findings, but carry both attempts' rejections so the record shows the
-        # first attempt happened and why it produced nothing.
+        # first attempt happened and why it produced nothing. The `SpecialistResult` is the
+        # retry's, unmodified — it is the answer that stands.
         outcome = SpecialistOutcome(
+            result=retry.result,
             criterion=retry.criterion,
-            findings=retry.findings,
             rejected=outcome.rejected + retry.rejected,
             resolved_model=retry.resolved_model,
             input_tokens=outcome.input_tokens + retry.input_tokens,
@@ -403,6 +535,8 @@ def _attempt(
         )
         return _not_analysed(
             criterion,
+            case.manifest.case_id,
+            run_id,
             SpecialistStatus.REFUSED,
             f"{criterion.criterion_id}: model declined the request "
             f"(category={exc.category or 'unspecified'}) — criterion NOT analysed",
@@ -419,6 +553,8 @@ def _attempt(
         )
         return _not_analysed(
             criterion,
+            case.manifest.case_id,
+            run_id,
             SpecialistStatus.FAILED,
             f"{criterion.criterion_id}: {type(exc).__name__} — criterion NOT analysed",
         )
@@ -437,8 +573,10 @@ def _attempt(
     try:
         payload = json.loads(response.text)
     except json.JSONDecodeError as exc:
-        return SpecialistOutcome(
-            criterion=criterion,
+        return _outcome(
+            criterion,
+            case.manifest.case_id,
+            run_id,
             findings=(),
             rejected=(f"{criterion.criterion_id}: response was not JSON — {exc}",),
             resolved_model=response.resolved_model,
@@ -452,8 +590,10 @@ def _attempt(
     )
 
     if not isinstance(raw_findings, list):
-        return SpecialistOutcome(
-            criterion=criterion,
+        return _outcome(
+            criterion,
+            case.manifest.case_id,
+            run_id,
             findings=(),
             rejected=(
                 f"{criterion.criterion_id}: response had no 'findings' array "
@@ -548,7 +688,7 @@ def _attempt(
                     generated_by=GeneratedBy(
                         node=criterion.node_id,
                         model_alias=ModelAlias.THINKING,
-                        prompt_version="demo-v1",
+                        prompt_version=PROMPT_VERSION,
                     ),
                     validation=FindingValidation(
                         schema_check=ValidationOutcome.PASSED,
@@ -565,8 +705,10 @@ def _attempt(
             # a conclusion; the contract is what actually stops one.
             rejected.append(f"{criterion.criterion_id}#{index}: rejected by contract — {exc}")
 
-    return SpecialistOutcome(
-        criterion=criterion,
+    return _outcome(
+        criterion,
+        case.manifest.case_id,
+        run_id,
         findings=tuple(findings),
         rejected=tuple(rejected),
         resolved_model=response.resolved_model,

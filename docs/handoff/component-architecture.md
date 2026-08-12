@@ -159,7 +159,7 @@ flowchart LR
         direction TB
         DOMAIN["packages/domain/<br/>contracts + JSON Schema<br/>BUILT"]
         GATEWAY["packages/gateway/<br/>ModelGateway port<br/>litellm + bedrock adapters<br/>BUILT"]
-        ORCH["packages/orchestration/<br/>our port + LangGraph adapter<br/>PLANNED - Phase 2"]
+        ORCH["packages/orchestration/<br/>our port + both adapters<br/>criteria, specialists, synthesis<br/>BUILT"]
         RETR["packages/retrieval/<br/>retrieval port + mapping module<br/>BUILT"]
         PG[("PostgreSQL<br/>system of record for<br/>workflow state<br/>PLANNED - Phase 2")]
         OSLOCAL[("Local OpenSearch<br/>dev mirror of the AWS collection<br/>PLANNED - Phase 2")]
@@ -373,15 +373,18 @@ reason to move the code.
 
 | Component | Build state | Path | Notes |
 |---|---|---|---|
-| Orchestration port (our own interface) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/port.py` | Phase 2, ORCH-01 |
-| LangGraph adapter behind the port | `PLANNED` | `packages/orchestration/src/ireports_orchestration/langgraph_adapter.py` | Phase 2, ORCH-01; no analysis node imports LangGraph |
+| Orchestration port (our own interface) | `BUILT` | `packages/orchestration/src/ireports_orchestration/port.py` | ORCH-01, address closed 2026-08-12. `RunResult`, the `Orchestrator` protocol, and the routing policy both adapters share. ORCH-01's checkpoint clauses (`durability="sync"`, strict deserialization) belong to the row below it and are untouched |
+| Hand-rolled adapter behind the port | `BUILT` | `packages/orchestration/src/ireports_orchestration/handrolled.py` | ADR-024. A thread pool and a loop, running the same shared specialist as the LangGraph adapter and asserted to produce identical output. What ORCH-05 called a second adapter and cut |
+| LangGraph adapter behind the port | `BUILT` | `packages/orchestration/src/ireports_orchestration/langgraph_adapter.py` | ORCH-01. `Send`-based runtime fan-out, a `join` node, conditional routing. No analysis module imports LangGraph — enforced by a source scan over every module in the package, exempting this one and `registry.py` |
+| Criteria selection from the case manifest | `BUILT` | `packages/orchestration/src/ireports_orchestration/criteria.py` | Fan-out width is runtime data, derived from `requested_analyses` × `policy_pack_ids`. **A stub for authority routing (ROUT-01), not the router** — it intersects what was asked with what the catalog offers and cannot decline or add a criterion |
+| Cross-criterion synthesis | `BUILT` | `packages/orchestration/src/ireports_orchestration/synthesis.py` | Evidence overlap computed by set arithmetic; contradictions and information gaps by one model call. Emits `ProposedFinding`s only — no summary, no ranking, no aggregate (ADR-014) |
 | Checkpoint store (`PostgresSaver` over PostgreSQL) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/checkpoint.py` | Phase 2, ORCH-01/ORCH-02; `durability="sync"` and strict deserialization set in code |
 | Model-call idempotency | `PLANNED` | `packages/orchestration/src/ireports_orchestration/idempotency.py` | Phase 2, ORCH-02; the most expensive item ADR-020 retained |
 | Deterministic budget/loop-limit shell | `PLANNED` | `packages/orchestration/src/ireports_orchestration/budget.py` | Phase 2, ORCH-03 |
 | LangSmith egress-deny at every entry point | `PLANNED` | `packages/orchestration/src/ireports_orchestration/egress.py` | Phase 2, ORCH-04; extends `spikes/langgraph/test_langsmith_egress.py`'s negative control |
 | Retrieval port and OpenSearch mapping module | `BUILT` | `packages/retrieval/src/ireports_retrieval/mapping.py` | RETR-01. Hybrid vector + lexical, mandatory case filter, bounded K. Header names Q-02; a test asserts no field name is written outside this module |
 | Local ingestion of synthetic cases into OpenSearch | `BUILT` | `packages/retrieval/src/ireports_retrieval/index.py` | RETR-02. Development only (ADR-007) — AWS owns chunking and embedding in production. Records the embedding model per document so a corpus embedded by two models is detectable (Q-03) |
-| Specialist sub-call (criterion-specific tool allowlist) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/specialist.py` | Phase 2, SPEC-01 |
+| Specialist sub-call | `BUILT` | `packages/orchestration/src/ireports_orchestration/specialist.py` | SPEC-01. Returns the published `SpecialistResult` contract; retrieves its own evidence; citations checked against what it was *shown*. **SPEC-01's tool-allowlist clause is vacuous rather than satisfied** — a specialist has no tool surface at all, so there is nothing to allowlist; the only capability it has is retrieval, bounded by the mandatory case filter |
 | Refusal / `StructuredOutputError` logging | `PLANNED` | `packages/orchestration/src/ireports_orchestration/refusal_log.py` | Phase 2, VAL-02 (reduced to logging, ADR-021) |
 
 **Typed output, delivery, and validation.**

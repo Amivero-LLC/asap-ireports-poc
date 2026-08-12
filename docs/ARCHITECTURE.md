@@ -152,7 +152,9 @@ flowchart TB
 |---|---|
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema. The vocabulary everything else speaks |
 | `packages/gateway/` | The **only** component permitted to call a model. One port, three adapters |
-| `spikes/lambda_demo/` | The runnable proof: case loader, criteria routing, specialist, synthesis, both orchestrators, packager, Lambda handler |
+| `packages/retrieval/` | Hybrid vector + lexical search, mandatory case filter, every field name in one module |
+| `packages/orchestration/` | Criteria routing, specialists, synthesis, and both orchestrators behind one port. **The reference implementation** |
+| `spikes/lambda_demo/` | The runnable wrapper: case loading off disk, envelope packaging, Lambda handler, and the synthetic corpus |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 
 ---
@@ -165,7 +167,9 @@ specialist implementation; both produce the same shape of output.
 ```python
 class Orchestrator(Protocol):
     name: str
-    def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult: ...
+    def run(
+        self, case: LoadedCase, gateway: ModelGateway, retriever: Retriever, run_id: str
+    ) -> RunResult: ...
 ```
 
 ### How far the comparison has actually got
@@ -178,19 +182,24 @@ width:
 START ──▶ select criteria (from the case) ──▶ N specialists ──▶ synthesis ──▶ END
 ```
 
-Two comparison points so far, one of each kind:
+Four comparison points so far, one of them a null result:
 
 | Change | Hand-rolled | LangGraph |
 |---|---|---|
 | **Runtime fan-out width** | No change — `pool.map` never cared about list length | **Structural.** Rebuilt around `Send`, because one-node-per-criterion needs the criteria known at construction |
 | **Fan-in barrier for stage two** | Free — exiting the `ThreadPoolExecutor` context | Free — supersteps; a node after a `Send` waits for every dispatch |
+| **Conditional routing after fan-out** | `if should_synthesize(outcomes):` | Needs a do-nothing `join` node. The naive version fires once per dispatch on partial state and **fails silently** |
+| **Passing `mypy --strict`** | No change | Four suppressions, because the documented `Send` pattern matches no `add_node` overload |
 
 The second is a null result and counts as evidence: joining was expected to favour LangGraph and
-did not. The first is real asymmetry, though not obviously a point *against* LangGraph — its
-version keeps the graph shape constant while the work varies, which is what a checkpoint needs.
+did not. The others are real asymmetries, all favouring the hand-rolled path on simplicity — though
+the first is not obviously a point *against* LangGraph, since its version keeps the graph shape
+constant while the work varies, which is what a checkpoint needs.
 
-**Still to come before the decision:** conditional routing, multi-step specialists, and
-crash/resume. [`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls
+**None of the four touches durable checkpointing, which is what LangGraph was chosen for.** The
+decision is not close to made.
+
+**Still to come before it:** multi-step specialists, and crash/resume. [`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls
 out of the work rather than needing a separate exercise, and each result lands in
 [`LESSONS.md`](LESSONS.md) as it happens.
 

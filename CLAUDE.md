@@ -71,20 +71,22 @@ adapting to it must be a single-file change.
 specialist implementation.
 
 The orchestration is now real enough to tell them apart: runtime fan-out width, a synthesis stage,
-and conditional routing. Three results so far, in `docs/LESSONS.md`:
+conditional routing, and a type-checked tree. Four results so far, in `docs/LESSONS.md`:
 
 | Change | Hand-rolled | LangGraph |
 |---|---|---|
 | Runtime fan-out width | No change | Structural — rebuilt around `Send` |
 | Fan-in barrier | Free | Free (supersteps) — a null result |
 | Conditional routing after fan-out | `if should_synthesize(...)` | Needs a `join` node; the naive version fires per dispatch on partial state **and fails silently** |
+| `mypy --strict` | No change | Four suppressions — the documented `Send` pattern matches no `add_node` overload |
 
 None is decisive, and none yet touches what LangGraph was chosen for — durable checkpointing.
 **ORCH-02 is what closes this.**
 
-**No module that analyzes a case may import LangGraph.** A test enforces it
-(`spikes/lambda_demo/test_demo.py`). With two implementations genuinely running, this is the working
-arrangement rather than lock-in insurance.
+**No module that analyzes a case may import LangGraph.** A test enforces it by scanning every
+module in `packages/orchestration/`, exempting only `langgraph_adapter.py` and `registry.py`
+(`tests/orchestration/test_orchestration.py`). With two implementations genuinely running, this is
+the working arrangement rather than lock-in insurance.
 
 Build shared orchestration logic in framework-free code both paths call. Where a feature is easy in
 one and hard in the other, that is a finding — write it into `docs/LESSONS.md`.
@@ -99,18 +101,24 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema in `schemas/` |
 | `packages/gateway/` | `ModelGateway` port — `litellm` (proven live), `bedrock` (never run), `stub`. Plus an `EmbeddingGateway`, Titan via the proxy |
 | `packages/retrieval/` | OpenSearch hybrid vector + lexical, mandatory case filter, bounded K. **All field names in `mapping.py`** (Q-02) |
-| `spikes/lambda_demo/` | The runnable demo — criteria routing, retrieval-backed specialists, both orchestrators, synthesis, validated envelopes, Lambda handler |
+| `packages/orchestration/` | Criteria routing, retrieval-backed specialists, synthesis, and both orchestrators behind `port.py`. Specialists return the published `SpecialistResult` |
+| `spikes/lambda_demo/` | The runnable wrapper — case loading off disk, envelope packaging, Lambda handler, `run_case.py`, and the synthetic corpus |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
-| Tests | 207 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 216 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 **Not built:** crash/resume, model-call idempotency, wall-clock and token budgets, authority routing
 from policy packs, ingestion, `apps/`, `evals/`.
 
-**Built but at the wrong address:** the orchestrator, specialist, synthesis and criteria modules
-live in `spikes/lambda_demo/` and use a local `SpecialistOutcome` rather than the published
-`SpecialistResult` contract. Graduating them into `packages/orchestration/` is what closes ORCH-01
-and SPEC-01 — see `docs/REQUIREMENTS.md`.
+**Graduated 2026-08-12.** The orchestrator, specialist, synthesis and criteria modules now live in
+`packages/orchestration/` and specialists return the published `SpecialistResult`. `SpecialistStatus`
+stays on the local `SpecialistOutcome` wrapper — ADR-021 §2 keeps completion status off the contract
+on purpose, and a test now asserts that rather than trusting prose.
+
+**What that did *not* close.** ORCH-01's acceptance also requires `durability="sync"` and strict
+checkpoint deserialization, which belong to ORCH-02 and do not exist. SPEC-01's tool-allowlist
+clause is *vacuous* rather than satisfied — a specialist has no tool surface to allowlist. Both are
+still unchecked in `docs/REQUIREMENTS.md`, deliberately.
 
 **To run the demo you need Docker up** — OpenSearch holds the indexed cases:
 

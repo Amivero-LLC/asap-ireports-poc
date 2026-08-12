@@ -1,33 +1,29 @@
-"""What the demo claims, checked offline.
+"""What the *wrapper* claims, checked offline.
 
-Everything here runs against `StubGateway`, so the whole file is free, deterministic, and safe in
-CI. The live half — real model calls through a real LiteLLM proxy — is `run_case.py`, which is
-opt-in and costs money. The split is deliberate: what these tests assert is that the
-**deterministic shell** behaves, and the shell is exactly the part that must not depend on what a
-model happened to return.
+This spike is no longer where the analysis lives. Criteria selection, specialists, synthesis and
+both orchestrators graduated to `packages/orchestration/`, and their tests went with them to
+`tests/orchestration/`. What remains here is the runnable shell around them — reading a case off
+disk, building the envelope, and the Lambda handler — and that is what this file tests.
 
-The rejection tests are the important ones. Each feeds the pipeline a response a real model has
-actually produced — an unresolvable citation, a determinative conclusion, a span cited in two
-roles at once — and asserts the finding does not survive. `CLAUDE.md`: the model reasons; it does
-not decide whether its own output is valid.
+Everything runs against `StubGateway`, so it is free, deterministic, and safe in CI. The live half
+is `run_case.py`, which is opt-in and costs money.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
-from ireports_domain import ASAPEnvelope, DecisionDomain, FindingClassification
-from ireports_gateway import ModelRefusalError, StubGateway
+from ireports_domain import ASAPEnvelope, FindingClassification
+from ireports_gateway import StubGateway
+from ireports_orchestration import CATALOG, ORCHESTRATORS
 from ireports_retrieval import InMemoryRetriever, RetrievedSpan
 from lambda_demo import handler as handler_module
-from lambda_demo.case_loader import LoadedCase, load_case
-from lambda_demo.criteria import CATALOG, NoApplicableCriteriaError, criteria_for
-from lambda_demo.orchestrator import ORCHESTRATORS
+from lambda_demo.case_loader import load_case
 from lambda_demo.package import build_envelope
-from lambda_demo.specialist import SpecialistStatus, analyze
 
 CASE_DIR = Path(__file__).parent / "cases" / "AMI-SYN-FIN-001"
 RUN_ID = "run_test_0001"
@@ -40,13 +36,8 @@ def case():
 
 @pytest.fixture
 def retriever(case):
-    """Every span, ignoring the query.
-
-    **Not a retriever, and no test here may claim otherwise.** It returns the whole case, which is
-    exactly the behaviour retrieval replaced — so it keeps orchestration tests offline and free,
-    and proves nothing about relevance. Retrieval behaviour is tested in `tests/retrieval/`,
-    against a real cluster.
-    """
+    """Every span, ignoring the query — offline and free. Not a retriever; see
+    `tests/orchestration/test_orchestration.py`, which says the same thing at more length."""
     return InMemoryRetriever(
         tuple(
             RetrievedSpan(
@@ -81,227 +72,38 @@ def _finding(**overrides: Any) -> dict[str, Any]:
 
 
 def _gateway(*findings: dict[str, Any]) -> StubGateway:
-    """A stub returning the same findings payload for every node."""
     return StubGateway(default=json.dumps({"findings": list(findings)}))
 
 
 # ---------------------------------------------------------------------------
-# The port holds
+# Loading a case off disk
 # ---------------------------------------------------------------------------
 
 
-def test_nodes_do_not_import_langgraph() -> None:
-    """ADR-012 chose LangGraph; this is what keeps that from becoming lock-in.
+def test_the_case_loader_is_the_only_thing_here_that_knows_about_files() -> None:
+    """The boundary this spike exists to hold after the graduation.
 
-    A source scan rather than an import check, because an import check passes for the wrong
-    reason: `orchestrator.py` imports LangGraph lazily, so a specialist that imported it too
-    would still not fail at collection time. The claim is about the *source*, so the source is
-    what gets read.
-
-    `orchestrator.py` and `handler.py` are deliberately absent from the list. They are the two
-    places the framework is *allowed* to appear — one is the adapter, the other is the packaging
-    entry point that pays for the import at init. The rule is that nothing which analyzes a case
-    knows a framework exists.
+    `ireports_orchestration` owns the types; this package owns reading them off a disk, because
+    where a case comes from is a property of the deployment (ADR-007). A `Path` or an `open()`
+    appearing in the analysis package would put the AWS ingestion path one refactor away.
     """
     package = Path(__file__).parent / "src" / "lambda_demo"
-    for module in ("specialist.py", "case_loader.py", "package.py"):
-        source = (package / module).read_text()
-        assert "langgraph" not in source.lower(), (
-            f"{module} references LangGraph. Nodes depend on our port, never on the framework — "
-            "that is the whole protection against ADR-012 becoming lock-in."
-        )
-
-
-def test_both_orchestrators_produce_the_same_findings(case, retriever) -> None:
-    """Same case, same stub, two orchestrators, identical output.
-
-    With a real model the two candidates return different analyses — they are two runs of a
-    probabilistic process, not two evaluations of a function. Pinning the model response is what
-    turns "similar" into "identical" and makes the port's claim checkable at all.
-    """
-    results = {
-        name: orchestrator.run(case, _gateway(_finding()), retriever, RUN_ID)
-        for name, orchestrator in ORCHESTRATORS.items()
+    filesystem_aware = {
+        module.name
+        for module in package.glob("*.py")
+        if "pathlib" in module.read_text() or "open(" in module.read_text()
     }
-    shapes = {
-        name: [(f.finding_id, f.title, f.supporting_evidence) for f in result.findings]
-        for name, result in results.items()
-    }
-    assert shapes["hand-rolled"] == shapes["langgraph"]
-    assert len(shapes["hand-rolled"]) == len(criteria_for(case.manifest))
+    assert filesystem_aware <= {"case_loader.py", "handler.py"}, sorted(filesystem_aware)
 
 
-# ---------------------------------------------------------------------------
-# The fan-out width comes from the case
-# ---------------------------------------------------------------------------
+def test_a_case_with_duplicate_evidence_ids_is_refused(tmp_path: Path) -> None:
+    """Ambiguous citations are worse than missing ones: every downstream check would pass."""
+    (tmp_path / "case.json").write_text((CASE_DIR / "case.json").read_text())
+    spans = json.loads((CASE_DIR / "evidence.json").read_text())["spans"]
+    (tmp_path / "evidence.json").write_text(json.dumps({"spans": [spans[0], spans[0]]}))
 
-
-def _manifest(case, **overrides):
-    return case.manifest.model_copy(update=overrides)
-
-
-def test_criteria_come_from_the_case_not_a_constant(case) -> None:
-    """Different requests select different criteria. This is the whole point of the change.
-
-    A fan-out whose width is fixed at import time is one line in any framework, so it cannot
-    distinguish two orchestrators. Width as runtime data is what makes the comparison real.
-    """
-    both = criteria_for(case.manifest)
-    suitability_only = criteria_for(
-        _manifest(case, requested_analyses=(DecisionDomain.SUITABILITY,))
-    )
-
-    assert len(suitability_only) < len(both)
-    assert {c.decision_domain for c in suitability_only} == {DecisionDomain.SUITABILITY}
-    # Narrowing the pack list narrows the selection too — both dimensions are live.
-    assert len(criteria_for(_manifest(case, policy_pack_ids=("sead4-current",)))) < len(both)
-
-
-def test_both_orchestrators_fan_out_to_the_width_the_case_asks_for(case, retriever) -> None:
-    """The runtime width reaches both implementations, not just the selection function.
-
-    Asserted on `outcomes` rather than `findings`: a criterion that produces no findings still ran,
-    and the count that matters here is how many specialists were dispatched.
-    """
-    narrowed = LoadedCase(
-        manifest=_manifest(case, requested_analyses=(DecisionDomain.SUITABILITY,)),
-        spans=case.spans,
-        root=case.root,
-    )
-    expected = len(criteria_for(narrowed.manifest))
-    assert expected < len(CATALOG)  # otherwise this test proves nothing
-
-    for name, orchestrator in ORCHESTRATORS.items():
-        result = orchestrator.run(narrowed, _gateway(_finding()), retriever, RUN_ID)
-        assert len(result.outcomes) == expected, f"{name} fanned out to the wrong width"
-        assert result.criteria == criteria_for(narrowed.manifest)
-
-
-def test_a_case_with_no_applicable_criteria_raises(case) -> None:
-    """Better than a successful run that analysed nothing.
-
-    An empty selection would complete, emit no findings, and be indistinguishable from a case where
-    every criterion came back clean — the one confusion this system can least afford.
-    """
-    with pytest.raises(NoApplicableCriteriaError, match="no criterion matching both"):
-        criteria_for(_manifest(case, policy_pack_ids=("some-pack-we-do-not-have",)))
-
-
-# ---------------------------------------------------------------------------
-# The shell rejects what it should
-# ---------------------------------------------------------------------------
-
-
-def test_unresolvable_citation_drops_the_finding(case, retriever) -> None:
-    """Evidence before inference. A citation that does not resolve is not trimmed — it is fatal.
-
-    Trimming would leave an observation standing on evidence nobody can open, which is precisely
-    the failure this architecture exists to prevent.
-    """
-    outcome = analyze(
-        CATALOG[0],
-        case,
-        _gateway(_finding(supporting_evidence=["ev_001", "ev_999"])),
-        retriever,
-        RUN_ID,
-    )
-    assert outcome.findings == ()
-    assert any("ev_999" in reason for reason in outcome.rejected)
-
-
-def test_determinative_language_is_rejected_by_the_contract(case, retriever) -> None:
-    """The prompt asks; the type enforces.
-
-    ADR-022 removed the in-run review gate, so `reject_determinative_language` and the
-    `ProposedFinding` type now carry the decision-support boundary alone. This is that guard
-    firing on text the prompt explicitly asked the model not to write.
-    """
-    outcome = analyze(
-        CATALOG[0],
-        case,
-        _gateway(
-            _finding(
-                policy_relevance="The record shows the subject violated SEAD-4 Guideline B.",
-            )
-        ),
-        retriever,
-        RUN_ID,
-    )
-    assert outcome.findings == ()
-    assert any("rejected by contract" in reason for reason in outcome.rejected)
-
-
-def test_a_span_cited_in_both_roles_is_demoted_and_recorded(case, retriever) -> None:
-    """Observed behaviour, resolved deterministically rather than by dropping a good finding.
-
-    Supporting wins because it is the basis of the observation, and the adjustment is written
-    into the rejection record so it is visible rather than silent.
-    """
-    outcome = analyze(
-        CATALOG[0],
-        case,
-        _gateway(_finding(supporting_evidence=["ev_001"], mitigating_evidence=["ev_001"])),
-        retriever,
-        RUN_ID,
-    )
-    assert len(outcome.findings) == 1
-    assert outcome.findings[0].mitigating_evidence == ()
-    assert any("one role per finding" in reason for reason in outcome.rejected)
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        pytest.param("not json at all", id="not-json"),
-        pytest.param('{"findings": [42]}', id="a-number-where-a-finding-goes"),
-        pytest.param('{"answer": "no"}', id="no-findings-key"),
-        pytest.param('{"findings": "[{\\"title\\": \\"x\\"}]"}', id="a-string-holding-a-stub"),
-    ],
-)
-def test_malformed_model_output_never_crashes_the_shell(case, payload: str, retriever) -> None:
-    """A requested schema is verified, not trusted (ADR-018).
-
-    Every shape here has been returned by a real model against this exact schema. None of them
-    may take the run down: a specialist that crashes loses the other specialists' work too. Each
-    one must also leave a reason behind — a silently empty result is indistinguishable from a
-    clean analysis, which is the worst outcome this system can produce.
-    """
-    outcome = analyze(CATALOG[0], case, StubGateway(default=payload), retriever, RUN_ID, attempts=1)
-    assert outcome.findings == ()
-    assert outcome.rejected  # rejected with a reason, not silently empty
-
-
-@pytest.mark.parametrize(
-    ("payload", "expected"),
-    [
-        pytest.param('{"findings": "[]"}', 0, id="empty-array-as-a-string"),
-        pytest.param(None, 1, id="a-bare-object-where-an-array-was-asked-for"),
-        pytest.param("NESTED", 1, id="the-envelope-repeated-inside-itself"),
-        pytest.param("NESTED_EMPTY", 0, id="a-nested-empty-array-is-genuinely-empty"),
-    ],
-)
-def test_the_two_observed_shape_coercions(
-    case, payload: str | None, expected: int, retriever
-) -> None:
-    """`findings` comes back as a JSON string or a bare object roughly one call in three.
-
-    Both are recoverable without guessing at content, so both are coerced rather than rejected —
-    and neither is an error, which is why they are tested apart from the malformed shapes above.
-    An empty array stays empty: "the record shows nothing relevant" is a valid answer, and
-    manufacturing a rejection for it would be as wrong as manufacturing a finding.
-    """
-    if payload == "NESTED":
-        # {"findings": {"findings": [ ... ]}} — observed live 2026-08-12. The old coercion wrapped
-        # this instead of unwrapping it and reported "missing every required field".
-        text = json.dumps({"findings": {"findings": [_finding()]}})
-    elif payload == "NESTED_EMPTY":
-        text = json.dumps({"findings": {"findings": []}})
-    elif payload is None:
-        text = json.dumps({"findings": _finding()})
-    else:
-        text = payload
-    outcome = analyze(CATALOG[0], case, StubGateway(default=text), retriever, RUN_ID, attempts=1)
-    assert len(outcome.findings) == expected
+    with pytest.raises(ValueError, match="duplicate evidence_id"):
+        load_case(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +132,48 @@ def test_no_findings_means_no_envelope(case) -> None:
     """An empty envelope would deliver 'nothing found' as though it were a result."""
     with pytest.raises(ValueError, match="no findings survived"):
         build_envelope(case, (), RUN_ID)
+
+
+def test_synthesis_findings_reach_the_envelope(case, retriever) -> None:
+    """A cross-criterion finding is a `ProposedFinding` like any other, and is delivered like one.
+
+    Giving synthesis a privileged section in the envelope would imply its findings carry more
+    weight than a specialist's. They do not.
+    """
+    gateway = StubGateway(
+        responses={
+            "synthesis": json.dumps(
+                {
+                    "contradictions": [
+                        {
+                            "title": "SF-86 answer conflicts with the interview disclosure",
+                            "observation": "The questionnaire records 'No' (ev_003); the interview "
+                            "records a 4 percent interest (ev_004). Both cannot describe the same "
+                            "holding.",
+                            "policy_relevance": "The conflict may be relevant to what the record "
+                            "establishes.",
+                            "recommended_officer_action": "Review both statements and resolve "
+                            "which is accurate.",
+                            "criterion_id": "731-202-B-3",
+                            "conflicting_evidence": ["ev_003", "ev_004"],
+                        }
+                    ],
+                    "information_gaps": [],
+                }
+            )
+        },
+        default=json.dumps({"findings": [_finding()]}),
+    )
+    result = ORCHESTRATORS["hand-rolled"].run(case, gateway, retriever, RUN_ID)
+    envelope = build_envelope(case, result.findings, RUN_ID)
+
+    delivered = {f.finding_id for f in envelope.analysis.findings}
+    contradictions = [
+        f for f in result.findings if f.classification is FindingClassification.CONTRADICTION
+    ]
+    assert len(contradictions) == 1
+    assert contradictions[0].finding_id in delivered
+    assert ASAPEnvelope.model_validate(envelope.model_dump(mode="json"))
 
 
 # ---------------------------------------------------------------------------
@@ -410,274 +254,35 @@ def test_handler_reports_an_empty_run_rather_than_crashing(monkeypatch, retrieve
 
 
 # ---------------------------------------------------------------------------
-# Synthesis — the second stage
+# The Lambda package
 # ---------------------------------------------------------------------------
 
 
-def _synth_gateway(contradictions=(), gaps=(), findings=None) -> StubGateway:
-    """A stub that answers specialists and the synthesis node differently.
+def test_build_stages_every_package_the_handler_imports() -> None:
+    """A package staged short one dependency fails at *import time inside the container*.
 
-    Keyed on `node_id`, which is what makes this possible at all: the synthesis node asks a
-    different question and gets a different schema back, and a single canned response could not
-    stand in for both.
+    `build.py` copies our pure-Python packages in by path rather than pip-installing them, so
+    adding a package to the workspace does not add it to the Lambda build. Graduating orchestration
+    out of this spike is exactly the change that could have missed it — the demo would still pass
+    every test here and fail on the first `sam local invoke`.
+
+    Loaded by explicit path rather than `import build`: `spikes/lambda_fit/` has a `build.py` too,
+    and which one a bare import resolves to depends on how pytest happened to order sys.path.
     """
-    return StubGateway(
-        responses={
-            "synthesis": json.dumps(
-                {"contradictions": list(contradictions), "information_gaps": list(gaps)}
-            )
-        },
-        default=json.dumps({"findings": [findings or _finding()]}),
+    spec = importlib.util.spec_from_file_location(
+        "lambda_demo_build", Path(__file__).parent / "build.py"
     )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
 
-
-def _contradiction(**overrides: Any) -> dict[str, Any]:
-    base: dict[str, Any] = {
-        "title": "SF-86 answer conflicts with the interview disclosure",
-        "observation": "The questionnaire records 'No' (ev_003); the interview records a 4 percent"
-        " interest (ev_004). Both cannot describe the same holding.",
-        "policy_relevance": "The conflict may be relevant to what the record establishes.",
-        "recommended_officer_action": "Review both statements and resolve which is accurate.",
-        "criterion_id": "731-202-B-3",
-        "conflicting_evidence": ["ev_003", "ev_004"],
+    staged = {name for _src, name in module.SHARED_SOURCE}
+    assert staged >= {
+        "ireports_domain",
+        "ireports_gateway",
+        "ireports_orchestration",
+        "ireports_retrieval",
+        "lambda_demo",
     }
-    base.update(overrides)
-    return base
-
-
-def test_overlap_is_computed_not_inferred(case, retriever) -> None:
-    """The most useful thing the fan-in produces, and it costs nothing.
-
-    Which findings rest on the same span is set arithmetic. Asking a model would be slower, cost
-    money, and be occasionally wrong about something with an exact answer.
-    """
-    result = ORCHESTRATORS["hand-rolled"].run(case, _synth_gateway(), retriever, RUN_ID)
-    assert result.synthesis is not None
-
-    # The stub gives every criterion the same finding on ev_001, so ev_001 spans every criterion.
-    found = {o.evidence_id: o for o in result.synthesis.overlaps}
-    assert "ev_001" in found
-    assert len(found["ev_001"].criterion_ids) == len(result.criteria) > 1
-
-
-def test_synthesis_findings_reach_the_envelope(case, retriever) -> None:
-    result = ORCHESTRATORS["hand-rolled"].run(
-        case, _synth_gateway(contradictions=[_contradiction()]), retriever, RUN_ID
-    )
-    contradictions = [
-        f for f in result.findings if f.classification is FindingClassification.CONTRADICTION
-    ]
-    assert len(contradictions) == 1
-    # First span is the assertion, the rest are what conflicts with it — the contract counts
-    # supporting + contradicting >= 2.
-    assert contradictions[0].supporting_evidence == ("ev_003",)
-    assert contradictions[0].contradicting_evidence == ("ev_004",)
-    assert ASAPEnvelope.model_validate(
-        build_envelope(case, result.findings, RUN_ID).model_dump(mode="json")
-    )
-
-
-@pytest.mark.parametrize(
-    ("override", "expected"),
-    [
-        pytest.param(
-            {"conflicting_evidence": ["ev_003"]}, "needs two conflicting spans", id="one-span"
-        ),
-        pytest.param(
-            {"conflicting_evidence": ["ev_003", "ev_999"]},
-            "cited unknown evidence",
-            id="unknown-span",
-        ),
-        pytest.param(
-            {"criterion_id": "GUIDELINE-Z"}, "which was not analysed", id="uninvolved-criterion"
-        ),
-    ],
-)
-def test_synthesis_is_validated_like_everything_else(
-    case, override, expected: str, retriever
-) -> None:
-    """The second stage gets no more trust than the first.
-
-    A contradiction naming a criterion nobody analysed, or resting on one span, or citing evidence
-    that is not in the case, is dropped with a reason — same shell, same rules.
-    """
-    result = ORCHESTRATORS["hand-rolled"].run(
-        case, _synth_gateway(contradictions=[_contradiction(**override)]), retriever, RUN_ID
-    )
-    assert result.synthesis is not None
-    assert not result.synthesis.findings
-    assert any(expected in reason for reason in result.synthesis.rejected)
-
-
-def test_both_orchestrators_synthesize_identically(case, retriever) -> None:
-    """The second stage is a real graph edge in one and a second statement in the other."""
-    shapes = {}
-    for name, orchestrator in ORCHESTRATORS.items():
-        result = orchestrator.run(
-            case, _synth_gateway(contradictions=[_contradiction()]), retriever, RUN_ID
-        )
-        assert result.synthesis is not None, name
-        shapes[name] = (
-            [f.finding_id for f in result.synthesis.findings],
-            [(o.evidence_id, o.criterion_ids) for o in result.synthesis.overlaps],
-        )
-    assert shapes["hand-rolled"] == shapes["langgraph"]
-
-
-# ---------------------------------------------------------------------------
-# Conditional routing
-# ---------------------------------------------------------------------------
-
-
-class _RefusesOne(StubGateway):
-    """Refuses one named criterion. Every other criterion would succeed."""
-
-    def __init__(self, node_id: str, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._refuse = node_id
-        self.refusals = 0
-        """Counted here rather than read from `gateway.calls`: this raises *before* delegating,
-        so a refused attempt never reaches the stub's own call log."""
-
-    def complete(self, request):  # type: ignore[no-untyped-def]
-        if request.node_id == self._refuse:
-            self.refusals += 1
-            raise ModelRefusalError(category="sensitive_content")
-        return super().complete(request)
-
-
-def test_one_refusal_does_not_kill_the_run(case, retriever) -> None:
-    """Regression. Until 2026-08-12 it did, on both paths.
-
-    `gateway.complete` was called bare, so a refusal raised through the thread pool or the graph
-    and discarded every other specialist's completed, already-paid-for work. Under Lambda that is
-    worse: the invocation is retried automatically and every model call is paid for again, into
-    the same refusal.
-    """
-    for name, orchestrator in ORCHESTRATORS.items():
-        result = orchestrator.run(
-            case,
-            _RefusesOne("candor_specialist", default=json.dumps({"findings": [_finding()]})),
-            retriever,
-            RUN_ID,
-        )
-        assert len(result.outcomes) == len(result.criteria), name
-        assert result.findings, f"{name} lost the surviving specialists' work"
-
-
-def test_a_refused_criterion_is_not_a_clean_one(case, retriever) -> None:
-    """The distinction the architecture exists to protect.
-
-    A criterion nobody could analyse and a criterion that came back clean both have zero findings.
-    If they look the same, the run reports silent under-analysis as a clean record.
-    """
-    result = ORCHESTRATORS["hand-rolled"].run(
-        case,
-        _RefusesOne("candor_specialist", default=json.dumps({"findings": [_finding()]})),
-        retriever,
-        RUN_ID,
-    )
-    by_node = {o.criterion.node_id: o for o in result.outcomes}
-
-    refused = by_node["candor_specialist"]
-    assert refused.status is SpecialistStatus.REFUSED
-    assert not refused.analysed
-    assert any("NOT analysed" in reason for reason in refused.rejected)
-
-    # And a criterion that genuinely found nothing is still COMPLETED, not conflated with it.
-    clean = ORCHESTRATORS["hand-rolled"].run(
-        case, StubGateway(default=json.dumps({"findings": []})), retriever, RUN_ID
-    )
-    assert all(o.status is SpecialistStatus.COMPLETED for o in clean.outcomes)
-    assert all(o.analysed for o in clean.outcomes)
-
-
-def test_a_refusal_is_not_retried(case, retriever) -> None:
-    """ADR-015: a refusal is not a transport failure and must not be retried blindly."""
-    gateway = _RefusesOne("candor_specialist", default=json.dumps({"findings": []}))
-    ORCHESTRATORS["hand-rolled"].run(case, gateway, retriever, RUN_ID)
-    assert gateway.refusals == 1, "a refused criterion was asked again"
-
-
-def test_synthesis_runs_once_not_once_per_specialist(case, retriever) -> None:
-    """The trap that cost a `join` node, and would have been silent.
-
-    A conditional edge leaving a `Send`-dispatched node fires **once per dispatch**, and each
-    firing sees only that dispatch's own state contribution. Measured directly: five dispatches
-    gave five router calls, each seeing one outcome, never five. Routing on the aggregate of a
-    fan-out therefore has to happen after an explicit join, or every branch decides on a run that
-    does not exist.
-
-    No error, no warning — just a decision made on one-fifth of the evidence.
-    """
-    for name, orchestrator in ORCHESTRATORS.items():
-        gateway = StubGateway(
-            responses={"synthesis": json.dumps({"contradictions": [], "information_gaps": []})},
-            default=json.dumps({"findings": [_finding()]}),
-        )
-        orchestrator.run(case, gateway, retriever, RUN_ID)
-        calls = [c for c in gateway.calls if c.node_id == "synthesis"]
-        assert len(calls) == 1, f"{name} ran synthesis {len(calls)} times"
-
-
-def test_both_paths_skip_synthesis_on_the_same_condition(case, retriever) -> None:
-    """The routing policy is shared code, so the two paths cannot drift.
-
-    If each orchestrator decided this separately, two runs of the same case would produce
-    different envelopes for a reason nobody could see.
-    """
-    for name, orchestrator in ORCHESTRATORS.items():
-        gateway = StubGateway(default=json.dumps({"findings": []}))
-        result = orchestrator.run(case, gateway, retriever, RUN_ID)
-        assert result.synthesis is None, f"{name} ran synthesis with nothing to reason across"
-        assert not any(c.node_id == "synthesis" for c in gateway.calls), name
-
-
-def test_a_citation_to_an_unretrieved_span_is_dropped(case) -> None:
-    """Citations are checked against what the specialist was **shown**, not what the case holds.
-
-    With retrieval these differ, and the distinction is the whole point. A model that cites a span
-    it was never given has not recalled the record — it has guessed, and a guess that happens to
-    name a real evidence id is indistinguishable from analysis unless this check is scoped to the
-    retrieved set.
-
-    Here the case contains ev_002 and retrieval deliberately does not surface it.
-    """
-    shown = InMemoryRetriever(
-        tuple(
-            RetrievedSpan(
-                evidence_id=s.evidence_id,
-                document_id=s.document_id,
-                title=s.title,
-                text=s.text,
-                page_number=s.page_number,
-                source_type=s.source_type,
-                score=1.0,
-            )
-            for s in case.spans
-            if s.evidence_id == "ev_001"
-        )
-    )
-    assert any(s.evidence_id == "ev_002" for s in case.spans), "fixture no longer proves anything"
-
-    outcome = analyze(
-        CATALOG[0],
-        case,
-        _gateway(_finding(supporting_evidence=["ev_002"])),
-        shown,
-        RUN_ID,
-        attempts=1,
-    )
-    assert outcome.findings == ()
-    assert any("ev_002" in reason for reason in outcome.rejected)
-    assert outcome.retrieved == ("ev_001",)
-
-
-def test_the_run_records_what_each_specialist_was_shown(case, retriever) -> None:
-    """Provenance. Two specialists on one case now read different records.
-
-    "Why did the financial criterion miss this?" is unanswerable without knowing what it was given,
-    and the answer is often that retrieval never surfaced the span.
-    """
-    result = ORCHESTRATORS["hand-rolled"].run(case, _gateway(_finding()), retriever, RUN_ID)
-    assert all(o.retrieved for o in result.outcomes if o.analysed)
+    for src, _name in module.SHARED_SOURCE:
+        assert src.is_dir(), f"{src} is staged by build.py and does not exist"

@@ -1,4 +1,10 @@
-"""Load a synthetic case from disk into typed contracts.
+"""Read a synthetic case off disk into the types `ireports_orchestration` analyses.
+
+**The reading is here; the types are not.** `LoadedCase` and `EvidenceSpan` live in
+`ireports_orchestration.case`, because where a case comes from is a property of the deployment
+rather than of the analysis. In AWS the ingestion pipeline hands these in with no filesystem in
+sight (ADR-007); this module is the local-first equivalent, and it is the only one that has to
+change for that.
 
 Deliberately file-based. The bake-off built its case in Python (`scenario.build_case()`), which
 is fine for a fixture but means there is nothing a reader can open, edit, and re-run. A case that
@@ -13,36 +19,12 @@ findings to measure agreement against; these have no ground truth attached and l
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 from ireports_domain import CaseManifest
+from ireports_orchestration import EvidenceSpan, LoadedCase
 
-
-@dataclass(frozen=True)
-class EvidenceSpan:
-    """One citable span of the case record.
-
-    A flat local shape rather than the full `EvidenceRecord` contract: that type requires
-    retrieval provenance (embedding model, rank, score) which only exists once retrieval is
-    built (RETR-01, Phase 2). Inventing those values to satisfy a contract would be the kind of
-    fabricated-provenance shortcut this project exists to avoid.
-    """
-
-    evidence_id: str
-    document_id: str
-    page_number: int
-    source_reliability: str
-    text: str
-    title: str = ""
-    source_type: str = "case_document"
-
-
-@dataclass(frozen=True)
-class LoadedCase:
-    manifest: CaseManifest
-    spans: tuple[EvidenceSpan, ...]
-    root: Path
+__all__ = ["EvidenceSpan", "LoadedCase", "available_cases", "load_case"]
 
 
 def load_case(root: Path) -> LoadedCase:

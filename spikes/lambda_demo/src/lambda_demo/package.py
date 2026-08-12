@@ -30,8 +30,7 @@ from ireports_domain import (
     ProposedFinding,
 )
 from ireports_domain.asap import MAX_EXCERPT_CHARS
-
-from .case_loader import LoadedCase
+from ireports_orchestration import LoadedCase
 
 
 def _excerpts(case: LoadedCase, evidence_ids: tuple[str, ...]) -> list[EvidenceExcerpt]:

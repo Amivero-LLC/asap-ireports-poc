@@ -18,10 +18,10 @@ so if you find a checkbox disagreeing with the code, believe the code and fix th
 
 **Where things stand (2026-08-12).** The architecture-package requirements are closed. Of the
 orchestrator-spine set, retrieval (RETR-01, RETR-02), the refusal path (VAL-02) and the gateway
-port (QUAL-02) are done; the orchestrator and specialist exist but live in `spikes/lambda_demo/`
-rather than `packages/`, so ORCH-01 and SPEC-01 are done in substance and not at the right
-address. Idempotent crash/resume (ORCH-02) and the Lambda timeout proof (LAMB-01) are the
-untouched hard ones — and ORCH-02 is what closes the framework question in ADR-024.
+port (QUAL-02) are done. ORCH-01 and SPEC-01 moved into `packages/orchestration/` and still are
+not checked off — each has one clause left, and both are named in the status lines below rather
+than rounded away. Idempotent crash/resume (ORCH-02) and the Lambda timeout proof (LAMB-01) are
+the untouched hard ones — and ORCH-02 is what closes the framework question in ADR-024.
 
 ---
 
@@ -109,7 +109,7 @@ untouched hard ones — and ORCH-02 is what closes the framework question in ADR
       `api.smith.langchain.com` **and still succeeds**, because the failure is swallowed.
       *Traces:* `REQ-langsmith-egress-deny` · ADR-012: "any future entry point inherits this
       obligation."
-  - *Status:* **Substance done, wrong address.** Port, both adapters and the no-import test exist in `spikes/lambda_demo/orchestrator.py`, not `packages/orchestration/`. Closing this means graduating the spike
+  - *Status:* **Address closed 2026-08-12, one clause open.** `packages/orchestration/port.py` exposes the port; both adapters sit behind it; the no-import test scans every module in the package rather than a hand-written list. **What is left is the checkpoint half** — `durability="sync"` and strict deserialization cannot be set until there is a checkpointer, which is ORCH-02. Unchecked on purpose: the acceptance is a conjunction, and rounding it up is how a requirements file starts lying
   - *Status:* **Partial.** Fan-out bound, bounded retry and bounded K are enforced in code. No wall-clock or token ceiling yet — and the wall-clock one is what LAMB-01 depends on
   - *Status:* **Proven for the bake-off** (`spikes/langgraph/test_langsmith_egress.py`), never re-proven at the demo's entry points
 
@@ -120,9 +120,11 @@ untouched hard ones — and ORCH-02 is what closes the framework question in ADR
       *Acceptance:* the specialist runs through the `ModelGateway` port on a tier **alias**, with a
       criterion-specific tool allowlist; prohibited tools (shell, generic HTTP, unrestricted
       filesystem, generic SQL, arbitrary Python, cross-case vector search, email, direct ASAP
-      delivery) are unreachable; the result is a typed `SpecialistResult`, not prose. **Evidence is
-      handed in from a synthetic fixture, not retrieved** — RETR-01..03 are cut by ADR-020.
-      *Traces:* `REQ-specialist-query` · blueprint §8.3, §8.4 · ADR-020.
+      delivery) are unreachable; the result is a typed `SpecialistResult`, not prose. ~~**Evidence is
+      handed in from a synthetic fixture, not retrieved** — RETR-01..03 are cut by ADR-020.~~
+      **Stale: ADR-021 restored retrieval, and specialists now retrieve their own evidence.**
+      *Traces:* `REQ-specialist-query` · blueprint §8.3, §8.4 · ADR-020, ADR-021.
+  - *Status:* **Address closed 2026-08-12, one clause vacuous.** `packages/orchestration/specialist.py` runs through the `ModelGateway` port on a tier alias and returns the published `SpecialistResult`. **The tool-allowlist clause is not satisfied — it is empty.** A specialist has no tool surface at all: it is handed a `Retriever` and calls a gateway, so there is nothing to allowlist and nothing to prohibit. Every prohibited capability on that list is unreachable by construction rather than by policy, which is a stronger guarantee and a different one. When a specialist gains a tool, this clause becomes real and this requirement is not done until it is enforced
 - [x] **VAL-02** *(reduced by ADR-021)*: A model refusal and a `StructuredOutputError` are **logged**,
       never swallowed into an empty result.
       *Acceptance:* the node catches `ModelRefusalError` / `StructuredOutputError` from the gateway

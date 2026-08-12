@@ -10,7 +10,7 @@ run. `spikes/lambda_fit/` measured whether the shape *packages*; this runs a cas
 ## What it demonstrates
 
 1. **One invocation per run, with in-process fan-out** — ADR-023's chosen shape, executing. Three
-   specialists fan out inside a single Lambda invocation, bounded by `IREPORTS_DEMO_MAX_PARALLEL`.
+   specialists fan out inside a single Lambda invocation, bounded by `IREPORTS_MAX_PARALLEL`.
    No Step Function, no Lambda per node, no queue between specialists.
 2. **Both orchestration paths run behind one port (ADR-024)** — custom Python and LangGraph, the
    same case, the same shared specialist, the same *shape* of answer. The framework decision is
@@ -44,8 +44,8 @@ wheel will not load in a Lambda container; a host build would package something 
 directory.
 
 **This costs money.** A full run is roughly 22k–34k tokens across six thinking-tier calls. Nothing
-in CI runs it and nothing should. The offline half — `test_demo.py`, 17 tests against
-`StubGateway` — is what CI checks.
+in CI runs it and nothing should. The offline half — `test_demo.py` here plus
+`tests/orchestration/test_orchestration.py`, all against `StubGateway` — is what CI checks.
 
 Envelopes land in `out/<candidate>-<run_id>.json`, gitignored. **Open one.** That file is what the
 architecture produces: a validated envelope of citation-backed proposals, pinned
@@ -164,16 +164,20 @@ forward.
 
 | File | What it is |
 |---|---|
+**The analysis is not here.** Criteria routing, specialists, synthesis and both orchestrators
+graduated to `packages/orchestration/` on 2026-08-12, and their tests went with them to
+`tests/orchestration/`. What is left in this directory is the runnable shell around that package.
+
+| File | What it is |
+|---|---|
 | `cases/AMI-SYN-FIN-001/` | The synthetic case: a manifest and 8 citable evidence spans. Edit it and re-run. |
-| `src/lambda_demo/case_loader.py` | File → typed contracts |
-| `src/lambda_demo/specialist.py` | One criterion, one real model call, citation validation, contract enforcement |
-| `src/lambda_demo/orchestrator.py` | `HandRolledOrchestrator` and `LangGraphOrchestrator` behind one port |
+| `src/lambda_demo/case_loader.py` | Disk → the types `ireports_orchestration` analyses |
 | `src/lambda_demo/package.py` | Findings → validated `ASAPEnvelope` |
 | `src/lambda_demo/handler.py` | The Lambda entry point. One invocation, one run, one envelope |
-| `build.py` | Stages one directory per candidate with its own dependency set |
+| `build.py` | Stages one directory per candidate with its own dependency set. **Staging is by path, so a new workspace package must be added here or the container lacks it** |
 | `template.yaml` | Two functions. No event sources — the trigger chain belongs to the AWS ingestion pipeline (ADR-007) |
 | `run_case.py` | Invokes both, writes `out/`, prints the comparison. The deliverable |
-| `test_demo.py` | The offline half: 17 tests against `StubGateway`, safe in CI |
+| `test_demo.py` | The offline half: the wrapper's own tests against `StubGateway`, safe in CI |
 
 `.stage/`, `.aws-sam/`, `out/`, and `.env-vars.json` are build and run artifacts, and are
 gitignored.
