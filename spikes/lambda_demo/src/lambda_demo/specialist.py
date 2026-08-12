@@ -330,7 +330,14 @@ def _attempt(
             if not isinstance(raw.get(k), str) or not raw.get(k)
         ]
         if missing:
-            rejected.append(f"{criterion.criterion_id}#{index}: missing/blank {missing} — dropped")
+            # Name what *was* there, not only what was absent. A rejection reading "missing all
+            # four required fields" is true and useless — it cannot distinguish a truncated
+            # response from a differently-shaped one, and the difference decides whether the fix
+            # is a bigger max_tokens or a clearer schema.
+            rejected.append(
+                f"{criterion.criterion_id}#{index}: missing/blank {missing} — dropped "
+                f"(keys present: {sorted(raw)})"
+            )
             continue
 
         support = [e for e in raw.get("supporting_evidence", []) or [] if e in known]

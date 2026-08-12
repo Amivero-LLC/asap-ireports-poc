@@ -407,6 +407,7 @@ mixing these in would misrepresent both.
 | Component | Build state | Path | Notes |
 |---|---|---|---|
 | Lambda cold start and packaging, measured under SAM local | `BUILT` | `spikes/lambda_fit/` | ARCH-03, closed by ADR-023. One function per bake-off candidate, built with real Linux wheels; ADR-012 stands |
+| One case through a Lambda, end to end, against a real model | `BUILT` | `spikes/lambda_demo/` | ADR-023's one-invocation-with-in-process-fan-out shape, executing. Both orchestrators, real model calls, a validated `ASAPEnvelope` per run. Local `sam local invoke` only — not a deployment, and no checkpointer |
 | Timeout-resume across a Lambda invocation boundary | `PLANNED` | `tests/end_to_end/test_lambda_timeout_resume.py` | Phase 2, LAMB-01. Depends on ORCH-02 — a Lambda timeout is a crash mid-fan-out, and today that re-runs an in-flight model call |
 
 **Evidence base and the handoff package itself.**

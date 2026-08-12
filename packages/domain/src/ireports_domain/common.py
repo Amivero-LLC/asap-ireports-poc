@@ -225,9 +225,13 @@ def reject_determinative_language(value: str) -> str:
     is enforced here, deterministically, on every narrative field a model can write into.
 
     This is a guard, not a proof. It catches the specific formulations blueprint §10.4 lists as
-    prohibited; it cannot catch every possible phrasing, and it is not a substitute for the
-    human review gate (ADR-011). Its value is that the common failure modes become impossible
-    rather than merely discouraged.
+    prohibited, and it cannot catch every possible phrasing.
+
+    **It used to have a backstop and no longer does.** An earlier version of this docstring called
+    it "not a substitute for the human review gate (ADR-011)" — but ADR-022 removed that gate
+    entirely, because review happens in ASAP rather than inside a run. The boundary now rests on
+    two mechanisms, not three: this guard, and the fact that `ProposedFinding` is the only finding
+    type there is. Weakening either one is not a defence-in-depth trade; it is the boundary.
     """
     for pattern, why in _DETERMINATIVE_PATTERNS:
         match = pattern.search(value)
