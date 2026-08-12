@@ -1,0 +1,172 @@
+{
+  "schema_version": "1.0.0",
+  "scored_on": "2026-08-11",
+  "candidates": [
+    {
+      "schema_version": "1.0.0",
+      "candidate": "hand-rolled",
+      "module": "spike_handrolled",
+      "framework_version": "none — Python 3.12+ standard library over psycopg 3.2",
+      "legs": [
+        {
+          "leg": "1-durable-resume",
+          "outcome": "passed",
+          "detail": "Crashed after `commit_node`; the completed specialist ran exactly once across the crash."
+        },
+        {
+          "leg": "2-human-interrupt",
+          "outcome": "passed",
+          "detail": "Paused in `awaiting_human_review`, took a disposition out of band, delivered on resume."
+        },
+        {
+          "leg": "3-timeout-survival",
+          "outcome": "passed",
+          "detail": "Bounded retry (MAX_MODEL_ATTEMPTS=2) absorbed the one-shot timeout in the same process."
+        },
+        {
+          "leg": "4-bounded-fanout",
+          "outcome": "passed",
+          "detail": "ThreadPoolExecutor bounded by `max_parallel_specialists`; join kept both authorities."
+        }
+      ],
+      "footprint": {
+        "framework_lines_of_code": 195,
+        "serialized_state_bytes": 16346,
+        "distributions": 0,
+        "installed_megabytes": 0,
+        "known_vulnerabilities": 0,
+        "cold_start_seconds": 0.478
+      },
+      "judged": {
+        "budget_and_allowlist_enforcement": "adequate",
+        "budget_and_allowlist_rationale": "Nothing helps and nothing gets in the way. The retry bound is four lines and trivially auditable; token budgets, tool allowlists, cancellation, and no-progress detection are entirely unwritten. Rated on what exists, not on what is possible.",
+        "state_inspectability": "adequate",
+        "state_inspectability_rationale": "Inspection is the best of the three — one JSONB row per run, legible in a single SELECT, keyed by node id. Replay is the worst: there is no history, so 'what did this run look like three nodes ago' has no answer at all.",
+        "test_determinism": "good",
+        "test_determinism_rationale": "Identical output across every run of the suite. The only nondeterminism is the wall-clock interleaving of the two specialist threads, which is a property of the scenario rather than of the candidate — and which the duplicate probe measures rather than suffers.",
+        "developer_comprehension": "good",
+        "developer_comprehension_rationale": "One idea repeated: skip what is committed, run what is not, commit immediately. 195 lines readable end to end in a sitting, with no concept that is not visible in the file. What is confusing is not the code but the absence — a reader has to keep the 'still owes' list in their head to judge it fairly."
+      },
+      "disqualifying_findings": [],
+      "notes": [
+        "195 lines is a floor, not a total. No-progress and duplicate-query detection, cancellation, tool allowlists, budget accounting, OTel spans, and any scheduler or supervisor are all absent and all genuinely needed for Milestone 2.",
+        "Stores full finding JSON at three stages, so each finding is serialized about three times. A known inefficiency rather than an intrinsic cost (blueprint §8.2).",
+        "Re-executes an in-flight sibling's model call in 12 of 24 mid-fan-out crashes. Correct at-least-once behaviour, and a real cost; shared with LangGraph."
+      ]
+    },
+    {
+      "schema_version": "1.0.0",
+      "candidate": "langgraph",
+      "module": "spike_langgraph",
+      "framework_version": "langgraph 1.2.10, langgraph-checkpoint-postgres 3.1.2, langgraph-checkpoint 4.2.0, langchain-core 1.5.3, langsmith 0.10.17",
+      "legs": [
+        {
+          "leg": "1-durable-resume",
+          "outcome": "passed",
+          "detail": "Crashed inside `put_writes` after the row committed; the completed task's pending writes were applied on resume and the node did not re-execute."
+        },
+        {
+          "leg": "2-human-interrupt",
+          "outcome": "passed",
+          "detail": "`interrupt()` suspended the run; `Command(resume=...)` in a later process delivered."
+        },
+        {
+          "leg": "3-timeout-survival",
+          "outcome": "passed",
+          "detail": "Declarative per-node `RetryPolicy(max_attempts=2, retry_on=(ModelTimeoutError,))`."
+        },
+        {
+          "leg": "4-bounded-fanout",
+          "outcome": "passed",
+          "detail": "One super-step ran both specialists; the `operator.add` reducer joined without collapsing the two authorities."
+        }
+      ],
+      "footprint": {
+        "framework_lines_of_code": 266,
+        "serialized_state_bytes": 16115,
+        "distributions": 31,
+        "installed_megabytes": 18,
+        "known_vulnerabilities": 0,
+        "cold_start_seconds": 1.565
+      },
+      "judged": {
+        "budget_and_allowlist_enforcement": "adequate",
+        "budget_and_allowlist_rationale": "Retry is declarative, per-node, and was exercised by leg 3. `recursion_limit` and per-node `timeout` are documented bounds that this spike did **not** exercise, so they are not credited. Token budgets and tool allowlists are not framework concepts in any candidate. Rated the same as the others because what separates them here is ergonomics, not capability.",
+        "state_inspectability": "good",
+        "state_inspectability_rationale": "The only candidate with real replay: `get_state`, `get_state_history`, and a checkpoint per super-step. The cost is that raw inspection is much harder — state is spread across three tables as msgpack in BYTEA, which is why measuring one checkpoint's size took 57 lines here against 3 elsewhere. Good through the API, poor through psql.",
+        "test_determinism": "good",
+        "test_determinism_rationale": "Deterministic output across every run, helped by the harness's frozen clock and derived ids. Persistence runs on a background executor, so *timing* varies — which showed up as an early 2-of-6 result that would not reproduce in 30 further trials. That is a caution about how much any single timing run is worth, not a defect.",
+        "developer_comprehension": "adequate",
+        "developer_comprehension_rationale": "The largest conceptual surface of the three: super-steps, channels, reducers, pending writes, task ids, and three durability modes are all load-bearing when reasoning about a crash. Worse, the two most consequential behaviours are defaults that are invisible in the code — a graph reads identically whether persistence is synchronous and whether deserialization is allowlisted. Against that: the graph definition itself is the clearest of the three, and the documentation is the best."
+      },
+      "disqualifying_findings": [],
+      "notes": [
+        "Persistence cost two lines. This is the dimension ADR-012 predicted would separate the candidates, and it did: 2 against Strands' 166-line SessionRepository and the hand-rolled candidate's 56-line checkpoint store.",
+        "Net orchestration wiring is ~192 lines: 57 of the 266 are the byte-measuring query that exists only for this scorecard, and 17 are the --crash-after hook.",
+        "Two defaults are wrong for this architecture and are now pinned in code with tests: `durability` defaults to `async` (we set `sync`), and checkpoint deserialization defaults to permissive — the library's own source says any Python callable stored in checkpoint data will be imported and executed on load.",
+        "Retains every super-step: 37,033 bytes for the run against a 16,115-byte latest checkpoint. Real feature, real growth, no retention policy attached (Q-09).",
+        "`langsmith` is a mandatory transitive dependency. Pinned closed via `langsmith.configure(enabled=False)` and proven closed with a negative control that shows an unpinned run POSTs ~90 KB of graph state — including finding text — to api.smith.langchain.com and still succeeds, because the failure is swallowed.",
+        "Re-executes an in-flight sibling's model call in 11 of 24 mid-fan-out crashes. Shared with the hand-rolled candidate; the measurement that proved the window is universal."
+      ]
+    },
+    {
+      "schema_version": "1.0.0",
+      "candidate": "strands",
+      "module": "spike_strands",
+      "framework_version": "strands-agents 1.51.0",
+      "legs": [
+        {
+          "leg": "1-durable-resume",
+          "outcome": "passed",
+          "detail": "Crashed inside `update_multi_agent` after the row committed; no completed node re-executed, settling the landscape scan's unconfirmed conversation-restore claim."
+        },
+        {
+          "leg": "2-human-interrupt",
+          "outcome": "passed",
+          "detail": "`Interrupt` suspended the graph; the disposition returned as an `interruptResponse`."
+        },
+        {
+          "leg": "3-timeout-survival",
+          "outcome": "passed",
+          "detail": "Recovered on the harness's second invocation; the candidate declares no retry policy."
+        },
+        {
+          "leg": "4-bounded-fanout",
+          "outcome": "passed",
+          "detail": "Strands scheduled the parallel batch; the join preserved both authorities."
+        }
+      ],
+      "footprint": {
+        "framework_lines_of_code": 373,
+        "serialized_state_bytes": 23739,
+        "distributions": 42,
+        "installed_megabytes": 47,
+        "known_vulnerabilities": 0,
+        "cold_start_seconds": 1.459
+      },
+      "judged": {
+        "budget_and_allowlist_enforcement": "adequate",
+        "budget_and_allowlist_rationale": "No budget or allowlist primitive was exercised, and this candidate declares no retry policy at all — leg 3 passed because the harness re-invoked the process. `Graph` owning run status also means the domain state machine is not enforced here, which is a control the hand-rolled candidate does apply.",
+        "state_inspectability": "adequate",
+        "state_inspectability_rationale": "One JSONB row, so inspection is structurally easy — but the payload is a transcript, and each node's typed output sits inside an assistant message body as escaped JSON. A human reading the row sees findings through two layers of encoding. No replay.",
+        "test_determinism": "good",
+        "test_determinism_rationale": "The most deterministic of the three in practice, and for a reason that is not to its credit: our synchronous node bodies stop its asyncio tasks from interleaving, so there is no concurrency for timing to vary. With genuinely async model calls this would look like the other two.",
+        "developer_comprehension": "adequate",
+        "developer_comprehension_rationale": "The graph model itself is the simplest to read. What costs a reader time is the persistence: `SessionRepository` requires session, agent, and message CRUD that a graph of deterministic nodes never calls, so most of the largest file is dead weight, and the AgentResult-shaped state container is not obvious until the encode/decode tax is hit."
+      },
+      "disqualifying_findings": [],
+      "notes": [
+        "The PostgreSQL SessionRepository is ours to build and is the largest file in the candidate — 166 of 373 lines, most of it never called.",
+        "State is conversation-shaped: a node's durable result must be an `AgentResult`, which persists only `message` and `stop_reason`, so typed contracts are flattened into a message body and re-validated on the way out. This is why its checkpoint is 47% larger than LangGraph's for identical content.",
+        "botocore dominates the footprint — the 1b scan measured it at 20.1 MB — pulled in whether or not a run touches AWS.",
+        "Scores 0 of 24 on the duplicate-call probe, which is an artifact of our synchronous node bodies and must not be read as a durability property. Confirmed by LangGraph, which does interleave and does show the window."
+      ]
+    }
+  ],
+  "recommendation": "langgraph",
+  "recommendation_rationale": "All three pass all four legs, so this is not a correctness decision. It is a decision about which costs the program should carry for the life of the system.\n\nLangGraph is recommended on four grounds. First, the thing this milestone existed to de-risk — durable checkpointing over PostgreSQL — cost two lines, against 56 for the hand-rolled store and 166 for the SessionRepository Strands does not ship; and its durability is per-task inside a super-step, finer-grained than either alternative. Second, once the 57 lines of scorecard-only instrumentation and the 17-line crash hook are set aside, its orchestration wiring is ~192 lines — below the hand-rolled floor of 195 — while additionally providing scheduling, a native interrupt, and declarative retry. Third, it is the only candidate with a written semver commitment (1.0 ACTIVE until 2.0, majors at least 6-12 months apart, a year of maintenance after), which is the single most valuable property for a program that must pin and defend versions through an ATO. Fourth, its costs are real, bounded, and now controlled rather than argued about: both wrong defaults are pinned in code with tests, and the mandatory LangSmith client is pinned closed and proven closed with a negative control.\n\nTwo qualifications the program should carry forward. The first has since been settled: cold start and packaging under SAM local were the one measurement most likely to reopen this, and ADR-023 took it — LangGraph imports in roughly 1.6-2.3s against ~0.5s for the framework-free control, about 3x, at 19 MB zipped against a 50 MB limit. On a workload where one specialist model call runs tens of seconds, that does not reopen the choice. The figures are load-sensitive and are a comparison rather than a production number; see spikes/lambda_fit/. And the hand-rolled candidate is a genuine runner-up rather than a strawman: if the program refuses the dependency surface, 195 lines that pass the same four legs is a defensible answer, with a known and growing maintenance ledger attached.",
+  "why_not_the_others": {
+    "hand-rolled": "Not rejected on the measured evidence, which is excellent: all four legs, 195 lines, zero added distributions, zero advisory surface, and the most legible state of the three. Rejected on the ledger behind the 195. No-progress detection, duplicate-query detection, cancellation, tool allowlists, budget accounting, OTel spans, replay, and a scheduler are all absent and all needed, and every one of them is something this program would own and maintain forever rather than inherit. The 195 is a floor that grows; LangGraph's ~192 of wiring is much closer to a total for the same scope. Retained as the fallback if the dependency surface is refused, and as the standing check that a framework is earning its place.",
+    "strands": "Dominated by LangGraph on every measured dimension: 373 lines against 266 (166 of them a SessionRepository whose interface is mostly unused), a 23,739-byte checkpoint against 16,115 for identical content, and 42 distributions / 47.3 MB against 31 / 18.0 MB. Its distinguishing asset is real — AWS alignment, documented Lambda packaging, a published layer ARN, which matter to a GovCloud target — but it does not offset that spread, and AWS publishes prescriptive guidance for LangGraph on Lambda as well. The structural objection is that its state container is a transcript, so a workflow carrying typed contract records pays a serialize/parse tax at every node boundary; that is a poor fit for an architecture whose central discipline is typed, citable, validated records. Retained, and worth revisiting if the SAM cold-start measurement favours it or if the program mandates AWS-native agent tooling."
+  }
+}

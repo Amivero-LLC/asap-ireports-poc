@@ -1,0 +1,522 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/run.schema.json",
+  "x-contract-version": "2.0.0",
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "description": "Who initiated or acted on a run.",
+      "properties": {
+        "actor_id": {
+          "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "actor_id",
+        "roles"
+      ],
+      "title": "Actor",
+      "type": "object"
+    },
+    "AuthorityRoute": {
+      "additionalProperties": false,
+      "description": "One routing determination: this authority applies to this case, or it does not, and why.\n\nADR-003: routing is implemented, not stubbed, from day one. Building it after the fact is a\nrefactor of every analysis path.\n\nA route with `applies=False` is retained rather than dropped. A reviewer needs to see that\nnational-security eligibility was considered and declined, and on what basis \u2014 an absent\nroute is indistinguishable from an oversight.",
+      "properties": {
+        "decision_domain": {
+          "$ref": "#/$defs/DecisionDomain"
+        },
+        "applies": {
+          "title": "Applies",
+          "type": "boolean"
+        },
+        "basis": {
+          "$ref": "#/$defs/RoutingBasis"
+        },
+        "policy_pack_ids": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+            "type": "string"
+          },
+          "title": "Policy Pack Ids",
+          "type": "array"
+        },
+        "rationale": {
+          "description": "Deterministic explanation of the routing rule that fired. Not model prose.",
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "blocking_gap": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set when routing could not be determined from explicit metadata. Blueprint \u00a710.2: missing or inconsistent routing fields produce a blocking information gap.",
+          "title": "Blocking Gap"
+        }
+      },
+      "required": [
+        "decision_domain",
+        "applies",
+        "basis",
+        "rationale"
+      ],
+      "title": "AuthorityRoute",
+      "type": "object"
+    },
+    "AuthorityRoutingResult": {
+      "additionalProperties": false,
+      "description": "The complete routing decision for a run \u2014 every domain considered, none omitted.",
+      "properties": {
+        "schema_version": {
+          "const": "2.0.0",
+          "default": "2.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/AuthorityRoute"
+          },
+          "minItems": 1,
+          "title": "Routes",
+          "type": "array"
+        },
+        "routed_at": {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "title": "Routed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "routes",
+        "routed_at"
+      ],
+      "title": "AuthorityRoutingResult",
+      "type": "object"
+    },
+    "BudgetConsumption": {
+      "additionalProperties": false,
+      "description": "What a run actually used, recorded for evaluation and cost work.",
+      "properties": {
+        "model_calls": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Model Calls",
+          "type": "integer"
+        },
+        "tool_calls": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Tool Calls",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "wall_clock_seconds": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Wall Clock Seconds",
+          "type": "number"
+        }
+      },
+      "title": "BudgetConsumption",
+      "type": "object"
+    },
+    "Budgets": {
+      "additionalProperties": false,
+      "description": "Loop limits and termination controls (blueprint \u00a78.5).\n\nThese are enforced by the deterministic shell, not requested of the model. A node that hits a\nceiling produces `incomplete_due_to_budget`; it does not quietly return less work.",
+      "properties": {
+        "max_model_calls_per_node": {
+          "default": 5,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Max Model Calls Per Node",
+          "type": "integer"
+        },
+        "max_tool_calls_per_node": {
+          "default": 12,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Max Tool Calls Per Node",
+          "type": "integer"
+        },
+        "max_evidence_per_node": {
+          "default": 40,
+          "minimum": 1,
+          "title": "Max Evidence Per Node",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "minimum": 1,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_wall_clock_seconds": {
+          "minimum": 1,
+          "title": "Max Wall Clock Seconds",
+          "type": "integer"
+        },
+        "max_parallel_specialists": {
+          "default": 4,
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Max Parallel Specialists",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_wall_clock_seconds"
+      ],
+      "title": "Budgets",
+      "type": "object"
+    },
+    "DecisionDomain": {
+      "description": "The distinct legal authorities this system analyses against.\n\nADR-003 and blueprint \u00a72.1: suitability, fitness, PIV credentialing, and national-security\neligibility are distinct authorities with distinct criteria. Collapsing them produces\nanalysis that is wrong in a way that is hard to detect, so every finding names exactly one.",
+      "enum": [
+        "suitability",
+        "fitness",
+        "national_security_eligibility",
+        "piv_credentialing"
+      ],
+      "title": "DecisionDomain",
+      "type": "string"
+    },
+    "ModelAlias": {
+      "description": "The only model references application code and contracts may carry.\n\nADR-008: concrete Bedrock model IDs, inference-profile IDs, and regions live in LiteLLM\nconfig. A partition change must be a config change, so a model ID must never reach a\ncontract. Blueprint \u00a710.3's example run manifest names a concrete model\n(`case-analysis-sonnet`); that is a divergence this enum deliberately closes.",
+      "enum": [
+        "ireports-orchestrator",
+        "ireports-thinking",
+        "ireports-fast"
+      ],
+      "title": "ModelAlias",
+      "type": "string"
+    },
+    "PolicyPackRef": {
+      "additionalProperties": false,
+      "description": "A pinned reference to an approved policy pack, as used by one run.\n\nThe `sha256` is what makes a run reproducible without replay (ADR-009): the manifest records\nexactly which policy content produced the findings, so a later change to a pack cannot\nsilently rewrite the basis of a past analysis.",
+      "properties": {
+        "policy_pack_id": {
+          "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+          "title": "Policy Pack Id",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/PolicyPackStatus"
+        },
+        "effective_from": {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "title": "Effective From",
+          "type": "string"
+        },
+        "effective_to": {
+          "anyOf": [
+            {
+              "description": "Timezone-aware UTC timestamp",
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Null means currently in force with no scheduled end.",
+          "title": "Effective To"
+        },
+        "decision_domains": {
+          "items": {
+            "$ref": "#/$defs/DecisionDomain"
+          },
+          "minItems": 1,
+          "title": "Decision Domains",
+          "type": "array"
+        }
+      },
+      "required": [
+        "policy_pack_id",
+        "version",
+        "content_sha256",
+        "status",
+        "effective_from",
+        "decision_domains"
+      ],
+      "title": "PolicyPackRef",
+      "type": "object"
+    },
+    "PolicyPackStatus": {
+      "description": "Only APPROVED may be used in a run.\n\nBlueprint \u00a72.7 and Q-07: the design fails closed when a pack is expired or unapproved. That\nis only meaningful if an approving office exists, which is Q-07 and remains open.",
+      "enum": [
+        "draft",
+        "approved",
+        "superseded",
+        "expired"
+      ],
+      "title": "PolicyPackStatus",
+      "type": "string"
+    },
+    "RoutingBasis": {
+      "description": "Why an authority was or was not routed.\n\nBlueprint \u00a710.2: the system may not infer routing from document content. `INFERRED` is\nabsent from this enum on purpose \u2014 there is no legitimate value for it.",
+      "enum": [
+        "explicit_case_metadata",
+        "policy_pack_applicability",
+        "requested_and_validated",
+        "declined_not_applicable",
+        "blocked_missing_metadata"
+      ],
+      "title": "RoutingBasis",
+      "type": "string"
+    },
+    "RunError": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "minLength": 1,
+          "title": "Node",
+          "type": "string"
+        },
+        "error_type": {
+          "minLength": 1,
+          "title": "Error Type",
+          "type": "string"
+        },
+        "message": {
+          "description": "Must not contain case text. `CLAUDE.md`: raw case text never reaches logs or traces, and error messages propagate to both.",
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "occurred_at": {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "retriable": {
+          "title": "Retriable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node",
+        "error_type",
+        "message",
+        "occurred_at",
+        "retriable"
+      ],
+      "title": "RunError",
+      "type": "object"
+    },
+    "RunStatus": {
+      "description": "The run state machine.\n\nThe ordering below is the legal progression. There is no state in which a run waits for a\nperson: `VALIDATING` proceeds straight to `PACKAGING` (ADR-022). `DELIVERED` means iReports\nemitted an envelope of *proposals* \u2014 it does not mean anything has been reviewed, approved, or\nacted on. Review is ASAP's, and happens after this state machine has finished.\n\n`INCOMPLETE_DUE_TO_BUDGET` still reaches `PACKAGING` rather than `FAILED`, for the same reason\nit always did: a truncated analysis must reach a reviewer rather than quietly disappearing.",
+      "enum": [
+        "initializing",
+        "routing",
+        "retrieving",
+        "analyzing",
+        "synthesizing",
+        "validating",
+        "packaging",
+        "delivering",
+        "delivered",
+        "failed",
+        "cancelled",
+        "incomplete_due_to_budget"
+      ],
+      "title": "RunStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Everything needed to reconstruct why a run produced what it produced.\n\nADR-009 declines an offline replay profile, so reproducibility rests entirely on this record:\nmodel aliases, prompt registry version, policy pack hashes, configuration hash, and\napplication version. If a field needed to explain a past result is missing here, it is not\nrecoverable anywhere else.",
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "ingestion_id": {
+      "pattern": "^ing_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Ingestion Id",
+      "type": "string"
+    },
+    "started_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completed At"
+    },
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "profile": {
+      "description": "e.g. 'local_bedrock'. See ADR-009 \u2014 no offline profile.",
+      "minLength": 1,
+      "title": "Profile",
+      "type": "string"
+    },
+    "policy_packs": {
+      "items": {
+        "$ref": "#/$defs/PolicyPackRef"
+      },
+      "minItems": 1,
+      "title": "Policy Packs",
+      "type": "array"
+    },
+    "authority_routing": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AuthorityRoutingResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "model_aliases": {
+      "description": "Aliases only, never model IDs (ADR-008). Diverges from blueprint \u00a710.3 deliberately.",
+      "items": {
+        "$ref": "#/$defs/ModelAlias"
+      },
+      "minItems": 1,
+      "title": "Model Aliases",
+      "type": "array"
+    },
+    "prompt_registry_version": {
+      "minLength": 1,
+      "title": "Prompt Registry Version",
+      "type": "string"
+    },
+    "application_version": {
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "title": "Application Version",
+      "type": "string"
+    },
+    "configuration_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Configuration Sha256",
+      "type": "string"
+    },
+    "budgets": {
+      "$ref": "#/$defs/Budgets"
+    },
+    "consumption": {
+      "$ref": "#/$defs/BudgetConsumption"
+    },
+    "status": {
+      "$ref": "#/$defs/RunStatus"
+    },
+    "evidence_snapshot_ids": {
+      "items": {
+        "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+        "type": "string"
+      },
+      "title": "Evidence Snapshot Ids",
+      "type": "array"
+    },
+    "proposed_finding_ids": {
+      "items": {
+        "pattern": "^fnd_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+        "type": "string"
+      },
+      "title": "Proposed Finding Ids",
+      "type": "array"
+    },
+    "errors": {
+      "items": {
+        "$ref": "#/$defs/RunError"
+      },
+      "title": "Errors",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "case_id",
+    "ingestion_id",
+    "started_at",
+    "actor",
+    "profile",
+    "policy_packs",
+    "model_aliases",
+    "prompt_registry_version",
+    "application_version",
+    "configuration_sha256",
+    "budgets",
+    "status"
+  ],
+  "title": "RunManifest",
+  "type": "object"
+}

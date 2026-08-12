@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/outbox-message.schema.json",
+  "x-contract-version": "2.0.0",
+  "$defs": {
+    "OutboxStatus": {
+      "enum": [
+        "pending",
+        "leased",
+        "delivered",
+        "retrying",
+        "dead_letter"
+      ],
+      "title": "OutboxStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A delivery intent, written in the same transaction that records the approval.\n\nBlueprint \u00a710.7. The envelope is never sent from a model node and never before the human\ngate \u2014 the outbox is the only path, and it is written by the packager after review.",
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "message_id": {
+      "pattern": "^msg_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Message Id",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "payload_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Payload Sha256",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/OutboxStatus",
+      "default": "pending"
+    },
+    "attempts": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Attempts",
+      "type": "integer"
+    },
+    "leased_until": {
+      "anyOf": [
+        {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Leased Until"
+    },
+    "next_attempt_at": {
+      "anyOf": [
+        {
+          "description": "Timezone-aware UTC timestamp",
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Next Attempt At"
+    },
+    "last_error": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Last Error"
+    },
+    "created_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "message_id",
+    "run_id",
+    "case_id",
+    "idempotency_key",
+    "payload_sha256",
+    "created_at"
+  ],
+  "title": "OutboxMessage",
+  "type": "object"
+}

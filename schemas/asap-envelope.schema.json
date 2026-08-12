@@ -1,0 +1,490 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/asap-envelope.schema.json",
+  "x-contract-version": "2.0.0",
+  "$defs": {
+    "Confidence": {
+      "enum": [
+        "low",
+        "moderate",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "DecisionDomain": {
+      "description": "The distinct legal authorities this system analyses against.\n\nADR-003 and blueprint \u00a72.1: suitability, fitness, PIV credentialing, and national-security\neligibility are distinct authorities with distinct criteria. Collapsing them produces\nanalysis that is wrong in a way that is hard to detect, so every finding names exactly one.",
+      "enum": [
+        "suitability",
+        "fitness",
+        "national_security_eligibility",
+        "piv_credentialing"
+      ],
+      "title": "DecisionDomain",
+      "type": "string"
+    },
+    "DeliveredFinding": {
+      "additionalProperties": false,
+      "description": "One *proposed* finding, as ASAP receives it for review.\n\nNamed for the act of delivery, not for any approval: ADR-022 places human review in ASAP,\nafter iReports has finished. Every finding in an envelope is therefore un-reviewed by\nconstruction, and the officer who reviews it does so in ASAP's tooling, recording the outcome\nin ASAP's own records.\n\nAn earlier version of this contract carried `human_disposition` and `reviewer_modified` under\nADR-011, when review was modelled as an in-run pause. Both are removed \u2014 iReports has no\ndisposition to report, and inventing a field for one would ask ASAP to populate a shape we do\nnot own. `machine_proposal_finding_id` stays: it traces the delivered record back to the\nimmutable proposal, which is still how a reader gets from an envelope to the analysis.",
+      "properties": {
+        "finding_id": {
+          "pattern": "^fnd_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "machine_proposal_finding_id": {
+          "pattern": "^fnd_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Machine Proposal Finding Id",
+          "type": "string"
+        },
+        "decision_domain": {
+          "$ref": "#/$defs/DecisionDomain"
+        },
+        "policy_pack_id": {
+          "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+          "title": "Policy Pack Id",
+          "type": "string"
+        },
+        "policy_id": {
+          "minLength": 1,
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "criterion_id": {
+          "minLength": 1,
+          "title": "Criterion Id",
+          "type": "string"
+        },
+        "policy_citations": {
+          "items": {
+            "pattern": "^pol_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Policy Citations",
+          "type": "array"
+        },
+        "classification": {
+          "$ref": "#/$defs/FindingClassification"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "observation": {
+          "minLength": 1,
+          "title": "Observation",
+          "type": "string"
+        },
+        "policy_relevance": {
+          "minLength": 1,
+          "title": "Policy Relevance",
+          "type": "string"
+        },
+        "recommended_officer_action": {
+          "minLength": 1,
+          "title": "Recommended Officer Action",
+          "type": "string"
+        },
+        "supporting_evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceExcerpt"
+          },
+          "title": "Supporting Evidence",
+          "type": "array"
+        },
+        "mitigating_evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceExcerpt"
+          },
+          "title": "Mitigating Evidence",
+          "type": "array"
+        },
+        "contradicting_evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceExcerpt"
+          },
+          "title": "Contradicting Evidence",
+          "type": "array"
+        },
+        "aggravating_factors": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Aggravating Factors",
+          "type": "array"
+        },
+        "mitigating_factors": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Mitigating Factors",
+          "type": "array"
+        },
+        "information_gaps": {
+          "items": {
+            "$ref": "#/$defs/InformationGap"
+          },
+          "title": "Information Gaps",
+          "type": "array"
+        },
+        "evidence_confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "analysis_confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "urgency": {
+          "$ref": "#/$defs/ReviewUrgency"
+        }
+      },
+      "required": [
+        "finding_id",
+        "machine_proposal_finding_id",
+        "decision_domain",
+        "policy_pack_id",
+        "policy_id",
+        "criterion_id",
+        "policy_citations",
+        "classification",
+        "title",
+        "observation",
+        "policy_relevance",
+        "recommended_officer_action",
+        "evidence_confidence",
+        "analysis_confidence",
+        "urgency"
+      ],
+      "title": "DeliveredFinding",
+      "type": "object"
+    },
+    "EnvelopeAnalysis": {
+      "additionalProperties": false,
+      "description": "The analysis section.\n\nNote the absent field. Blueprint \u00a710.6's example has a free-text `summary`; a run-level\nnarrative is the most likely place for an aggregate characterization of a person to reappear,\nwhich ADR-014 forbids. Under ADR-011 it survived here as a reviewer-authored, language-guarded\noptional field. With review moved to ASAP (ADR-022) there is no reviewer at this point in the\npipeline to author one, so the field is gone entirely \u2014 which is the stricter outcome.\n\n`machine_generated` stays pinned to `True` and is now the single most important field on the\nenvelope. It says exactly what an envelope is: machine output, proposed, not yet reviewed by\nanyone. The companion `human_reviewed: Literal[True]` was removed, because under ADR-022 it\nwould have been false in every envelope this system emits.",
+      "properties": {
+        "run_id": {
+          "pattern": "^run_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "policy_pack_ids": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Policy Pack Ids",
+          "type": "array"
+        },
+        "model_aliases": {
+          "items": {
+            "$ref": "#/$defs/ModelAlias"
+          },
+          "minItems": 1,
+          "title": "Model Aliases",
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/DeliveredFinding"
+          },
+          "minItems": 1,
+          "title": "Findings",
+          "type": "array"
+        },
+        "machine_generated": {
+          "const": true,
+          "default": true,
+          "description": "Structurally pinned. Everything in this envelope is a machine proposal awaiting review in ASAP; there is no shape of this object that claims otherwise (ADR-022).",
+          "title": "Machine Generated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "run_id",
+        "policy_pack_ids",
+        "model_aliases",
+        "findings"
+      ],
+      "title": "EnvelopeAnalysis",
+      "type": "object"
+    },
+    "EnvelopeCase": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "program_id": {
+          "minLength": 1,
+          "title": "Program Id",
+          "type": "string"
+        },
+        "subject_id": {
+          "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "ingestion_id": {
+          "pattern": "^ing_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Ingestion Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "case_id",
+        "program_id",
+        "subject_id",
+        "ingestion_id"
+      ],
+      "title": "EnvelopeCase",
+      "type": "object"
+    },
+    "EnvelopeIntegrity": {
+      "additionalProperties": false,
+      "properties": {
+        "payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "signature": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Mechanism to be agreed with ASAP. Q-04.",
+          "title": "Signature"
+        }
+      },
+      "required": [
+        "payload_sha256"
+      ],
+      "title": "EnvelopeIntegrity",
+      "type": "object"
+    },
+    "EvidenceExcerpt": {
+      "additionalProperties": false,
+      "description": "A bounded excerpt plus the reference needed to retrieve the full span.\n\nBoth, not either. The excerpt makes the finding reviewable on arrival; the reference keeps\nour store authoritative and lets ASAP re-fetch under its own authorization.",
+      "properties": {
+        "evidence_id": {
+          "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "excerpt": {
+          "description": "Verbatim, truncated to MAX_EXCERPT_CHARS. Never a model paraphrase.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "description": "True when the source span exceeded MAX_EXCERPT_CHARS.",
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "text_sha256": {
+          "description": "Hash of the *full* span, not the excerpt.",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Text Sha256",
+          "type": "string"
+        },
+        "document_reference": {
+          "description": "Stable, authorization-checked reference.",
+          "minLength": 1,
+          "title": "Document Reference",
+          "type": "string"
+        },
+        "page_number": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Number"
+        },
+        "source_reliability": {
+          "$ref": "#/$defs/SourceReliability",
+          "default": "undetermined"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "excerpt",
+        "text_sha256",
+        "document_reference"
+      ],
+      "title": "EvidenceExcerpt",
+      "type": "object"
+    },
+    "FindingClassification": {
+      "description": "What kind of thing this finding is.\n\nEvery member is a statement about the *record*, not about the person. There is deliberately\nno member meaning \"adverse\", \"disqualifying\", or \"cleared\" \u2014 those are determinations.",
+      "enum": [
+        "potential_issue",
+        "mitigating_information",
+        "contradiction",
+        "information_gap",
+        "no_issue_identified"
+      ],
+      "title": "FindingClassification",
+      "type": "string"
+    },
+    "InformationGap": {
+      "additionalProperties": false,
+      "description": "A question for the reviewer.\n\nBlueprint \u00a78.4: the `propose_information_gap` tool records a question \u2014 it does not authorize\nexternal investigation or contact. Nothing in this contract carries an action to take.",
+      "properties": {
+        "gap_id": {
+          "pattern": "^gap_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+          "title": "Gap Id",
+          "type": "string"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "why_it_matters": {
+          "minLength": 1,
+          "title": "Why It Matters",
+          "type": "string"
+        },
+        "related_evidence_ids": {
+          "items": {
+            "pattern": "^ev_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+            "type": "string"
+          },
+          "title": "Related Evidence Ids",
+          "type": "array"
+        },
+        "blocking": {
+          "default": false,
+          "description": "True when analysis under this criterion cannot be completed without an answer.",
+          "title": "Blocking",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "gap_id",
+        "question",
+        "why_it_matters"
+      ],
+      "title": "InformationGap",
+      "type": "object"
+    },
+    "ModelAlias": {
+      "description": "The only model references application code and contracts may carry.\n\nADR-008: concrete Bedrock model IDs, inference-profile IDs, and regions live in LiteLLM\nconfig. A partition change must be a config change, so a model ID must never reach a\ncontract. Blueprint \u00a710.3's example run manifest names a concrete model\n(`case-analysis-sonnet`); that is a divergence this enum deliberately closes.",
+      "enum": [
+        "ireports-orchestrator",
+        "ireports-thinking",
+        "ireports-fast"
+      ],
+      "title": "ModelAlias",
+      "type": "string"
+    },
+    "ReviewUrgency": {
+      "description": "Sequencing hint for the reviewer's queue.\n\nThis is not a severity score and must not become one. It says how soon a human should look,\nnot how serious the underlying conduct is \u2014 the latter is an adjudicative judgment. It is\nper-finding and is never aggregated across findings or across a person (ADR-014).",
+      "enum": [
+        "routine",
+        "normal_review",
+        "prompt_review"
+      ],
+      "title": "ReviewUrgency",
+      "type": "string"
+    },
+    "SourceReliability": {
+      "description": "Blueprint \u00a77.6.\n\nSource reliability is recorded, never inferred at analysis time from the assertion's\ncontent. A subject's own statement and an investigator's finding carry different weight, and\na contradiction between them is a finding input rather than something to silently resolve.",
+      "enum": [
+        "official_record",
+        "investigator_finding",
+        "third_party_report",
+        "subject_self_report",
+        "undetermined"
+      ],
+      "title": "SourceReliability",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One versioned envelope per completed run (blueprint \u00a710.6).\n\n\"Completed\", not \"approved\": under ADR-022 a run finishes without anyone having reviewed it,\nand the envelope is what gets reviewed rather than the product of a review.",
+  "properties": {
+    "envelope_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Envelope Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "message_id": {
+      "pattern": "^msg_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Message Id",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "description": "Stable across retries and unique per emitted payload. Blueprint's convention is '{case_id}:{run_id}:approved-v{n}', which assumed the pre-ADR-022 review gate; '{case_id}:{run_id}:v{n}' is the equivalent here. Delivery correctness depends on this being derived, never random.",
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "source_system": {
+      "default": "asap-ireports",
+      "minLength": 1,
+      "title": "Source System",
+      "type": "string"
+    },
+    "destination_system": {
+      "default": "asap",
+      "minLength": 1,
+      "title": "Destination System",
+      "type": "string"
+    },
+    "case": {
+      "$ref": "#/$defs/EnvelopeCase"
+    },
+    "analysis": {
+      "$ref": "#/$defs/EnvelopeAnalysis"
+    },
+    "integrity": {
+      "$ref": "#/$defs/EnvelopeIntegrity"
+    }
+  },
+  "required": [
+    "message_id",
+    "idempotency_key",
+    "created_at",
+    "case",
+    "analysis",
+    "integrity"
+  ],
+  "title": "ASAPEnvelope",
+  "type": "object"
+}

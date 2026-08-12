@@ -33,3 +33,16 @@ models/
 .DS_Store
 .idea/
 .vscode/
+
+# spikes/lambda_fit build artifacts — regenerate with build.py + `sam build --use-container`
+spikes/lambda_fit/.stage/
+spikes/lambda_fit/.aws-sam/
+spikes/lambda_fit/event.json
+
+# spikes/lambda_demo — build artifacts, run output, and a file holding a live proxy key.
+# `.env-vars.json` is written by run_case.py on every run and is NOT matched by the `.env.*`
+# rule above (that needs a literal dot), so it is named here. Never commit it.
+spikes/lambda_demo/.stage/
+spikes/lambda_demo/.aws-sam/
+spikes/lambda_demo/.env-vars.json
+spikes/lambda_demo/out/

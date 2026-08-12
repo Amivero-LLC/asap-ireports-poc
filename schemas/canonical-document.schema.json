@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/canonical-document.schema.json",
+  "x-contract-version": "2.0.0",
+  "$defs": {
+    "DocumentBlock": {
+      "additionalProperties": false,
+      "description": "An addressable unit of canonical text.\n\n`block_index` is stable within `(document_id, page_number)` for a given\n`(content_sha256, extraction_method)` pair. That triple is what makes a citation resolvable\nrather than approximate \u2014 see `EvidenceSpan`.",
+      "properties": {
+        "block_index": {
+          "minimum": 0,
+          "title": "Block Index",
+          "type": "integer"
+        },
+        "page_number": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Number"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "char_start": {
+          "description": "Offset into the canonical document text.",
+          "minimum": 0,
+          "title": "Char Start",
+          "type": "integer"
+        },
+        "char_end": {
+          "minimum": 0,
+          "title": "Char End",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "block_index",
+        "text",
+        "char_start",
+        "char_end"
+      ],
+      "title": "DocumentBlock",
+      "type": "object"
+    },
+    "ExtractionMethod": {
+      "enum": [
+        "native_text",
+        "docling",
+        "ocr_tesseract",
+        "ocr_then_docling"
+      ],
+      "title": "ExtractionMethod",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Normalized document text, addressable by block (blueprint \u00a76.2 stage 3).",
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "document_id": {
+      "pattern": "^doc_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Document Id",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "ingestion_id": {
+      "pattern": "^ing_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Ingestion Id",
+      "type": "string"
+    },
+    "content_sha256": {
+      "description": "Hash of the *source* file this was extracted from.",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "extraction_method": {
+      "$ref": "#/$defs/ExtractionMethod"
+    },
+    "extractor_version": {
+      "description": "Pinned so that a re-extraction which moves block boundaries is detectable. Evidence spans are only comparable within one extractor version.",
+      "minLength": 1,
+      "title": "Extractor Version",
+      "type": "string"
+    },
+    "blocks": {
+      "items": {
+        "$ref": "#/$defs/DocumentBlock"
+      },
+      "minItems": 1,
+      "title": "Blocks",
+      "type": "array"
+    },
+    "normalized_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Normalized At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "document_id",
+    "case_id",
+    "ingestion_id",
+    "content_sha256",
+    "extraction_method",
+    "extractor_version",
+    "blocks",
+    "normalized_at"
+  ],
+  "title": "CanonicalDocument",
+  "type": "object"
+}

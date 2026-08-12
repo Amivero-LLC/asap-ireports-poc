@@ -1,0 +1,42 @@
+{
+  "source_path": "/Users/davidlarrimore/Documents/Github/asap-ireports/CLAUDE.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "CLAUDE.md",
+  "summary": "Repository guidance for asap-ireports defining the decision-support boundary, target layout, decided stack, and the non-negotiable rules that constrain all application code.",
+  "scope": [
+    "asap-ireports repository",
+    "decision-support boundary",
+    "findings and human disposition gate",
+    "ASAP delivery envelope",
+    "target repository layout",
+    "Python 3.12 / uv toolchain",
+    "FastAPI API boundary",
+    "Pydantic v2 + JSON Schema contracts",
+    "orchestration framework selection (Milestone 1 bake-off)",
+    "OpenSearch retrieval index",
+    "PostgreSQL system of record",
+    "LiteLLM model gateway and Bedrock access",
+    "LiteLLM model aliases (ireports-orchestrator, ireports-thinking, ireports-fast)",
+    "citation validation / evidence-before-inference",
+    "deterministic shell around probabilistic reasoning",
+    "retrieval port and OpenSearch mapping module",
+    "synthetic case data policy",
+    "logging and OpenTelemetry tracing redaction",
+    "Docling / OCRmyPDF / Tesseract / Chonkie extraction",
+    "embeddings (development only)",
+    "quality tooling (Ruff, mypy/pyright, Bandit, pytest, pip-audit)",
+    "branch and commit conventions"
+  ],
+  "cross_refs": [
+    "docs/DECISIONS.md",
+    "docs/ROADMAP.md",
+    "docs/OPEN-QUESTIONS.md",
+    "blueprint.md",
+    "amivero-dev-resources/docs/reference/coding-standards.md"
+  ],
+  "locked": false,
+  "precedence": 3,
+  "notes": "Manifest declared SPEC; accepted as authoritative. Heuristics alone would have leaned DOC (prose guidance file, no endpoint/schema tables), but content is dominated by binding implementation contracts, so SPEC is correct. Downstream extraction must treat the following as HARD CONSTRAINTS, not guidance: (1) decision-support boundary - the system must never grant, deny, revoke, suspend, or otherwise make a final suitability, fitness, credentialing, or national-security eligibility determination; (2) no universal person-risk score and no aggregate risk-level field on any contract; (3) every finding is proposed until a human reviewer records a disposition, and nothing reaches ASAP without an explicit recorded human disposition enforced as a state transition, not a config flag; (4) both the original machine proposal and the human-approved version are retained; (5) application code never hard-codes a model ID - models are referenced only via the three LiteLLM aliases ireports-orchestrator, ireports-thinking, ireports-fast, with concrete model IDs, inference profiles, and regions confined to LiteLLM config; (6) evidence before inference - every material factual statement carries a resolvable case evidence citation and every policy-relevance claim a resolvable policy citation, with deterministic validators rejecting unsupported citations pre-human-review; (7) deterministic shell around probabilistic reasoning - schema validation, citation validation, authority routing, policy-pack effectivity, and loop/termination limits are ordinary code, and the model never decides control flow or the validity of its own output; (8) PostgreSQL is the system of record for workflow state and OpenSearch is only a retrieval index, never authoritative for findings, dispositions, or run state; (9) retrieval goes through the port with all OpenSearch field names, filters, and mappings in a single mapping module - never a raw client; (10) synthetic data only, ever - no real case data in fixtures, tests, or examples; (11) raw case text never appears in logs, traces, or error messages - traces carry identifiers, versions, and outcomes only. Precedence rule stated by the document itself: docs/DECISIONS.md supersedes blueprint.md, which is input rather than output. Orchestration framework is explicitly UNDECIDED pending Milestone 1 - do not extract a framework choice. Explicitly out of scope: Neo4j, Streamlit or any UI, LocalStack in the default profile, a local LLM server. Filename hash suffix is a deterministic path-derived token; SHA-256 was not computable without shell access."
+}

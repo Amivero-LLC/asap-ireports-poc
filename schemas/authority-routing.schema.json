@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/authority-routing.schema.json",
+  "x-contract-version": "2.0.0",
+  "$defs": {
+    "AuthorityRoute": {
+      "additionalProperties": false,
+      "description": "One routing determination: this authority applies to this case, or it does not, and why.\n\nADR-003: routing is implemented, not stubbed, from day one. Building it after the fact is a\nrefactor of every analysis path.\n\nA route with `applies=False` is retained rather than dropped. A reviewer needs to see that\nnational-security eligibility was considered and declined, and on what basis \u2014 an absent\nroute is indistinguishable from an oversight.",
+      "properties": {
+        "decision_domain": {
+          "$ref": "#/$defs/DecisionDomain"
+        },
+        "applies": {
+          "title": "Applies",
+          "type": "boolean"
+        },
+        "basis": {
+          "$ref": "#/$defs/RoutingBasis"
+        },
+        "policy_pack_ids": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+            "type": "string"
+          },
+          "title": "Policy Pack Ids",
+          "type": "array"
+        },
+        "rationale": {
+          "description": "Deterministic explanation of the routing rule that fired. Not model prose.",
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "blocking_gap": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set when routing could not be determined from explicit metadata. Blueprint \u00a710.2: missing or inconsistent routing fields produce a blocking information gap.",
+          "title": "Blocking Gap"
+        }
+      },
+      "required": [
+        "decision_domain",
+        "applies",
+        "basis",
+        "rationale"
+      ],
+      "title": "AuthorityRoute",
+      "type": "object"
+    },
+    "DecisionDomain": {
+      "description": "The distinct legal authorities this system analyses against.\n\nADR-003 and blueprint \u00a72.1: suitability, fitness, PIV credentialing, and national-security\neligibility are distinct authorities with distinct criteria. Collapsing them produces\nanalysis that is wrong in a way that is hard to detect, so every finding names exactly one.",
+      "enum": [
+        "suitability",
+        "fitness",
+        "national_security_eligibility",
+        "piv_credentialing"
+      ],
+      "title": "DecisionDomain",
+      "type": "string"
+    },
+    "RoutingBasis": {
+      "description": "Why an authority was or was not routed.\n\nBlueprint \u00a710.2: the system may not infer routing from document content. `INFERRED` is\nabsent from this enum on purpose \u2014 there is no legitimate value for it.",
+      "enum": [
+        "explicit_case_metadata",
+        "policy_pack_applicability",
+        "requested_and_validated",
+        "declined_not_applicable",
+        "blocked_missing_metadata"
+      ],
+      "title": "RoutingBasis",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The complete routing decision for a run \u2014 every domain considered, none omitted.",
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "routes": {
+      "items": {
+        "$ref": "#/$defs/AuthorityRoute"
+      },
+      "minItems": 1,
+      "title": "Routes",
+      "type": "array"
+    },
+    "routed_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Routed At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "routes",
+    "routed_at"
+  ],
+  "title": "AuthorityRoutingResult",
+  "type": "object"
+}

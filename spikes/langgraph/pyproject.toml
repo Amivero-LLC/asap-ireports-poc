@@ -1,0 +1,25 @@
+[project]
+name = "spike-langgraph"
+version = "0.1.0"
+description = "Orchestration bake-off candidate: LangGraph (ADR-012)"
+requires-python = ">=3.12"
+dependencies = [
+    "ireports-domain",
+    "ireports-spike-harness",
+    # Pinned to the versions the Milestone 1b landscape scan resolved (§5.1), so the scan's
+    # advisory analysis and this spike's measurements describe the same code.
+    "langgraph>=1.2.10,<1.3",
+    "langgraph-checkpoint-postgres>=3.1.2,<3.2",
+    "psycopg[binary]>=3.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spike_langgraph"]
+
+[tool.uv.sources]
+ireports-domain = { workspace = true }
+ireports-spike-harness = { workspace = true }

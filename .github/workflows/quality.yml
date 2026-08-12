@@ -1,0 +1,132 @@
+name: quality
+
+# Every gate in this repository was run by hand until 2026-08-11, and the figures published in
+# the handoff documents drifted four times in a single day — a schema-currency failure sat
+# committed for several commits, and three documents carried contract or test counts that were
+# simply wrong. WR-07 and WR-14 in `01-REVIEW.md` recorded that "`--check` is the CI currency
+# gate" was a claim about infrastructure that did not exist. This is that infrastructure.
+#
+# The point is not test coverage. It is that a claim in a handoff document should not be able to
+# go stale without something failing.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Never a live model call in CI (pyproject marks the `live` marker as opt-in and never CI).
+  IREPORTS_LIVE_SMOKE: "0"
+
+jobs:
+  gates:
+    name: lint, types, contracts, schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync (locked)
+        # --locked, not --frozen: a lockfile that has drifted from pyproject.toml should fail
+        # here rather than be silently resolved into something nobody has run locally.
+        run: uv sync --locked --all-extras --dev
+
+      - run: uv run ruff check packages tests scripts spikes
+      - run: uv run ruff format --check packages tests scripts spikes
+      - run: uv run mypy --strict packages tests scripts
+
+      - name: Schemas match the models
+        # The gate that was failing live and uncaught. `--check` regenerates in memory and
+        # compares; a docstring edit that changes a description is enough to trip it.
+        run: uv run python scripts/generate_schemas.py --check
+
+      - name: Contract and architecture tests
+        # `tests/` needs no services. The build-state guard here is what keeps
+        # component-architecture.md honest about what exists.
+        run: uv run pytest tests -q
+
+      - name: Security scan
+        # `--severity-level medium` makes this assert the claim the handoff actually makes —
+        # "0 high, 0 medium" — rather than "zero findings of any kind". Without it the step
+        # fails on three documented B105 false positives: bandit reads the `ClearanceRequirement`
+        # enum members (`secret`, `top_secret`, `top_secret_sci`) as hardcoded passwords.
+        # Suppressing those individually would mean editing a domain contract to satisfy a
+        # scanner, which is the wrong direction.
+        #
+        # Verified not vacuous: planting a `subprocess.call(..., shell=True)` and a
+        # `yaml.load()` in `packages/` makes this step exit 1 on both.
+        run: uv run bandit -r packages -q --severity-level medium
+
+  spikes:
+    name: orchestration bake-off
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ireports
+          POSTGRES_PASSWORD: ireports_local_only
+          POSTGRES_DB: ireports_spike
+        ports: ["5436:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ireports -d ireports_spike"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      IREPORTS_SPIKE_DSN: postgresql://ireports:ireports_local_only@localhost:5436/ireports_spike
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked --all-extras --dev
+
+      - name: Bake-off conformance and scorecard
+        # The three candidates each drive four legs against real PostgreSQL, killing and
+        # resuming processes. This is retained evidence for ADR-012, so it runs on every push.
+        run: uv run pytest spikes -q --junitxml=spikes-results.xml
+
+      - name: Fail if the spikes silently skipped
+        # The Postgres-dependent legs are guarded by a skipif on connectivity. Without this
+        # check, a broken service container would turn the bake-off into a green no-op — which
+        # is worse than a red build, because it looks like evidence.
+        run: |
+          python3 - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          suite = ET.parse("spikes-results.xml").getroot()
+          if suite.tag != "testsuite":
+              suite = suite.find("testsuite")
+          tests = int(suite.get("tests", 0))
+          skipped = int(suite.get("skipped", 0))
+          print(f"spikes: {tests} collected, {skipped} skipped")
+          if skipped:
+              names = [
+                  tc.get("name")
+                  for tc in suite.iter("testcase")
+                  if tc.find("skipped") is not None
+              ]
+              print("skipped:", ", ".join(names), file=sys.stderr)
+              sys.exit(
+                  "Bake-off legs were skipped. These are ADR-012's evidence and must actually "
+                  "run; a skipped leg is not a passing leg. Check the postgres service."
+              )
+          PY
+
+  # Deliberately not covered here: `spikes/lambda_fit/` (ARCH-03). It needs the SAM CLI and
+  # builds three ~70 MB packages in Lambda containers, and its output is a timing measurement
+  # that a shared CI runner would report unreliably — the figures already move ~50% with host
+  # load on a single laptop. It stays a deliberate, local measurement; ADR-023 records what it
+  # measured and states the load sensitivity rather than pretending to a precision it lacks.

@@ -26,9 +26,56 @@ inference restrictions, and data-routing rules in GovCloud are unvalidated (blue
 §"Working assumptions", §4.1.9). If the intended model is unavailable in the approved partition,
 the model tier strategy (ADR-008) needs different targets and the evaluation baseline moves.
 
-**To resolve:** confirm against current AWS GovCloud Bedrock documentation and an actual API call
-in the target account and region — not from a general availability page. Record the answer as a
-compatibility matrix entry (blueprint §15.3), not prose.
+**Added 2026-08-10 (ADR-015).** Two endpoint questions now ride on Q-01, not just model ids:
+whether the Anthropic SDK's Bedrock Messages endpoint (`bedrock-mantle.{region}.api.aws`) resolves
+in GovCloud at all — GovCloud endpoints do not generally follow the commercial pattern — and
+whether a LiteLLM proxy is permitted in the approved environment. If the first is absent, the
+fallback is a `bedrock-runtime` adapter (scoped work); if the second is refused, the `bedrock`
+adapter becomes the only path and the alias→model mapping moves into our environment.
+
+**Partial evidence added 2026-08-10 — Q-01 remains OPEN.** The project made its first real model
+calls, against a **commercial-partition** Bedrock deployment via an organisation-shared LiteLLM
+proxy. Recorded as a compatibility matrix entry in `docs/handoff/compatibility-matrix.md`, and
+reproducible with `IREPORTS_LIVE_SMOKE=1 uv run pytest tests/live -v -s`.
+
+What it establishes — **for the commercial partition only**:
+
+- All three ADR-008 tiers reach a model and return usage, a resolved model id, and a stop reason.
+- `output_config.effort` and adaptive thinking are forwarded and genuinely honoured, not dropped.
+  This was ADR-015's central bet and it holds on this path.
+- `output_config.format` is accepted by every group tested and **enforced by only some of them**,
+  with the split not following documented model support (ADR-018).
+- LiteLLM's native `/v1/messages` route works; the `/anthropic` passthrough route 401s against a
+  Bedrock-backed proxy (ADR-017).
+- `temperature` and `thinking.budget_tokens` — both documented as rejected on current models —
+  were **accepted**. This path is more permissive than the first-party API.
+
+**What it does not establish, and why the gate stays shut.** A commercial-partition result is not
+evidence about GovCloud: not model availability, not concrete model or inference-profile IDs, not
+cross-region inference restrictions, not data-routing behaviour. A model that answers here may be
+absent there; an endpoint that resolves here may not exist there. The `bedrock` adapter has still
+never been run in any partition, so `bedrock-mantle.{region}.api.aws` remains unverified. Whether
+LiteLLM is permitted in the approved environment remains unknown.
+
+**Largely answered 2026-08-12 — see [`AWS.md`](AWS.md), which supersedes this entry.** Most of
+Q-01 turned out to be answerable from AWS documentation, and treating it as unknowable was a
+mistake that cost three cut requirements. What is now documented:
+
+- **Claude Sonnet 5 is available on Bedrock in AWS GovCloud (US-West and US-East)** since
+  2026-07-23; Opus 4.8 since 2026-05.
+- **`bedrock-mantle` endpoints exist in GovCloud US-West only** — our `bedrock` adapter uses
+  `AnthropicBedrockMantle`, so **region choice constrains adapter choice.** US-East needs a
+  `bedrock-runtime` adapter, which is real work.
+- **Claude in Bedrock is FedRAMP High and DoD IL4/IL5 approved** in GovCloud (US).
+
+**What remains open is much smaller:** documented availability is not account entitlement (Bedrock
+model access is granted per account), the concrete inference-profile IDs must come from the target
+account, and whether a LiteLLM proxy is *permitted* in the approved environment is an
+organizational question rather than an AWS one.
+
+**To close the rest:** point the live smoke check at the target endpoint in the target account and
+paste the resulting matrix into `docs/handoff/compatibility-matrix.md` as a second run-of-record,
+alongside the commercial one rather than replacing it.
 
 **Related:** Bedrock's feature surface differs from the first-party Claude API in ways that affect
 design — check per feature rather than assuming parity.
@@ -76,6 +123,35 @@ whether ASAP stores evidence excerpts or only references and findings.
 **Blast radius:** low for architecture, high for capacity planning. Checkpointing and resume are
 built regardless, so a volume surprise means adding a batch queue rather than reworking the run
 model. Needed: average and 95th-percentile case sizes, page counts, document counts, daily volumes.
+
+### Q-14 · Is Amazon Bedrock AgentCore an approved deployment target?
+
+**Raised by:** the Milestone 1b orchestration landscape scan, 2026-08-10.
+**Assumption:** no — ADR-004 stands, and we build and exercise the Lambda/SAM adapter.
+**Blast radius:** low for Milestone 1, medium for deployment. AgentCore is a managed agent runtime,
+not a Python orchestration library, so it does not change the M1 bake-off. It changes what the
+Lambda adapter is *for*.
+
+Amazon Bedrock AgentCore reached AWS GovCloud (US-West) on 2026-05-05 — after `blueprint.md` was
+written, which is why neither the blueprint nor ADR-004 considers it. AWS documents specific
+GovCloud gaps: no semantic search in AgentCore Gateway; AWS Agent Registry (Preview), Bedrock
+Guardrails Policy, and Temporal Policy unavailable; and six CloudFormation resource types absent,
+including `Policy`, `PolicyEngine`, and `Evaluator`.
+
+**Read alongside Q-01, not as an answer to it.** This is adjacent evidence about the Bedrock service
+family in the target partition. Q-01 asks about Claude model availability, concrete model and
+inference-profile IDs, and cross-region inference rules, and remains fully open.
+
+**To resolve:** ask the program whether AgentCore Runtime is approved, preferred, or excluded for
+this workload. Whoever resolves Q-01 should also read AgentCore's GovCloud export-control section —
+it states that AgentCore metadata may not contain export-controlled data and enumerates the
+customer-initiated configurations under which data-plane traffic leaves the GovCloud partition. For
+a system carrying CUI and personnel-security information that is a design constraint, not
+boilerplate.
+
+**Source:** `https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-bedrock-agentcore.html`
+and `https://aws.amazon.com/about-aws/whats-new/2026/05/bedrock-agentcore-launch-aws-govcloud-us/`.
+Detail in `docs/handoff/orchestration-landscape.md` §7.
 
 ### Q-06 · Agency supplemental fitness factors and precedent material
 

@@ -1,0 +1,33 @@
+{
+  "measured_on": "SAM local, macOS arm64 Docker, python3.12 arm64, 1024 MB",
+  "caveat": "Indicative comparison only. SAM local does not emulate Lambda's init phase \u2014 its own Init Duration is ~0.05ms for every candidate and is meaningless. import_seconds is timed inside the handler module. A production cold-start figure requires a real Lambda deploy (Q-01).",
+  "candidates": {
+    "hand-rolled": {
+      "import_seconds_median": 0.478,
+      "import_seconds_min": 0.406,
+      "import_seconds_max": 0.547,
+      "billed_ms_median": 537,
+      "unzipped_mb": 30.1,
+      "runs": 5,
+      "import_ratio_vs_handrolled": 1.0
+    },
+    "langgraph": {
+      "import_seconds_median": 1.565,
+      "import_seconds_min": 1.49,
+      "import_seconds_max": 1.615,
+      "billed_ms_median": 1633,
+      "unzipped_mb": 68.9,
+      "runs": 5,
+      "import_ratio_vs_handrolled": 3.27
+    },
+    "strands": {
+      "import_seconds_median": 1.459,
+      "import_seconds_min": 1.252,
+      "import_seconds_max": 1.512,
+      "billed_ms_median": 1509,
+      "unzipped_mb": 79.7,
+      "runs": 5,
+      "import_ratio_vs_handrolled": 3.05
+    }
+  }
+}

@@ -1,97 +1,121 @@
-# Roadmap
+# What to build next
 
-Sequenced so that the riskiest architectural claims are settled first and every milestone leaves
-behind an artifact the ASAP program team can act on (ADR-001).
+A working list, in rough priority order. Not a formal plan — no requirement IDs, no acceptance
+criteria to sign off. If something here turns out to be wrong or unnecessary, change it.
 
----
+**Where we are:** a case runs end to end through a Lambda, against real models, through both
+orchestration paths, and produces a validated envelope. What is missing is everything that makes it
+survive contact with production: retrieval, budgets, and crash recovery.
 
-## Milestone 1 — Architecture sign-off and the orchestration decision
-
-**Goal:** produce an architecture the program can sign off on, with the orchestration framework
-chosen on evidence rather than assertion.
-
-This milestone exists because the agentic orchestrator is the part of this system most likely to
-be underestimated, and the framework choice is the hardest thing to reverse once analysis nodes
-are written against it.
-
-### 1a · Architecture package
-
-- Component architecture with the boundaries that matter marked: what is ours, what the AWS
-  ingestion pipeline owns, what ASAP owns, and where the human review gate sits.
-- Library and framework inventory with versions, and the reason each one is there.
-- Data contracts as Pydantic models with generated JSON Schema: case, document, evidence, finding,
-  run manifest, human disposition, ASAP envelope. Contracts first — they are the interface the
-  orchestration decision has to satisfy.
-- The authority-routing model: how a case maps to 5 CFR 731 suitability/fitness, SEAD-4, or both.
-
-**Exit:** program leadership can sign off on components, libraries, and contracts.
-
-### 1b · Orchestration landscape scan
-
-Survey current agentic-orchestration frameworks — maintenance activity, release cadence, API
-stability, production adoption, licensing, and dependency footprint. The candidate set in ADR-012
-was drawn from a document written earlier; confirm it is still the right set before spending spike
-effort, and add or drop candidates with a recorded reason.
-
-**Exit:** a short written scan; ADR-012's candidate list confirmed or amended.
-
-### 1c · Orchestration bake-off (partial spike)
-
-Each candidate — LangGraph, Strands Agents SDK, PydanticAI/Pydantic Graph, hand-rolled Python —
-implements the same narrow scenario, covering only the legs where frameworks actually differ:
-
-1. Durable checkpoint and **resume in a separate process** after the first exits
-2. **Human-in-the-loop interrupt** — pause mid-run, record a disposition out of band, resume
-3. **Survive a simulated model timeout** without losing or duplicating completed work
-4. Bounded parallel fan-out of two specialist nodes, then join and de-duplicate
-
-Scored on blueprint §9.4: framework-specific lines of code, serialized state size, resume
-correctness, budget and tool-allowlist enforcement, ease of inspecting and replaying state, test
-determinism, dependency and vulnerability footprint, cold-start and image size, and developer
-comprehension after a short onboarding exercise.
-
-**Exit:** a scorecard, a recommendation, and ADR-012 moved from `Open` to `Accepted`. Losing
-spikes are kept — a rejected candidate with a recorded reason is part of the handoff.
+The previous milestone-based roadmap is in git history (`docs/ROADMAP.md` before 2026-08-12) if you
+want the earlier sequencing reasoning.
 
 ---
 
-## Milestone 2 — The orchestrator produces an iReport
+## 1 · Shared orchestration core
 
-**Goal:** the general orchestrator runs end to end and produces an iReport from a single
-sub-agent query — the simplest path that touches every seam, before any optimization.
+**Why first:** ADR-024 keeps two orchestration paths alive, and the way that stays cheap is building
+the logic *once* in framework-free code both paths call. Do this before adding features, or you will
+add each of them twice.
 
-- Orchestrator on the chosen framework, behind our own port so nodes never import it directly
-- One synthetic case, ingested locally and indexed into local OpenSearch
-- Authority routing selects the policy pack
-- A single specialist sub-agent query produces proposed findings against one criterion
-- Deterministic validators: schema, citation resolution, policy effectivity, prohibited content
-- Human review gate — run pauses, disposition recorded, run resumes
-- Delivery to the ASAP mock through the outbox with an idempotency key
+- Budgets: ceilings on model calls, tokens, and wall clock — per node and per run
+- Loop and fan-out limits, replacing the current `IREPORTS_DEMO_MAX_PARALLEL` env var
+- A `BudgetConsumption` record on the run so spend is accountable after the fact
 
-**Exit:** one command takes a synthetic case to a delivered, human-approved iReport. Every seam
-has been exercised once.
+The orchestrators keep only what is genuinely theirs: how work is scheduled. Everything about
+*what* work is allowed belongs in shared code.
+
+**Watch for:** where a feature is easy in one path and awkward in the other. That is real evidence
+for the framework decision, and it goes in `LESSONS.md`.
+
+## 2 · Local AWS parity
+
+**Why:** you asked for the local environment to be architecturally compatible with what GovCloud
+actually offers, and today `infrastructure/docker/` is one PostgreSQL container.
+
+- **OpenSearch in the compose file**, configured to mirror the Serverless vector collection —
+  same index shape, same vector engine settings, so local behaviour predicts AWS behaviour
+- **The mapping module**: every field name, filter, and facet in one file, so swapping to the real
+  AWS collection schema is a single-file edit. Its header should say the schema is unconfirmed
+- **LocalStack as an opt-in profile** for the S3 and trigger path — not in the default `pytest`
+  loop, which stays fast and service-free
+- A short "what runs where" check so a developer can confirm their local stack matches `docs/AWS.md`
+
+**Decide early:** GovCloud US-West or US-East. `bedrock-mantle` is US-West only, and that decides
+whether our `bedrock` adapter works as written or needs a `bedrock-runtime` sibling.
+
+## 3 · Retrieval
+
+**Why:** right now specialists are *handed* evidence from a file. A specialist that retrieves its
+own evidence is the actual architecture — the fixture version demonstrates a fan-out, not this
+system.
+
+- Vector + lexical query against local OpenSearch, with a **mandatory case filter** and bounded K
+- One synthetic case indexed and retrieved against
+- No graph database, ever (ADR-006)
+
+**Known limitation to write down, not solve:** if the embedding model used at query time differs
+from the one that populated the AWS collection, nothing errors — retrieval just gets quietly worse.
+Local retrieval quality is never predictive of AWS retrieval quality.
+
+## 4 · Crash, resume, and idempotency
+
+**Why:** this is the hard one, the highest technical risk, and **the thing that decides the
+framework question**. It is the only seam where custom Python and LangGraph meaningfully differ.
+
+- Checkpoint after each node; resume in a *separate process* without re-running completed work
+- **A crash mid-fan-out must not re-run an in-flight model call.** Today that fails: the bake-off
+  measured 11 of 24 duplicate paid calls for LangGraph and 12 of 24 hand-rolled
+- Set `durability="sync"` and strict checkpoint deserialization on the LangGraph path — both
+  defaults are wrong here and invisible when reading the graph
+- Then prove it across a Lambda invocation boundary. **A Lambda timeout is a crash mid-fan-out**,
+  and Lambda retries automatically, so without idempotency a timeout re-pays for every model call
+
+**When this works, make the framework call** and close ADR-024.
+
+## 5 · A case the system has never seen
+
+**Why:** every run so far uses `AMI-SYN-FIN-001`, built alongside the system, and it contains real
+concerns. So we have shown it finds issues when issues exist. We have *not* shown the opposite —
+whether it manufactures concern on a clean record to look thorough.
+
+- A second synthetic case with a different shape: a clean record, or one where concern is strongly
+  mitigated
+- The interesting result is **fewer findings, or none**. An empty envelope is refused by design, so
+  a genuinely clean case should produce a run that says so rather than an envelope that invents
+  something
+
+This is cheap and it is the single strongest evidence improvement available.
+
+## 6 · One command, end to end
+
+Fold the demo into something a developer runs without knowing about SAM staging:
+
+```
+ireports run --case AMI-SYN-FIN-001
+```
+
+Load, retrieve, fan out, enforce budgets, validate, package, write the envelope. Unattended, no
+point at which it waits for a person.
 
 ---
 
-## Milestone 3 — Optimize
+## Not scheduled, deliberately
 
-Widen and deepen against measurements from M2, in the order the evidence justifies. Candidates:
-the full specialist set across both authority families; retrieval quality work (hybrid fusion,
-query planning, reranking); the contradiction and challenge stages; multi-criterion fan-out;
-model-tier tuning across the three aliases; the evaluation harness and red-team scenarios.
+| | Why not |
+|---|---|
+| Document ingestion | Not ours — the AWS pipeline owns upload, extraction, chunking, indexing (ADR-007) |
+| Authority routing from policy packs | Criteria are hard-coded in `specialist.py` and that is honest for a PoC. Real routing needs approved policy content that does not exist yet |
+| Checkpoint row integrity | The largest known security gap. A tampered checkpoint that still parses would not be detected. Worth doing before anything real runs on this, not before the PoC is proven |
+| Agreement scoring against analyst findings | Needs synthetic cases with analyst-identified ground truth. Worth doing once there is something to measure |
+| Bedrock AgentCore | Reached GovCloud US-West 2026-05-05 and is a live alternative to the Lambda adapter. Never evaluated — worth a look before committing to Lambda |
 
-Sequence this from M2 findings — not from this list.
+## The refusal gap
 
----
+Worth stating plainly because it is the weakest point in the current design: **a refused specialist
+produces an empty findings list that is indistinguishable, in the artifact, from a criterion that
+came back clean.** The distinction exists only in the log.
 
-## Continuous — the handoff package
-
-Built as we go, not written up at the end (ADR-001):
-
-- `docs/DECISIONS.md` — every decision with its reasoning, kept current
-- `docs/OPEN-QUESTIONS.md` — what remains unresolved and what it would cost to be wrong
-- The bake-off scorecard and the retained spikes
-- Contracts and schemas
-- Deployment and packaging notes, including whatever Q-01 turns up about GovCloud
-- Known failure modes and things we tried that did not work — the most useful and most commonly
-  omitted artifact in a handoff
+Refusals are expected in normal operation here — adjudicative files routinely discuss criminal
+conduct, substance use, and foreign contacts. Closing this means surfacing "this criterion was not
+analyzed" as a first-class outcome rather than as silence. It is not hard; it just has not been done.

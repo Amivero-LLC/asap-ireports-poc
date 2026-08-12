@@ -1,0 +1,178 @@
+"""Versioned data contracts for asap-ireports.
+
+Contracts come before the orchestration decision on purpose (ROADMAP 1a): they are the interface
+the orchestration choice has to satisfy. A framework that cannot carry this state cheaply through
+a checkpoint is disqualified by these types rather than by opinion. An earlier version of this
+note also required pausing between a proposal and its disposition; ADR-022 removed that pause
+along with the disposition contracts, because review happens in ASAP rather than inside a run.
+
+`ROOT_CONTRACTS` is the set published as JSON Schema. It is also what the ADR-014 guard test
+walks, so adding a contract here automatically brings it under that check.
+"""
+
+from __future__ import annotations
+
+from .asap import (
+    ENVELOPE_VERSION,
+    MAX_EXCERPT_CHARS,
+    ASAPEnvelope,
+    DeliveredFinding,
+    DeliveryReceipt,
+    EnvelopeAnalysis,
+    EnvelopeCase,
+    EnvelopeIntegrity,
+    EvidenceExcerpt,
+    OutboxMessage,
+    OutboxStatus,
+)
+from .case import (
+    CaseContext,
+    CaseManifest,
+    ClearanceRequirement,
+    DocumentExpectation,
+    PersonStatus,
+    PositionRiskLevel,
+    PositionSensitivity,
+    ServiceType,
+    Subject,
+)
+from .common import (
+    CONTRACT_VERSION,
+    Confidence,
+    ContractModel,
+    DataClassification,
+    DecisionDomain,
+    DecisionSupportText,
+    ModelAlias,
+    ValidationOutcome,
+    reject_determinative_language,
+)
+from .document import (
+    CanonicalDocument,
+    DocumentBlock,
+    DocumentManifest,
+    DocumentType,
+    ExtractionMethod,
+    SourceReliability,
+)
+from .evidence import (
+    ContradictionRecord,
+    EvidenceRecord,
+    EvidenceSpan,
+    RetrievalMode,
+    RetrievalProvenance,
+)
+from .finding import (
+    FindingAuthority,
+    FindingClassification,
+    FindingValidation,
+    GeneratedBy,
+    InformationGap,
+    ProposedFinding,
+    ReviewUrgency,
+)
+from .policy import (
+    AuthorityRoute,
+    AuthorityRoutingResult,
+    PolicyCitation,
+    PolicyPackRef,
+    PolicyPackStatus,
+    RoutingBasis,
+)
+from .run import (
+    LEGAL_TRANSITIONS,
+    Actor,
+    BudgetConsumption,
+    Budgets,
+    RunError,
+    RunManifest,
+    RunStatus,
+    is_legal_transition,
+)
+from .specialist import (
+    SpecialistCriterion,
+    SpecialistResult,
+)
+
+ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
+    "case": CaseManifest,
+    "document": DocumentManifest,
+    "canonical-document": CanonicalDocument,
+    "evidence": EvidenceRecord,
+    "contradiction": ContradictionRecord,
+    "authority-routing": AuthorityRoutingResult,
+    "finding": ProposedFinding,
+    "run": RunManifest,
+    "asap-envelope": ASAPEnvelope,
+    "outbox-message": OutboxMessage,
+    "delivery-receipt": DeliveryReceipt,
+    "specialist-result": SpecialistResult,
+}
+"""Contracts published to `schemas/` as JSON Schema. Keys are the schema file stems."""
+
+__all__ = [
+    "CONTRACT_VERSION",
+    "ENVELOPE_VERSION",
+    "LEGAL_TRANSITIONS",
+    "MAX_EXCERPT_CHARS",
+    "ROOT_CONTRACTS",
+    "ASAPEnvelope",
+    "Actor",
+    "AuthorityRoute",
+    "AuthorityRoutingResult",
+    "BudgetConsumption",
+    "Budgets",
+    "CanonicalDocument",
+    "CaseContext",
+    "CaseManifest",
+    "ClearanceRequirement",
+    "Confidence",
+    "ContractModel",
+    "ContradictionRecord",
+    "DataClassification",
+    "DecisionDomain",
+    "DecisionSupportText",
+    "DeliveredFinding",
+    "DeliveryReceipt",
+    "DocumentBlock",
+    "DocumentExpectation",
+    "DocumentManifest",
+    "DocumentType",
+    "EnvelopeAnalysis",
+    "EnvelopeCase",
+    "EnvelopeIntegrity",
+    "EvidenceExcerpt",
+    "EvidenceRecord",
+    "EvidenceSpan",
+    "ExtractionMethod",
+    "FindingAuthority",
+    "FindingClassification",
+    "FindingValidation",
+    "GeneratedBy",
+    "InformationGap",
+    "ModelAlias",
+    "OutboxMessage",
+    "OutboxStatus",
+    "PersonStatus",
+    "PolicyCitation",
+    "PolicyPackRef",
+    "PolicyPackStatus",
+    "PositionRiskLevel",
+    "PositionSensitivity",
+    "ProposedFinding",
+    "RetrievalMode",
+    "RetrievalProvenance",
+    "ReviewUrgency",
+    "RoutingBasis",
+    "RunError",
+    "RunManifest",
+    "RunStatus",
+    "ServiceType",
+    "SourceReliability",
+    "SpecialistCriterion",
+    "SpecialistResult",
+    "Subject",
+    "ValidationOutcome",
+    "is_legal_transition",
+    "reject_determinative_language",
+]

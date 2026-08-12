@@ -87,6 +87,17 @@ Q-01 in `OPEN-QUESTIONS.md`; must be validated before any GovCloud deployment wo
 is a config change. GovCloud feature gaps must be checked per feature, not assumed from commercial
 AWS behavior — several Bedrock capabilities differ from the first-party Claude API.
 
+**Amended 2026-08-10 by ADR-015** — recorded 2026-08-11, on a gap the doc ingest surfaced. This
+entry says "Bedrock **via LiteLLM** as the only network egress"; ADR-015 adds a `bedrock` adapter
+using the standard AWS credential chain with no proxy, which is a Bedrock call that does not go via
+LiteLLM. ADR-015 declared itself an amendment to ADR-008 and quoted the equivalent `CLAUDE.md`
+sentence, but did not name ADR-004, so the two entries read as though they disagree.
+
+**They do not, and the distinction is worth stating.** What ADR-004 governs is *what egress is
+permitted* — nothing but Bedrock — and that is unchanged. "Via LiteLLM" was mechanism wording, and
+the mechanism is what ADR-015 revisits. The surviving constraint is the stronger one: **the model
+gateway port is the only component permitted to call a model.** Read ADR-004's egress rule that way.
+
 ---
 
 ## ADR-005 — FastAPI is the boundary; no UI in Milestone 1
@@ -213,7 +224,13 @@ Tracked as Q-04.
 
 ## ADR-011 — Hard human-review gate, single reviewer role
 
-**Date:** 2026-08-10 · **Status:** Accepted
+**Date:** 2026-08-10 · **Status:** Superseded by ADR-022 (2026-08-11)
+
+> **Superseded.** This entry modelled human review as an in-run pause. iReports has no human
+> interaction — it runs unattended and emits output, and review happens afterwards in ASAP. The
+> decision below is retained unedited as the record of what was believed and why; **ADR-022 is
+> what holds.** The decision-support boundary itself did not change: no determination, no
+> aggregate score, everything emitted is a proposal.
 
 **Decision.** A run pauses in an explicit review state. One authorized reviewer role may accept,
 modify, or reject each proposed finding. **Nothing reaches ASAP without a recorded disposition** —
@@ -228,9 +245,14 @@ unattended. That friction is the point.
 
 ---
 
-## ADR-012 — Orchestration framework is undecided pending a bake-off
+## ADR-012 — Orchestration framework: LangGraph
 
-**Date:** 2026-08-10 · **Status:** Open — resolved by Milestone 1
+**Date:** 2026-08-10 · **Resolved:** 2026-08-11 · **Status:** Accepted
+
+**Decision: LangGraph**, on the evidence in `docs/handoff/orchestration-scorecard.md` and the
+retained spikes under `spikes/`. The entry below is the original text, which set the method and
+the candidate set; §"Resolution" at the end records the outcome. Nothing above it was edited —
+the reasoning that led to a bake-off is as much a handoff artifact as its result.
 
 **Context.** This is the project's central risk. The blueprint recommends LangGraph (§9.3) but
 supports the recommendation with a criteria comparison rather than a demonstration. Choosing wrong
@@ -238,17 +260,42 @@ is expensive: orchestration touches checkpointing, human-in-the-loop, error hand
 testing, and observability, and the choice is difficult to reverse once analysis nodes are written
 against it.
 
-**Decision.** No framework is adopted until a spike produces a scorecard. Candidates:
+**Decision.** No framework is adopted until a spike produces a scorecard. Candidates, **as amended
+by the Milestone 1b landscape scan on 2026-08-10** (`docs/handoff/orchestration-landscape.md`):
 
 | Candidate | Why it is in the set |
 |---|---|
-| **LangGraph** | The blueprint's recommendation and the incumbent to beat. Explicit state graph, durable checkpoints, interrupt-based human-in-the-loop |
-| **Strands Agents SDK** | AWS-aligned, documented Lambda packaging — relevant to a GovCloud target and an AWS-standardizing program |
-| **PydanticAI / Pydantic Graph** | Typed agents and graphs on Pydantic v2, which we use for contracts regardless. Direct Bedrock support |
-| **Hand-rolled Python** | The honest baseline. If a bounded, checkpointed state machine over PostgreSQL is a few hundred lines, that is the finding — and it carries no framework lifecycle risk |
+| **LangGraph** | The blueprint's recommendation and the incumbent to beat. Explicit state graph, durable checkpoints, interrupt-based human-in-the-loop. Scan confirmed: the only candidate where a PostgreSQL checkpointer is a first-party package, and the only one with a written semver stability commitment |
+| **Strands Agents SDK** | AWS-aligned, documented Lambda packaging — relevant to a GovCloud target and an AWS-standardizing program. Scan confirmed a real first-class interrupt primitive; also found session storage is file/S3 only, so a PostgreSQL `SessionRepository` is ours to build |
+| **Hand-rolled Python** | The honest baseline. If a bounded, checkpointed state machine over PostgreSQL is a few hundred lines, that is the finding — and it carries no framework lifecycle risk. Scan weighted this up: 17 distributions / 28 MB against 42–47 / 46–62 MB for every framework measured |
 
-Also considered, not in the M1 set: Claude Agent SDK, Haystack, AutoGen, CrewAI, LlamaIndex
-Workflows, Semantic Kernel. A landscape scan (M1 task) may add candidates before the spike starts.
+**Dropped by the scan — PydanticAI / Pydantic Graph.** Originally in the set for typed agents and
+graphs on Pydantic v2. Removed because Pydantic Graph 2.x **has no state-persistence API at all**
+(verified in source at tag `v2.27.0`), 1.x had only file and in-memory backends — never PostgreSQL —
+and durability is delegated to Temporal, DBOS, or Prefect via `pydantic_ai/durable_exec/`. It
+therefore cannot attempt spike leg 1 without either becoming the hand-rolled baseline plus a
+dependency, or importing a workflow engine this project has not decided to adopt. A near-daily minor
+release cadence alongside a concurrent 1.x line compounds the API-stability risk. **This does not
+affect Pydantic v2 for contracts**, which stands; PydanticAI also remains available as a typed
+agent-and-tool layer *inside* whichever orchestrator wins.
+
+The scan reduced the set from four candidates to three deliberately. The freed effort goes into the
+spike legs where the answer is genuinely unknown, rather than into a fourth scorecard row that would
+read as a comparison without being one.
+
+Also considered, not in the M1 set: Microsoft Agent Framework (closest human-in-the-loop semantics
+in the field and the lightest core measured, but Azure-oriented against a GovCloud/Bedrock program),
+DBOS and Temporal and Restate (durable-execution substrates, not agent orchestrators; DBOS requires
+a long-running process, conflicting with the ADR-004 Lambda adapter), Claude Agent SDK, Haystack,
+CrewAI, LlamaIndex Workflows, Burr. **AutoGen and Semantic Kernel are removed from consideration
+entirely** — both moved to maintenance mode in April 2026 and merged into Microsoft Agent Framework,
+so blueprint §9.2 evaluates them as live options when they are not.
+
+Amazon Bedrock AgentCore reached AWS GovCloud (US-West) on 2026-05-05, after the blueprint was
+written. It is a managed runtime rather than a Python orchestration library, so it is not a bake-off
+candidate, but it is a live alternative to the Lambda adapter for production deployment and its
+documented GovCloud feature gaps and export-control language bear on ADR-004 and Q-01. The scan
+proposes a new open question (Q-14) covering whether it is an approved deployment target.
 
 **Method — partial spike, not the full §9.4 scenario.** Each candidate implements only the legs
 where frameworks actually differ:
@@ -263,9 +310,106 @@ resume correctness, ability to enforce budgets and tool allowlists, ease of insp
 replaying state, test determinism, dependency and vulnerability footprint, cold-start and image
 size, and developer comprehension after a short onboarding exercise.
 
+**Added to the spike by the 1b scan.** Three measurements the scan could not make by reading, which
+the bake-off must produce:
+
+1. **Resume semantics under a mid-node process kill** — for every candidate, assert on whether
+   completed work re-executes. A third party alleges Strands restores *conversation* rather than
+   resuming *execution*; the source sells a competing product and the claim is unconfirmed, so it is
+   a measurement, not a finding. Assert it for LangGraph too rather than assuming it.
+2. **LangSmith egress-deny test.** `langsmith` is a mandatory transitive dependency of
+   `langchain-core`, so it is in the tree whether or not we use it. Tracing is opt-in and the
+   default is not egress, but a client library capable of exporting run content out of a system that
+   may carry CUI must be *pinned closed and proven closed*, not trusted. Required deliverable if
+   LangGraph is selected.
+3. **Checkpoint-store threat model**, framework-independent. Four deserialization advisories landed
+   on LangGraph's checkpoint path between November 2025 and June 2026 — all fixed in versions at or
+   below what we would use. The finding is not that a framework is insecure; it is that the
+   checkpoint blob is a deserialization trust boundary in any design, including a hand-rolled one,
+   and must be integrity-controlled, access-controlled, and never fed from outside our own
+   PostgreSQL.
+
 **Consequences.** No analysis-node code is written against any framework until this resolves. The
 orchestration package is defined by a port so nodes depend on our interface, not the framework's.
 The losing spikes are retained — a rejected candidate with a recorded reason is a handoff artifact.
+PydanticAI was rejected before the spike rather than during it; the reasoning above is its recorded
+entry, and the evidence sits in `docs/handoff/orchestration-landscape.md` §5.3.
+
+### Resolution — 2026-08-11
+
+**All three candidates pass all four legs.** The decision is therefore not about correctness but
+about which costs the program carries for the life of the system. Full scorecard, with the fair
+reading of every number: `docs/handoff/orchestration-scorecard.md` and
+`orchestration-scorecard.json` (a validated `Scorecard` contract, not a hand-typed table).
+
+| | hand-rolled | **LangGraph** | Strands |
+|---|---|---|---|
+| Candidate-specific lines | 195 | 266 (~192 net of spike-only instrumentation) | 373 |
+| State at the review interrupt | 16,346 B | 16,115 B (37,033 B retained per run) | 23,739 B |
+| Distributions / size beyond baseline | 0 / 0.0 MB | 31 / 18.0 MB | 42 / 47.3 MB |
+| `pip-audit` advisories, pinned set | 0 | 0 | 0 |
+| Cold start under SAM local | not run | not run | not run |
+
+**Why LangGraph.** The capability this ADR named as load-bearing — durable checkpointing over
+PostgreSQL — cost **two lines**, against 56 for the hand-rolled store and 166 for the
+`SessionRepository` Strands does not ship, and its durability is per-task inside a super-step
+rather than per-super-step. Net of instrumentation its wiring is ~192 lines, *below* the
+hand-rolled floor of 195, while additionally providing scheduling, a native interrupt, and
+declarative retry. It is the only candidate with a written semver commitment, which is the
+property a version-pinning, ATO-bound program most needs. And the conditions this ADR attached to
+selecting it are met rather than deferred.
+
+**Why not hand-rolled.** Not rejected on its measurements, which are excellent. Rejected on the
+ledger behind them: no-progress and duplicate-query detection, cancellation, tool allowlists,
+budget accounting, OTel spans, replay, and a scheduler are all absent, all needed, and all work
+this program would own forever rather than inherit. 195 is a floor that grows. Retained as the
+fallback if the dependency surface is refused.
+
+**Why not Strands.** Dominated on every measured dimension — 373 lines to 266, a 47% larger
+checkpoint for identical content, 42 distributions / 47.3 MB to 31 / 18.0 MB. Its real asset is
+AWS alignment and first-class Lambda packaging, which does not offset that spread, and AWS
+publishes prescriptive Lambda guidance for LangGraph as well. The structural objection is that its
+state container is a transcript, so typed contract records pay a serialize/parse tax at every node
+boundary — a poor fit for an architecture whose discipline is typed, citable, validated records.
+
+**Three findings that outlive the choice.**
+
+1. **The duplicate-model-call window is universal.** A crash mid-fan-out re-runs a sibling
+   specialist whose model call was in flight but uncommitted: hand-rolled 12/24, LangGraph 11/24,
+   Strands 0/24 — and Strands' zero is an artifact of our synchronous node bodies, confirmed by
+   LangGraph, which genuinely interleaves and shows the window. **Model-call-level idempotency
+   (blueprint §8.5 duplicate-query detection) is owed by all three and built by none.** It is a
+   Milestone 2 requirement regardless of this decision.
+2. **Two LangGraph defaults are wrong for this architecture and invisible in the code.**
+   `durability` defaults to `async` rather than `sync`; checkpoint deserialization defaults to
+   permissive, where the library's own source states that *"any Python callable stored in
+   checkpoint data will be imported and executed on load"*. Both are now set in code, with tests.
+   A graph reads identically either way, so a reviewer cannot catch these by reading it.
+3. **The scan's highest-value unknown is settled.** The third-party claim that Strands restores
+   conversation rather than resuming execution **does not hold** for `Graph` in 1.51.0. Asserted,
+   not assumed, for LangGraph too.
+
+**Conditions carried forward, not closed.**
+
+- **Cold start and packaging under SAM local were not measured for any candidate.** This is the
+  one outstanding number most likely to reopen the choice, and ADR-004 commits to exercising that
+  adapter. `spikes/test_scorecard.py` fails the moment a cold-start figure is recorded, which
+  forces the recommendation to be re-read against it rather than left standing by default.
+- **LangSmith stays pinned closed and proven closed.** `langsmith` is a mandatory transitive
+  dependency of `langchain-core`. The control is `langsmith.configure(enabled=False)` at the entry
+  point, verified and fail-closed, with a negative control showing that an *unpinned* run `POST`s
+  roughly 90 KB of graph state — including finding text — to `api.smith.langchain.com` **and still
+  succeeds**, because the failure is swallowed. Any future entry point inherits this obligation.
+- **The checkpoint blob remains a deserialization trust boundary**, in this and any design.
+  `docs/handoff/checkpoint-threat-model.md`, including §6's list of controls not built — row-level
+  integrity being the largest.
+- **Nodes depend on our port, never on LangGraph directly.** The original consequence stands
+  unchanged and is Milestone 2's first obligation. This decision selects an implementation behind
+  the port; it does not license `from langgraph import ...` in analysis code.
+
+**The losing spikes are retained** under `spikes/handrolled/` and `spikes/strands/`, passing the
+same suite, and `spikes/harness/negative_control.py` stays permanently so leg 1 keeps being a test
+that can fail.
 
 ---
 
@@ -300,3 +444,575 @@ determination.
 
 **Consequences.** Schema review must reject any field that functions as an aggregate score,
 whatever it is named.
+
+---
+
+## ADR-015 — Two model-gateway adapters behind one port; both use the Anthropic SDK
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Amends ADR-008**
+
+**Context.** ADR-008 and `CLAUDE.md` name LiteLLM as "the only component permitted to call
+Bedrock." That is a good default and a bad single point of failure. LiteLLM's own availability
+and approval in the target partition is not established, its advisory history is substantial
+(the M1b scan found repeated RCE, auth-bypass, and privilege-escalation advisories), and a proxy
+the program has not approved is a deployment blocker we would discover late. Separately, nothing
+in this project had ever actually called a model — the orchestration spike runs against a
+deterministic stub, correctly, since all four bake-off legs are about control flow.
+
+**Decision.** A `ModelGateway` port with two production adapters, selected by configuration:
+
+| Adapter | Transport | Where the alias→model mapping lives |
+|---|---|---|
+| `litellm` (default) | Official Anthropic SDK pointed at LiteLLM's **Anthropic-native passthrough** (`{base}/anthropic`) | LiteLLM's config — outside our process entirely |
+| `bedrock` | `anthropic.AnthropicBedrockMantle`, standard AWS credential chain, no proxy | Our environment (`IREPORTS_BEDROCK_MODEL_*`) |
+
+A third adapter, `stub`, is offline and exists for contract tests only (ADR-009's "mock at the
+gateway boundary"). It must never be selectable in a profile that produces reviewer-visible
+findings.
+
+**Both production adapters use the official `anthropic` SDK, and that is the load-bearing part.**
+The obvious LiteLLM integration is its OpenAI-compatible surface, which would silently cost the
+Anthropic request surface this architecture depends on: adaptive thinking, `output_config.effort`,
+structured outputs, thinking blocks, and the `refusal` stop reason. LiteLLM also exposes an
+Anthropic passthrough, so we keep the gateway *and* the real API. The Bedrock adapter uses the
+SDK's Messages-API Bedrock client rather than a raw `bedrock-runtime` `converse` call for the same
+reason — one request shape, one refusal path, no second place for decision-support behaviour to
+drift.
+
+**Consequences.**
+
+1. **ADR-008 still holds, more strongly.** Application code names a tier; no model id reaches a
+   contract. With the LiteLLM adapter no model id reaches our repository at all.
+2. **A refusal can never become an empty finding.** Current models decline with HTTP 200 and a
+   possibly-empty content list; the gateway raises rather than returning. For this system that is
+   the highest-stakes error path — silent under-analysis that validates cleanly and reaches a
+   reviewer looking like a clean result.
+3. **No sampling parameters, anywhere.** `temperature`, `top_p`, and `top_k` are rejected by
+   current models and are not configurable in this system. Reasoning depth is `effort` per tier.
+4. **`ireports-fast` is low effort with thinking on, not thinking disabled.** Disabling thinking
+   has two documented failure modes — a tool call written into visible text (the call silently
+   never runs) and internal tags leaking into output. Neither is survivable for a system whose
+   validators depend on structured output.
+5. **No default model id exists.** A missing one is a startup error naming the variable. Q-01 is
+   refused, not guessed; `.env.example` carries placeholders that fail loudly.
+6. **New unverified risk.** The Mantle endpoint is `bedrock-mantle.{region}.api.aws`; whether it
+   resolves in GovCloud is **unverified**, and GovCloud endpoints do not generally follow the
+   commercial pattern. `IREPORTS_BEDROCK_BASE_URL` is the escape hatch; if the endpoint is absent
+   there, the fallback is a `bedrock-runtime` adapter — real work to scope, not a flag. Folded
+   into Q-01.
+
+**Amended 2026-08-10 by ADR-017 and ADR-018**, both on evidence from the first live model call.
+The decision stands; two of its implementation details were wrong.
+
+---
+
+## ADR-016 — `.env` reaches a process at entry points, never through a library
+
+**Date:** 2026-08-10 · **Status:** Accepted
+
+**Context.** `.env` was populated with working LiteLLM settings and the gateway still failed with
+`adapter 'litellm' requires IREPORTS_LITELLM_BASE_URL`. Nothing in the repository loaded the file:
+`GatewayConfig.from_env()` reads `os.environ`, `python-dotenv` was not a dependency, and `uv run`
+does not read `.env` unless told to. The variable was set in a file nobody read.
+
+**Decision.** Library code stays a pure consumer of `os.environ`. The file is loaded **explicitly,
+at process entry points**. Two exist today:
+
+| Entry point | Mechanism |
+|---|---|
+| The pytest session | `conftest.py` at the repository root calls `load_dotenv(..., override=False)` |
+| Any other command | `uv run --env-file .env <command>` — first-class in the toolchain already in use |
+
+When `apps/api` lands it becomes the third, loading in its own `main` rather than in a package
+anything else imports. Docker Compose uses `env_file` for containers.
+
+**Rejected: calling `load_dotenv()` inside `GatewayConfig.from_env()`.** It is the shortest fix and
+the worst one. A library that reads a file relative to the current working directory acquires a
+hidden dependency on where the process was started, and in Lambda there is no `.env` at all — so
+local and deployed behaviour would diverge for reasons having nothing to do with configuration.
+The gateway would also start behaving differently depending on which directory a test runner
+happened to be invoked from.
+
+**Rejected as the *only* mechanism: `set -a; source .env`.** Zero dependencies and perfectly
+explicit, but it does not reach an IDE test runner, a pre-commit hook, or a CI step — which
+reproduces exactly the failure above, silently. It remains fine as an ad hoc shell convenience.
+
+**Consequences.**
+
+1. `python-dotenv` is a **dev dependency, permanently.** Deployed environments (Lambda, ECS,
+   Compose) get variables injected by the platform. Nothing in a shipped artifact reads a `.env`
+   file, so the dependency never reaches a deployment.
+2. **`override=False`.** A variable already present in the real environment beats the file. CI, a
+   container, and a deployed function cannot be silently overridden by a `.env` on disk.
+3. **Contract tests are isolated from it.** `tests/contract/conftest.py` strips every `IREPORTS_*`
+   variable. A contract test whose result depends on an untracked local file is not evidence of
+   anything, which is the one thing ADR-001 cannot tolerate.
+4. `mypy` is configured to skip the root `conftest.py` — two files legitimately named `conftest.py`
+   are a duplicate module to mypy, and the alternative fix (adding `__init__.py` across the test
+   tree) changes module resolution for every existing test file.
+
+---
+
+## ADR-017 — LiteLLM's native Messages endpoint, and a per-tier override for shared proxies
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Amends ADR-015**
+
+**Context.** The first live call against a real Bedrock-backed LiteLLM proxy failed two ways that
+offline tests could not have caught. Evidence: `docs/handoff/compatibility-matrix.md` §6.
+
+**Decision 1 — `IREPORTS_LITELLM_BASE_URL` is used verbatim; the gateway appends nothing.**
+
+ADR-015 had the gateway append `/anthropic`, reaching for LiteLLM's *passthrough* route. LiteLLM
+serves two routes that look interchangeable and are not:
+
+| Route | What it is |
+|---|---|
+| `{base}/v1/messages` | LiteLLM's **native Anthropic-format endpoint** — accepts a Messages API request and routes it to any `model_list` entry, Bedrock included. What this architecture needs. |
+| `{base}/anthropic/v1/messages` | **Passthrough to `api.anthropic.com`**, requiring the proxy to hold a first-party Anthropic credential. A Bedrock-backed proxy has none, so it forwards the caller's virtual key upstream and Anthropic returns `401 invalid x-api-key`. |
+
+The failure presents as a bad key and is in fact a wrong route — and a gateway that rewrites the
+operator's URL underneath them makes that near-undiagnosable. Passthrough remains reachable by
+configuring `…/anthropic` deliberately.
+
+**Decision 2 — an optional per-tier alias→model override for the LiteLLM adapter**
+(`IREPORTS_LITELLM_MODEL_ORCHESTRATOR|THINKING|FAST`), defaulting to the identity mapping.
+
+ADR-008 assumed LiteLLM's config is ours to write. The realistic case is a LiteLLM instance owned
+by the organisation, fronting dozens of models for many teams, that does not carry
+`ireports-thinking` and will not without a change-control ticket. Blocking the architecture on
+another team's config file is not a design.
+
+**ADR-008's invariant is untouched.** *Application code* names a tier; a node still writes
+`ModelAlias.THINKING`. Only the place the tier is resolved moves — into our environment, exactly
+where the `bedrock` adapter already keeps it. The identity mapping remains **preferred** and
+remains the default: when the proxy carries our three names, no model identifier exists on our
+side at all, and that is still the better arrangement.
+
+**Consequences.** The ADR-015 claim "with the LiteLLM adapter no model id reaches our repository at
+all" is now conditional on the proxy carrying our aliases. `docs/handoff/model-gateway.md` says so.
+
+---
+
+## ADR-018 — A requested schema is verified, not trusted
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Amends ADR-015**
+
+**Context.** Measured against a live endpoint: `output_config.format` is accepted with **HTTP 200**
+by every model group tested and **silently not enforced** by three of five. Where it is not
+enforced the schema is neither applied nor rejected — the model answers in prose, wrapping the JSON
+in a Markdown fence. The split does not follow Anthropic's documented model support, so it cannot
+be predicted from a model name. Detail and the per-group table: `compatibility-matrix.md` §5.
+
+**Decision.** When a `ModelRequest` carries a `response_schema`, the gateway parses the returned
+text and raises `StructuredOutputError` if it is not JSON. The diagnostic reports shape — length,
+and whether the text is fenced — and never the text itself, because a model asked to structure a
+finding was by construction looking at case evidence and the error travels into logs and traces.
+
+**Rejected: stripping the fence.** It is two lines and it would make the system appear to work. It
+would also hide from the program team that schema enforcement is a per-model-group property rather
+than a platform guarantee, and it would install a lenient parser that eventually accepts something
+that is not a finding at all. `CLAUDE.md`: the model reasons; it does not decide whether its own
+output is valid.
+
+**Consequences.**
+
+1. A tier mapped to a non-enforcing model group **fails loudly** on any structured request. That
+   is the correct signal: choose an enforcing group, or make a recorded decision to repair.
+2. This is the same failure class as ADR-015's refusal path, one layer out. A refusal must not
+   become an empty finding; an unenforced schema must not become a prose finding. Both are silent
+   under-analysis that validates cleanly and reaches a reviewer looking like a clean result.
+3. Milestone 2 should surface a `StructuredOutputError` to the reviewer as an information gap,
+   exactly as a refusal is meant to. The contracts already support it (`InformationGap`,
+   `blocking=True`); wiring both is one job.
+4. **Two request shapes documented as rejected were accepted** on this path (`temperature`,
+   `thinking.budget_tokens`). Nothing in this system may rely on the endpoint rejecting a
+   malformed request — the guard rails are ours.
+
+**Partly superseded by ADR-019.** ADR-018's *mechanism* diagnosis was wrong — enforcement is not a
+per-model-group property. Its *guard* stands and is now load-bearing for a different reason.
+
+---
+
+## ADR-019 — Structured output is a single tool call, and no tier needs Opus
+
+**Date:** 2026-08-10 · **Status:** Accepted · **Supersedes the mechanism in ADR-015 and the
+diagnosis in ADR-018**
+
+**Context.** ADR-018 concluded that `output_config.format` was enforced by some model groups and
+not others, and that the tier mapping therefore had to prefer Opus for anything structured. That
+conclusion came from one trial per model. Repeated eight times per group, it does not survive:
+`output_config.format` is unreliable **everywhere**, including Opus 4.8 (6 of 8). Sonnet 5,
+Sonnet 4.6, and Haiku 4.5 were 0 of 8. Full tables: `docs/handoff/compatibility-matrix.md` §5.
+
+The schema does reach the model — adding it raises `input_tokens` — so this is not the proxy
+dropping a field. The mechanism simply is not binding on this path.
+
+**Decision.** A `ModelRequest` carrying a `response_schema` is sent as **one tool**, and the
+gateway returns that tool call's validated input as `ModelResponse.text`. `output_config.format`
+is removed rather than kept alongside — two mechanisms competing to shape one response is worse
+than the one that works.
+
+Three fields are deliberately **not** sent, each because sending it breaks a tier we want:
+
+| Not sent | Why |
+|---|---|
+| `strict: true` | Bedrock rejects it: `tools.0.custom.strict: Extra inputs are not permitted` |
+| `tool_choice` (forced) | 400s with adaptive thinking on Sonnet 4.6 and Haiku 4.5: *"Thinking may not be enabled when tool_choice forces a specific tool"*. ADR-015 keeps thinking on for every tier, so forcing is unavailable |
+| `output_config.format` | Measured unreliable on every group |
+
+What remains is the least-specified configuration — one tool, model's choice, thinking on — and it
+returned the exact expected input **20 of 20** across Opus 4.8, Sonnet 5, Sonnet 4.6, and Haiku 4.5.
+
+**Consequences.**
+
+1. **No tier requires an Opus-class model.** This was the practical blocker and it is gone. The
+   development mapping is Sonnet 4.6 (orchestrator), Sonnet 5 (thinking), Haiku 4.5 (fast) — all
+   three verified end to end. Opus 4.8 remains an escalation for the thinking tier if Milestone 3
+   evaluation demands it, on evidence rather than by default.
+2. **ADR-018's guard survives and matters more.** With `tool_choice` left to the model, a turn
+   *could* answer in prose. It did not in 20 of 20 trials, but the gateway raises
+   `StructuredOutputError` if no tool call comes back. "Did not occur" is not "cannot occur".
+3. **We do not get the documented hard guarantee.** `strict: true` would make tool input
+   schema-valid by construction; Bedrock refuses it. So tool input is best-effort and must still be
+   validated through the Pydantic contracts downstream — which the architecture already does. Worth
+   stating plainly rather than implying the tool path is airtight.
+4. **The prompt now carries part of the contract.** The tool's description tells the model to call
+   it exactly once and not to answer in prose. That is a prompt-shaped dependency in a system that
+   otherwise keeps its guarantees in code, and it is the price of not being allowed to force the
+   call.
+5. **This is a per-endpoint finding.** A first-party Anthropic endpoint may well enforce
+   `output_config.format` correctly. The decision is scoped to what was measured; re-run the live
+   smoke check before assuming it transfers.
+
+---
+
+## ADR-020 — The buildable scope is an orchestrator spine; breadth moves to the handoff
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Amends the scope of ADR-003, ADR-007, ADR-010, and
+ADR-012's carried conditions. Does not touch ADR-011 or ADR-014.**
+
+**Context.** The roadmap that preceded this entry carried thirty-three requirements across nine
+phases: a dual-adapter orchestration bake-off re-run at outcome level, checkpoint MAC hardening
+with least-privilege database roles, local OpenSearch ingestion with embedding provenance,
+authority routing across two approved policy packs, deterministic citation validators, a
+transactional outbox against an ASAP mock, a dependency inventory, and a GovCloud gate.
+
+Every one of those is defensible on its own terms. Together they answer a question the project was
+not asked. ADR-001 fixes the deliverable as *a proven architecture and a handoff package*, and
+`CLAUDE.md` names the risk that deliverable exists to retire: **the agentic orchestrator is harder
+than it looks.** Breadth across authorities, retrieval infrastructure, and delivery plumbing does
+not retire that risk — it spends the budget that would have.
+
+The dual-adapter bake-off is the clearest case. It was added to re-test ADR-012 at outcome level
+because Milestone 1c was a partial spike against a deterministic stub. But it multiplies every
+downstream phase by two, and it re-opens a decision that was already made on measured evidence and
+already protected structurally: nodes depend on our port, never on LangGraph, so the escape hatch
+is the port, not a second implementation maintained in parallel.
+
+**Decision.** The buildable scope is the orchestrator spine and nothing else:
+
+> One command loads a synthetic case, fans out to bounded specialist sub-calls through the
+> `ModelGateway` port on tier aliases, enforces budgets and loop limits in the deterministic shell,
+> survives a crash mid-fan-out and resumes in a separate process without double-paying for an
+> in-flight model call, pauses for a recorded human disposition, and emits a validated typed
+> envelope.
+
+Nine phases become three. What is cut is **not abandoned** — it is designed in the handoff package
+and explicitly marked unbuilt, with the reason, per ADR-001's standing requirement that every claim
+be cited or marked unverified.
+
+| Cut | Requirements | Where it lives now |
+|---|---|---|
+| Second orchestration adapter and the outcome-level bake-off | ORCH-05, BAKE-01, ARCH-03, ARCH-05 | ADR-012 stands as decided; the port is the escape hatch |
+| Checkpoint row integrity, least privilege, resume provenance | CKPT-01..03 | `docs/handoff/checkpoint-threat-model.md` §6, already written |
+| OpenSearch retrieval, local ingest, embedding provenance | RETR-01..03, CONT-02 | Handoff; evidence is handed to the specialist from a synthetic fixture |
+| Authority routing, two approved policy packs | ROUT-01..02 | Handoff; ADR-003's coverage decision is unchanged, its *implementation* is deferred |
+| Evidence-citation validators | VAL-01 | Handoff; the finding contract still requires citations structurally |
+| Transactional outbox, ASAP mock | DEL-01 | Handoff; ADR-010's envelope contract stands, its transport does not ship |
+| Dependency inventory, GovCloud gate, `bedrock` live run | ARCH-02, HAND-02..03 | Handoff; Q-01 stays open and its cost is stated |
+
+**What is explicitly retained, and why.**
+
+1. **The human disposition gate (ADR-011) and the no-aggregate-score rule (ADR-014) are untouched.**
+   Both were considered for the cut and both were kept. They are already structural in the thirteen
+   shipped contracts with passing tests, so retaining them costs nothing — and cutting them would
+   mean deleting working guardrails, which is not a simplification. Both remain NON-NEGOTIABLE.
+2. **Crash and resume across a genuine process boundary.** Named non-negotiable. "Bounded-agentic"
+   is a word rather than a claim if the run cannot survive a process death.
+3. **Model-call idempotency (ORCH-02).** The most expensive retained item, and retained
+   deliberately. A crash mid-fan-out currently re-runs an in-flight model call — measured 11 of 24
+   trials under LangGraph, 12 of 24 hand-rolled, and owed by all three bake-off candidates while
+   built by none. Durable orchestration of paid sub-calls is not proven if resuming double-pays.
+4. **A refusal never becomes an empty result (VAL-02).** Nearly free — the gateway already raises
+   `ModelRefusalError` — and it defends against the failure mode the project names as its worst:
+   silent under-analysis that looks like a completed analysis.
+
+**Consequences.**
+
+1. **ADR-012 stands as decided and is no longer under re-test.** The outcome-level bake-off that
+   would have judged it does not happen. The conditions ADR-012 carried forward are re-homed: nodes
+   still depend on our port; LangSmith is still pinned closed and proven closed; the checkpoint blob
+   is still a deserialization trust boundary. **Cold start under SAM local remains unmeasured, and
+   now has no scheduled phase** — `spikes/test_scorecard.py` continues to fail the moment a figure
+   is recorded, which keeps the gap visible rather than closing it by omission.
+2. **The Strands amendment is moot.** Removing Strands from a mission bake-off that no longer exists
+   needs no amendment. `spikes/` is retained in full per ADR-001 — all three candidates, all four
+   legs, still running.
+3. **Q-02 and Q-03 stop being build gates and become documented unknowns.** No local retrieval means
+   no mapping module to mark PROVISIONAL and no embedding parity to check. Their blast radius is
+   unchanged for whoever builds retrieval; what changes is that this project no longer proceeds
+   under a working assumption about them. That is a smaller claim, honestly made.
+4. **The handoff package carries more weight and less evidence.** More of it is design rather than
+   demonstrated architecture. ADR-001's rule — a decision that cannot be demonstrated is a decision
+   that has not been made — now applies to a larger share of the package, so the unbuilt sections
+   must say plainly that they are unbuilt. This is the real cost of this decision and it is not
+   hedged.
+5. **Milestone 3 is unaffected.** It was already a placeholder gated on measurements, and the
+   measurements it was gated on have narrowed.
+
+---
+
+## ADR-021 — Retrieval is part of the spine; the refusal path is a log line
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Amends ADR-020 (same day)**
+
+**Context.** ADR-020 cut retrieval on the reasoning that evidence could be handed to the specialist
+from a synthetic fixture, since bounded fan-out, budget exhaustion, and crash-mid-flight do not
+depend on where the spans came from. That reasoning was wrong about what the architecture is. The
+thing being demonstrated is *an orchestrator kicking off a sub-agent call that searches the case
+record and returns policy findings with citations* — the search is not incidental to the sub-agent,
+it is what the sub-agent does. A fixture-fed specialist demonstrates a fan-out, not this system.
+
+Separately, ADR-020 retained VAL-02's full refusal path — a model refusal surfacing to the reviewer
+as a blocking `InformationGap`. That is reviewer-workflow machinery, and this project is proving an
+architecture rather than building the analysis product or evaluating model behaviour.
+
+**Decision.**
+
+1. **Retrieval returns to the spine, reduced.** Local OpenSearch in Docker, one synthetic case
+   indexed, queried through the retrieval port. Every field name, filter, and facet mapping lives in
+   one module marked PROVISIONAL against Q-02, per ADR-007's one-file containment rule.
+   **RETR-01 and RETR-02 return to v1; RETR-03 stays cut** — embedding provenance and the parity
+   check are model-evaluation work, and Q-03 remains a documented unknown rather than a build gate.
+   **ADR-006 is untouched: vector and lexical search only, no graph database, in any milestone.**
+2. **`SpecialistResult` carries no completion status.** It is the criterion analyzed, the provenance
+   of the run, and the proposed findings with their citations. Nothing else.
+3. **VAL-02 reduces from wired to logged.** The gateway already raises `ModelRefusalError` on
+   `stop_reason` before touching content, so a refusal cannot become an empty string. The node
+   catches it, logs it with `run_id`, `case_id`, and the criterion, and the orchestrator does no
+   special routing. No `InformationGap` plumbing, no `blocking` flag, no review branch.
+
+**Consequences.**
+
+1. **Q-02 is a live containment concern again, and is still not cleared.** The mapping module must
+   carry a header naming Q-02 and stating that the AWS collection's real schema is unconfirmed.
+   Adapting to the real schema stays a one-file change. No document may imply the gate was cleared.
+2. **The false-negative failure mode is now caught by logs rather than by contract.** A refused
+   sub-agent produces a `SpecialistResult` with an empty findings list, which is indistinguishable
+   at the artifact level from a criterion that came back clean. The distinction lives in the log.
+   **This is a deliberate trade and it is the weakest point in the spine** — stated here so the
+   handoff can carry it forward as a known gap rather than discovering it in production.
+3. **`ChunkRecord` and `PolicyRecord` (CONT-02) stay cut.** The indexed record shape lives inside
+   the retrieval package rather than being published as a domain contract. Publishing it would mean
+   committing a schema against an unconfirmed collection (Q-02) for no consumer outside retrieval.
+
+---
+
+## ADR-022 — Human review happens in ASAP, not inside a run
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Supersedes ADR-011**
+
+**Context.** ADR-011 modelled human review as an in-run pause: a run stops in
+`AWAITING_HUMAN_REVIEW`, an authorized officer records a disposition, and the run resumes. Every
+downstream artifact was built on that shape — two run states, a no-bypass transition table, the
+`HumanDisposition` / `DispositionedFinding` / `ReviewSummary` contracts, and an `ASAPEnvelope`
+whose `human_reviewed` field was pinned to `Literal[True]`.
+
+**That is not the system.** iReports has no reviewer-facing surface and no human interaction of any
+kind. It runs unattended, analyzes a case, and emits its output. Review happens afterwards, in
+ASAP, by an officer using ASAP's own tooling. The pause this project built was a gate in front of a
+door that does not exist here.
+
+The confusion is understandable and worth recording, because the two things it conflated are both
+real. There **is** human judgment involved in this project — but it is *validation*, not
+*adjudication*: synthetic cases carry issues a human analyst already identified, and the measure of
+the system is whether what iReports finds matches what the human found. That is an evaluation
+activity performed against test data, not a step in a production run.
+
+**Decision.**
+
+1. **A run never waits for a human.** `AWAITING_HUMAN_REVIEW` and `REVIEW_RECORDED` are removed
+   from `RunStatus`, along with the `human_review_recorded` flag and the `_delivery_requires_review`
+   validator. A run proceeds from validation to packaging to delivered without stopping.
+2. **iReports does not model disposition.** `HumanDisposition`, `DispositionedFinding`,
+   `ReviewSummary`, `ApprovedFindingText`, `ReviewerRole`, `DispositionKind`, and `ReasonCode` are
+   removed, with their generated schemas. What an officer decides, and how ASAP records it, is
+   ASAP's contract to define — publishing our guess at it would invite a downstream system to
+   implement against a shape we do not own.
+3. **The envelope carries proposals, not approved findings.** `human_reviewed`,
+   `human_disposition`, `reviewer_modified`, and `reviewer_summary` are removed from the
+   `ASAPEnvelope`. An envelope is what iReports proposes for review — it is un-reviewed by
+   construction, which is the opposite of what the pinned `Literal[True]` asserted.
+4. **The decision-support boundary is unchanged, and its enforcement moves.** ADR-014 stands
+   untouched: no aggregate score, no determination, in any contract, under any name. What changes
+   is the mechanism. The boundary used to rest on two legs — a state-machine gate *and* the fact
+   that everything emitted is a proposal. The gate is gone; the second leg now carries it alone,
+   so it is strengthened rather than merely retained (see consequence 2).
+
+**Rationale.** A gate that models a workflow the system does not have is worse than no gate. It
+costs real complexity, it tells a reader the architecture does something it does not, and — most
+seriously — it invites the handoff team to build a reviewer workflow into iReports that belongs in
+ASAP. Removing it makes the boundary between the two systems sharper, not softer.
+
+**Consequences.**
+
+1. **Phase 3 changes content.** "Human gate, typed output, and the handoff" becomes validation and
+   handoff: synthetic cases with analyst-identified issues, scorers that measure agreement between
+   those and what iReports found, and the handoff package. REV-01 and REV-02 are withdrawn rather
+   than cut — they describe a system that was never being built, so they are not owed a
+   designed-not-built entry the way ADR-020's cuts are. This is recorded in `REQUIREMENTS.md`.
+2. **The no-determination rule loses a redundant enforcement and must be tightened.** Under
+   ADR-011, an envelope reaching ASAP had passed a structural gate. Now nothing structural stands
+   between an analysis and ASAP except the shape of what is emitted. Two mechanisms therefore
+   become load-bearing rather than supporting: `ProposedFinding` is the only finding type that
+   exists, and `reject_determinative_language` guards every text field on the way out. Both were
+   already built and tested; the point is that their failure is now unmitigated.
+3. **We give up the ability to prove non-delivery of rejected findings.** ADR-011 let us assert, by
+   walking a transition table, that a rejected finding could not reach ASAP. That assertion now
+   belongs to ASAP and this project cannot make it. **This is a real reduction in what the handoff
+   can claim**, and the package must say so rather than quietly dropping the claim.
+4. **Contract count drops from 14 to 12** and `CONTRACT_VERSION` is bumped, because removing a
+   published contract is a breaking change for any consumer that had started against it.
+
+---
+
+## ADR-023 — Lambda fit: one invocation per run, and the cold-start number that closes ARCH-03
+
+**Date:** 2026-08-11 · **Status:** Accepted · **Closes ARCH-03 (cut by ADR-020)** · **Amends ADR-004**
+
+**Context.** ADR-004 commits to AWS GovCloud with a Lambda/SAM adapter "built and exercised," but
+nothing was ever built or exercised, and ADR-020 cut ARCH-03 — the cold-start measurement — leaving
+the scorecard's largest hole open with no scheduled phase. Two questions had gone unanswered long
+enough to be load-bearing:
+
+1. **Does an orchestrator that fans out to sub-agents fit Lambda at all?** A 15-minute ceiling and
+   a fan-out of paid model calls look like a bad match.
+2. **Does LangGraph's dependency weight disqualify it on cold start?** The scorecard names this as
+   the one outstanding measurement that could reopen ADR-012.
+
+**Decision.**
+
+1. **The target shape is one Lambda invocation per run, with in-process fan-out.** The orchestrator
+   and its specialist sub-calls run inside a single invocation; LangGraph is a library executing in
+   that process, and fan-out is async concurrency bounded by `max_parallel_specialists`. Step
+   Functions with a Lambda per node is **rejected as the primary shape** — it moves control flow out
+   of the framework ADR-012 selected and splits the deterministic shell across Python and ASL, which
+   is a large cost to buy a ceiling this workload can already survive.
+2. **The 15-minute ceiling is survived by the mechanism already owed, not by a new one.** ORCH-02
+   requires that a crash mid-fan-out resume in a separate process without re-running an in-flight
+   model call. **A Lambda timeout is that crash.** `max_wall_clock_seconds` is already a first-class
+   budget on `Budgets`; the shell stops before the ceiling, checkpoints, and returns, and the next
+   invocation resumes from the checkpoint. No new architecture is required — but note the
+   dependency in consequence 3.
+3. **LocalStack is permitted in an opt-in profile.** `CLAUDE.md` excludes it "in the default
+   profile," which governs the everyday `pytest` loop and is unchanged. Proving the trigger chain
+   (upload → extract → chunk → index → start analysis) needs service emulation that SAM local does
+   not provide, and that is a legitimate opt-in.
+4. **ARCH-03 is closed with a measurement, and ADR-012 stands.**
+
+**The measurement** `[measured]` — `spikes/lambda_fit/`, SAM local, python3.12 arm64, 1024 MB,
+reproducible via `measure_coldstart.py`:
+
+| Candidate | Import (typical) | vs control | Unzipped | Zipped |
+|---|---|---|---|---|
+| hand-rolled | ~0.5 s | 1× | 30.1 MB | 9.1 MB |
+| **langgraph** | **~1.6–2.3 s** | **~3×** | 68.9 MB | 19 MB |
+| strands | ~1.5–1.8 s | ~3× | 79.7 MB | 34 MB |
+
+**The precision here is lower than a stopwatch implies, and that is stated rather than smoothed.**
+Three runs on the same machine gave LangGraph medians of 1.565 s, 1.974 s and 2.303 s, with samples
+from 1.49 s to 5.78 s, as host load varied. The candidate ratio moved between 2.84× and 4.03×. An
+early version of this entry quoted 1.565 s and 3.27× as though they were stable; they are a
+low-load snapshot. **Package size is the load-independent number and is what Lambda limits are
+checked against.**
+
+The conclusion is robust across that whole spread, which is why the imprecision does not undermine
+it: at the *worst* observed ratio and median, LangGraph costs roughly 1.5–1.8 s more per cold
+start than a framework-free control.
+
+**ADR-012 does not reopen.** LangGraph costs ~1.1 s more per cold start than a framework-free
+control, on a workload where one specialist model call runs tens of seconds and cold starts occur
+on scale-up rather than per request. Package size is comfortably inside both Lambda limits
+(250 MB unzipped, 50 MB zipped). The dependency-weight objection was the strongest argument against
+LangGraph and it does not survive contact with the number.
+
+**What the number is not.** `sam local invoke` reports an `Init Duration` of ~0.05 ms for every
+candidate; it does not emulate Lambda's init/invoke split and that field is meaningless. The figure
+above is `import_seconds`, timed inside the handler module around the orchestrator import, on
+macOS arm64 Docker. It is an **indicative comparison between candidates on identical footing**, not
+a production cold-start figure `[unverified]` — a real one needs a deploy to Lambda, gated on Q-01
+for GovCloud. Treat the *ratio* as the finding, not the absolute.
+
+**Consequences.**
+
+1. **Strands is the heaviest package at 79.7 MB unzipped / 34 MB zipped**, approaching the 50 MB
+   zipped limit before any application code. Recorded because it constrains a candidate this
+   project no longer plans to use, and a future reader may be considering it fresh.
+2. **`spikes/lambda_fit/` is retained and runs in the suite**, like the other spikes. Its two
+   guard tests assert the figures stay under a 3 s ceiling and that LangGraph stays within 5× the
+   control — tripwires on the reasoning, not performance budgets.
+3. **The timeout-resume proof is owed and not yet built.** Consequence 2 of the decision above is
+   an argument, not a demonstration: it depends on ORCH-02, which is unbuilt and measured at 11/24
+   duplicate paid calls for LangGraph today. **Under Lambda this is worse than on a laptop**,
+   because Lambda retries automatically — a timeout without idempotency means paying for the same
+   model calls again on every retry. Phase 2 (LAMB-01) proves it under Lambda semantics.
+4. **The trigger chain is not ours and is not proven here.** Upload, extraction, chunking, and
+   indexing belong to the AWS ingestion pipeline (ADR-007). What ADR-023 covers starts at "case is
+   ready, start the analysis." How that invocation is triggered is an integration question for the
+   handoff team, and Q-02 still gates what the index looks like when they get there.
+
+---
+
+## ADR-024 — Both orchestration paths stay live; the framework decision is deferred
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Amends ADR-012**
+
+**Context.** ADR-012 selected LangGraph on 2026-08-11 — correctly, on the evidence it had: all
+three candidates passed all four bake-off legs, and LangGraph cost two lines for durable
+PostgreSQL checkpointing against 56 and 166 for the others. That was a decision about *cost at the
+checkpointing seam*, made before any real analysis code existed.
+
+Since then the runnable demo (`spikes/lambda_demo/`) has run real cases through **both** a
+hand-rolled orchestrator and a LangGraph one, behind one port, sharing one specialist
+implementation. Two things became visible that the bake-off could not show:
+
+1. **The hand-rolled path is a thread pool and a loop.** For one invocation per run with
+   in-process fan-out (ADR-023), the framework is not carrying much. LangGraph's advantage was
+   concentrated in checkpointing, and checkpointing is not yet built.
+2. **Keeping both costs almost nothing.** The port was built as insurance against lock-in. It
+   turns out to be cheap enough to run as the actual arrangement — one shared specialist, two
+   orchestrators, identical output shape.
+
+**Decision.** **Both paths stay live.** Custom Python and LangGraph are developed in parallel
+behind this project's own orchestration port until there is a reason to choose — most likely when
+crash/resume and model-call idempotency (ORCH-02) are built, since that is the seam where the
+frameworks actually differ.
+
+ADR-012 is **not reversed.** Its evidence stands and LangGraph remains the leading candidate. What
+changes is that it is no longer treated as settled, and no code may assume it.
+
+**Consequences.**
+
+1. **The no-import rule is now the working arrangement, not lock-in insurance.** No module that
+   analyzes a case may import LangGraph. This was previously a hedge; it is now load-bearing,
+   because a second implementation genuinely runs. Enforced by
+   `spikes/lambda_demo/test_demo.py::test_nodes_do_not_import_langgraph`.
+2. **Every orchestration feature is owed by both paths.** Budgets, loop limits, fan-out bounds,
+   and eventually checkpointing get built twice — or, better, built once in shared code that both
+   orchestrators call. Where a feature is easy in one and hard in the other, *that is the finding*
+   and it belongs in `docs/LESSONS.md`.
+3. **The decision point is named, not open-ended.** Deferring forever is worse than choosing
+   wrong. The call gets made when idempotent crash/resume works, because that is the capability
+   the framework was selected for in the first place.
+4. **Packaging stays separate per path.** Each is built with only its own dependencies, so neither
+   inflates the other — `spikes/lambda_demo/build.py` already does this.

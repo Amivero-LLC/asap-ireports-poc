@@ -1,0 +1,44 @@
+# Local substrate for the Milestone 1c orchestration bake-off.
+#
+# PostgreSQL only. The spike measures orchestration control flow — durable resume,
+# human-in-the-loop interrupt, timeout survival, bounded fan-out — none of which needs
+# OpenSearch, Jaeger, or a model. Adding services here would make the bake-off slower to
+# run without making it measure more.
+#
+#   docker compose -f infrastructure/docker/compose.yaml up -d
+#   docker compose -f infrastructure/docker/compose.yaml down -v
+#
+# Port 5436 avoids the other local stacks in this workspace (aether uses 5435).
+
+name: ireports-spike
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: ireports-spike-postgres
+    environment:
+      POSTGRES_USER: ireports
+      POSTGRES_PASSWORD: ireports_local_only
+      POSTGRES_DB: ireports_spike
+    ports:
+      - "5436:5432"
+    volumes:
+      - spike_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The bake-off starts and kills processes repeatedly; a real readiness gate
+      # prevents a failed connection from being scored as a resume failure.
+      test: ["CMD-SHELL", "pg_isready -U ireports -d ireports_spike"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    command:
+      # Chatty logging is deliberate: when a candidate loses work on resume, the
+      # question is always "what actually committed", and the answer is here.
+      - postgres
+      - -c
+      - log_statement=none
+      - -c
+      - max_connections=50
+
+volumes:
+  spike_pgdata:

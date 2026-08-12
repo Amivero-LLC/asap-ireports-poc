@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/document.schema.json",
+  "x-contract-version": "2.0.0",
+  "$defs": {
+    "DocumentExpectation": {
+      "description": "Documents the case is expected to contain.\n\nDrives the completeness checker (blueprint \u00a78.1). An expectation that is not satisfied\nbecomes an information gap, not a silent omission.",
+      "enum": [
+        "security_questionnaire",
+        "report_of_investigation",
+        "subject_interview",
+        "credit_report",
+        "law_enforcement_check",
+        "employment_verification",
+        "education_verification",
+        "reference_interview",
+        "subject_statement"
+      ],
+      "title": "DocumentExpectation",
+      "type": "string"
+    },
+    "DocumentType": {
+      "description": "Classification assigned during ingestion (blueprint \u00a76.2 stage 4).\n\n`UNCLASSIFIED_BY_SYSTEM` is deliberate: an unrecognized document must remain analysable and\nvisibly unclassified rather than being forced into the nearest category.",
+      "enum": [
+        "security_questionnaire",
+        "report_of_investigation",
+        "subject_interview",
+        "subject_statement",
+        "credit_report",
+        "law_enforcement_record",
+        "court_record",
+        "employment_record",
+        "education_record",
+        "financial_record",
+        "medical_or_treatment_record",
+        "correspondence",
+        "other",
+        "unclassified_by_system"
+      ],
+      "title": "DocumentType",
+      "type": "string"
+    },
+    "ExtractionMethod": {
+      "enum": [
+        "native_text",
+        "docling",
+        "ocr_tesseract",
+        "ocr_then_docling"
+      ],
+      "title": "ExtractionMethod",
+      "type": "string"
+    },
+    "SourceReliability": {
+      "description": "Blueprint \u00a77.6.\n\nSource reliability is recorded, never inferred at analysis time from the assertion's\ncontent. A subject's own statement and an investigator's finding carry different weight, and\na contradiction between them is a finding input rather than something to silently resolve.",
+      "enum": [
+        "official_record",
+        "investigator_finding",
+        "third_party_report",
+        "subject_self_report",
+        "undetermined"
+      ],
+      "title": "SourceReliability",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One expected or present document in a case.\n\n`expectation` links a physical document back to what the case said it should contain, which\nis what lets the completeness checker distinguish \"missing\" from \"present but unreadable\" \u2014\ntwo conditions with different consequences for a reviewer.",
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "document_id": {
+      "pattern": "^doc_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Document Id",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "ingestion_id": {
+      "pattern": "^ing_[A-Za-z0-9][A-Za-z0-9_\\-]{0,62}$",
+      "title": "Ingestion Id",
+      "type": "string"
+    },
+    "file_name": {
+      "minLength": 1,
+      "title": "File Name",
+      "type": "string"
+    },
+    "media_type": {
+      "minLength": 1,
+      "title": "Media Type",
+      "type": "string"
+    },
+    "byte_size": {
+      "minimum": 0,
+      "title": "Byte Size",
+      "type": "integer"
+    },
+    "content_sha256": {
+      "description": "Integrity anchor. A changed hash invalidates every evidence span into this document.",
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "document_type": {
+      "$ref": "#/$defs/DocumentType"
+    },
+    "expectation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DocumentExpectation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Which case document_expectation this satisfies, if any."
+    },
+    "source_reliability": {
+      "$ref": "#/$defs/SourceReliability",
+      "default": "undetermined"
+    },
+    "page_count": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Page Count"
+    },
+    "extraction_method": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExtractionMethod"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "extraction_succeeded": {
+      "description": "False means present-but-unreadable. This must reach the reviewer as an information gap; silently analysing a case with an unreadable document is a failure mode blueprint \u00a76.2 stage 1 exists to prevent.",
+      "title": "Extraction Succeeded",
+      "type": "boolean"
+    },
+    "extraction_notes": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Extraction Notes"
+    },
+    "ingested_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Ingested At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "document_id",
+    "case_id",
+    "ingestion_id",
+    "file_name",
+    "media_type",
+    "byte_size",
+    "content_sha256",
+    "document_type",
+    "extraction_succeeded",
+    "ingested_at"
+  ],
+  "title": "DocumentManifest",
+  "type": "object"
+}

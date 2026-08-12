@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Amivero-LLC/asap-ireports/schemas/case.schema.json",
+  "x-contract-version": "2.0.0",
+  "$defs": {
+    "CaseContext": {
+      "additionalProperties": false,
+      "description": "Explicit routing metadata.\n\nEvery field here is an input to authority routing. Blueprint \u00a710.2: the system may not infer\nservice type, person status, or position sensitivity from document content when explicit\nmetadata is required. Fields that routing needs but that may be genuinely unknown are\noptional here and produce a *blocking information gap* at routing time rather than a guess.",
+      "properties": {
+        "person_status": {
+          "$ref": "#/$defs/PersonStatus"
+        },
+        "service_type": {
+          "$ref": "#/$defs/ServiceType"
+        },
+        "position_title": {
+          "minLength": 1,
+          "title": "Position Title",
+          "type": "string"
+        },
+        "position_risk_level": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositionRiskLevel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required to route suitability/fitness. Absence is a blocking gap, not a default."
+        },
+        "position_sensitivity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositionSensitivity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required to route national-security eligibility. Absence is a blocking gap."
+        },
+        "clearance_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClearanceRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "piv_required": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Piv Required"
+        },
+        "conditional_offer_date": {
+          "anyOf": [
+            {
+              "description": "Timezone-aware UTC timestamp",
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fair Chance Act process control (blueprint \u00a72.5): criminal-history inquiry timing is evaluated relative to this date.",
+          "title": "Conditional Offer Date"
+        },
+        "entry_on_duty_date": {
+          "anyOf": [
+            {
+              "description": "Timezone-aware UTC timestamp",
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry On Duty Date"
+        },
+        "agency_component": {
+          "minLength": 1,
+          "title": "Agency Component",
+          "type": "string"
+        }
+      },
+      "required": [
+        "person_status",
+        "service_type",
+        "position_title",
+        "agency_component"
+      ],
+      "title": "CaseContext",
+      "type": "object"
+    },
+    "ClearanceRequirement": {
+      "enum": [
+        "none",
+        "confidential",
+        "secret",
+        "top_secret",
+        "top_secret_sci"
+      ],
+      "title": "ClearanceRequirement",
+      "type": "string"
+    },
+    "DataClassification": {
+      "description": "`CLAUDE.md`: synthetic data only, in this repo, always.\n\nThe enum has one member on purpose. Production classifications are a program concern and\nadding them here would make it possible for a real-data payload to validate against a\ncontract in this repository.",
+      "enum": [
+        "SYNTHETIC-NO-PII"
+      ],
+      "title": "DataClassification",
+      "type": "string"
+    },
+    "DecisionDomain": {
+      "description": "The distinct legal authorities this system analyses against.\n\nADR-003 and blueprint \u00a72.1: suitability, fitness, PIV credentialing, and national-security\neligibility are distinct authorities with distinct criteria. Collapsing them produces\nanalysis that is wrong in a way that is hard to detect, so every finding names exactly one.",
+      "enum": [
+        "suitability",
+        "fitness",
+        "national_security_eligibility",
+        "piv_credentialing"
+      ],
+      "title": "DecisionDomain",
+      "type": "string"
+    },
+    "DocumentExpectation": {
+      "description": "Documents the case is expected to contain.\n\nDrives the completeness checker (blueprint \u00a78.1). An expectation that is not satisfied\nbecomes an information gap, not a silent omission.",
+      "enum": [
+        "security_questionnaire",
+        "report_of_investigation",
+        "subject_interview",
+        "credit_report",
+        "law_enforcement_check",
+        "employment_verification",
+        "education_verification",
+        "reference_interview",
+        "subject_statement"
+      ],
+      "title": "DocumentExpectation",
+      "type": "string"
+    },
+    "PersonStatus": {
+      "enum": [
+        "applicant",
+        "appointee",
+        "employee",
+        "contractor"
+      ],
+      "title": "PersonStatus",
+      "type": "string"
+    },
+    "PositionRiskLevel": {
+      "description": "5 CFR part 731 position risk designation (blueprint \u00a72.6).",
+      "enum": [
+        "low_risk",
+        "moderate_risk_public_trust",
+        "high_risk_public_trust"
+      ],
+      "title": "PositionRiskLevel",
+      "type": "string"
+    },
+    "PositionSensitivity": {
+      "description": "National-security position sensitivity designation.",
+      "enum": [
+        "non_sensitive",
+        "noncritical_sensitive",
+        "critical_sensitive",
+        "special_sensitive"
+      ],
+      "title": "PositionSensitivity",
+      "type": "string"
+    },
+    "ServiceType": {
+      "enum": [
+        "competitive_service",
+        "excepted_service",
+        "senior_executive_service",
+        "contractor_position"
+      ],
+      "title": "ServiceType",
+      "type": "string"
+    },
+    "Subject": {
+      "additionalProperties": false,
+      "description": "The person the case concerns.\n\n`protected_attributes_included` is a declaration, not a container. Blueprint \u00a710.2 requires\nthat protected attributes not be included unless needed for a legitimate, approved purpose,\nand blueprint \u00a713.7 prohibits their use in analysis. This contract carries no field in which\na protected attribute could be placed, so the flag exists to assert their *absence* and to\nlet a validator fail closed if an ingestion path ever tries to introduce them.",
+      "properties": {
+        "subject_id": {
+          "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "display_name": {
+          "description": "Synthetic name only. See DataClassification \u2014 this repo holds no real cases.",
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "citizenship": {
+          "description": "Relevant to SEAD-4 Guidelines A-C analysis. Present because it is a criterion input under a named authority, not a general demographic attribute.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Citizenship",
+          "type": "array"
+        },
+        "protected_attributes_included": {
+          "const": false,
+          "default": false,
+          "description": "Structurally pinned false. If a legitimate, approved purpose ever requires protected attributes, that is a contract major version and a policy decision, not a runtime flag.",
+          "title": "Protected Attributes Included",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subject_id",
+        "display_name"
+      ],
+      "title": "Subject",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The case as the system is asked to analyse it.\n\nBlueprint \u00a710.2. Note what is absent: no aggregate risk field, no overall assessment, no\nprior determination. ADR-014 forbids the first; the others would prejudice the analysis.",
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0",
+      "default": "2.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "case_id": {
+      "pattern": "^[A-Z][A-Z0-9\\-]{2,63}$",
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_name": {
+      "minLength": 1,
+      "title": "Case Name",
+      "type": "string"
+    },
+    "tenant_id": {
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "program_id": {
+      "minLength": 1,
+      "title": "Program Id",
+      "type": "string"
+    },
+    "data_classification": {
+      "$ref": "#/$defs/DataClassification",
+      "default": "SYNTHETIC-NO-PII"
+    },
+    "subject": {
+      "$ref": "#/$defs/Subject"
+    },
+    "case_context": {
+      "$ref": "#/$defs/CaseContext"
+    },
+    "requested_analyses": {
+      "description": "A request, not an authorization. Blueprint \u00a710.2: requested_analyses cannot override legal applicability \u2014 the authority router validates each request against case_context and may decline one or add one the requester omitted.",
+      "items": {
+        "$ref": "#/$defs/DecisionDomain"
+      },
+      "minItems": 1,
+      "title": "Requested Analyses",
+      "type": "array"
+    },
+    "policy_pack_ids": {
+      "items": {
+        "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Policy Pack Ids",
+      "type": "array"
+    },
+    "document_expectations": {
+      "items": {
+        "$ref": "#/$defs/DocumentExpectation"
+      },
+      "title": "Document Expectations",
+      "type": "array"
+    },
+    "documents_root": {
+      "default": "documents",
+      "minLength": 1,
+      "title": "Documents Root",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "Timezone-aware UTC timestamp",
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "created_by": {
+      "pattern": "^[a-z0-9][a-z0-9\\-]{2,63}$",
+      "title": "Created By",
+      "type": "string"
+    }
+  },
+  "required": [
+    "case_id",
+    "case_name",
+    "tenant_id",
+    "program_id",
+    "subject",
+    "case_context",
+    "requested_analyses",
+    "policy_pack_ids",
+    "created_at",
+    "created_by"
+  ],
+  "title": "CaseManifest",
+  "type": "object"
+}

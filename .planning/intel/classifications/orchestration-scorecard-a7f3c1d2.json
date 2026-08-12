@@ -1,0 +1,37 @@
+{
+  "source_path": "/Users/davidlarrimore/Documents/Github/asap-ireports/docs/handoff/orchestration-scorecard.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Orchestration Bake-off Scorecard",
+  "summary": "Measured evidence from the Milestone 1c orchestration bake-off comparing hand-rolled, LangGraph, and Strands, recommending LangGraph and resolving ADR-012.",
+  "scope": [
+    "orchestration framework bake-off",
+    "LangGraph",
+    "Strands Agents SDK",
+    "hand-rolled Python orchestrator",
+    "PostgreSQL durable checkpointing",
+    "checkpoint deserialization trust boundary",
+    "LangSmith tracing pinned closed",
+    "duplicate paid model call window",
+    "Lambda cold start under SAM local",
+    "packages/orchestration port"
+  ],
+  "cross_refs": [
+    "orchestration-scorecard.json",
+    "spikes/bakeoff_scorecard.py",
+    "spikes/README.md",
+    "spikes/measure.py",
+    "spikes/test_scorecard.py",
+    "docs/handoff/checkpoint-threat-model.md",
+    "checkpoint-threat-model.md",
+    "docs/DECISIONS.md",
+    "docs/OPEN-QUESTIONS.md",
+    "blueprint.md",
+    "CLAUDE.md",
+    "packages/orchestration"
+  ],
+  "locked": false,
+  "precedence": 4,
+  "notes": "Manifest declared DOC/precedence 4; heuristic and content analysis agree. Content signals are ADR-adjacent (a recommendation with a status line reading 'complete — resolves ADR-012'), but this is EVIDENCE supporting a decision, not the decision itself — the decision lives in docs/DECISIONS.md as ADR-012 (orchestration framework = LangGraph, accepted 2026-08-11). Classified DOC per manifest and treated as context/evidence only; do not extract its recommendation as a locked decision. Outstanding obligations recorded here are real forward work for the synthesizer to surface: (1) cold start under SAM local is unmeasured for all three candidates and is the measurement most likely to reopen the framework choice — test_cold_start_is_null_and_stays_visible in spikes/test_scorecard.py fails if a number is filled in; (2) model-call-level idempotency (blueprint section 8.5 duplicate-query detection) is owed by every candidate and built by none — belongs on the Milestone 2 plan regardless of framework; (3) checkpoint row integrity (keyed MAC) is unbuilt and owed by every candidate, per checkpoint-threat-model.md section 6; (4) checkpoint history retention policy is owed (37,033 B retained per run and growing; ties to Q-09); (5) analysis nodes must depend on this project's own orchestration port, never on LangGraph directly — ADR-012 already requires this, enforced when packages/orchestration lands. Also note two invisible-in-code defaults now pinned: durability=\"sync\" and strict checkpoint deserialization."
+}

@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  The runnable demo: one synthetic case, two orchestrators, real model calls, one ASAPEnvelope
+  per run. Each function runs a complete analysis in a single invocation with in-process fan-out,
+  which is the shape ADR-023 chose.
+
+  This template exists to be invoked locally. It has no event sources and no IAM policies: the
+  trigger chain (upload, extraction, chunking, indexing) belongs to the AWS ingestion pipeline
+  (ADR-007), and the demo authenticates to a LiteLLM proxy with a key supplied through
+  --env-vars, not to AWS.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 1024
+    # The real Lambda ceiling. A run of three specialists against a thinking-tier model takes
+    # tens of seconds, so nothing here is close to it — but ADR-023's argument is that the shell
+    # stops at max_wall_clock_seconds *before* this fires, and the timeout is the crash ORCH-02
+    # has to survive. Leaving the default 3 would hide which of the two actually stopped a run.
+    Timeout: 900
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        # Every variable the gateway reads, declared with an empty default and filled at invoke
+        # time from `run_case.py --env-vars`.
+        #
+        # The empty defaults are not padding — they are required. `sam local invoke --env-vars`
+        # only overrides variables the template already declares; anything undeclared is silently
+        # dropped, and the function fails inside the container with "requires
+        # IREPORTS_LITELLM_BASE_URL" as though the developer's shell were empty. That failure
+        # costs an hour the first time. `run_case.py` reads this list back out of the built
+        # template and refuses to forward a variable that is not here, so the two cannot drift.
+        #
+        # Empty is also the correct default on its own terms: `GatewayConfig` treats an empty
+        # string as absent and fails at construction naming the variable (ADR-008 — Q-01 means
+        # this project refuses to ship a plausible-looking model id).
+        IREPORTS_MODEL_ADAPTER: ""
+        IREPORTS_MODEL_MAX_TOKENS: ""
+        IREPORTS_MODEL_TIMEOUT_SECONDS: ""
+        IREPORTS_MODEL_MAX_RETRIES: ""
+        IREPORTS_EFFORT_ORCHESTRATOR: ""
+        IREPORTS_EFFORT_THINKING: ""
+        IREPORTS_EFFORT_FAST: ""
+        IREPORTS_LITELLM_BASE_URL: ""
+        IREPORTS_LITELLM_API_KEY: ""
+        IREPORTS_LITELLM_MODEL_ORCHESTRATOR: ""
+        IREPORTS_LITELLM_MODEL_THINKING: ""
+        IREPORTS_LITELLM_MODEL_FAST: ""
+        IREPORTS_AWS_REGION: ""
+        IREPORTS_AWS_PROFILE: ""
+        IREPORTS_BEDROCK_BASE_URL: ""
+        IREPORTS_BEDROCK_MODEL_ORCHESTRATOR: ""
+        IREPORTS_BEDROCK_MODEL_THINKING: ""
+        IREPORTS_BEDROCK_MODEL_FAST: ""
+        # Mirrors Budgets.max_parallel_specialists. Unbounded fan-out over paid model calls is
+        # the failure budgets exist to prevent, and it is worse here than on a laptop: a Lambda
+        # timeout is retried automatically, so a runaway fan-out is paid for more than once.
+        IREPORTS_DEMO_MAX_PARALLEL: "3"
+
+Resources:
+  HandRolledFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .stage/handrolled/
+      Handler: lambda_demo.handler.handler
+      Environment:
+        Variables:
+          CANDIDATE: hand-rolled
+
+  LangGraphFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .stage/langgraph/
+      Handler: lambda_demo.handler.handler
+      Environment:
+        Variables:
+          CANDIDATE: langgraph
