@@ -112,6 +112,12 @@ routing, policy packs, ingestion, `apps/`, `evals/`.
 
 ## Conventions
 
-- **Branches:** `feature/`, `bugfix/`, `hotfix/`, `chore/`, `docs/`
-- **Commits:** Conventional Commits — `<type>(scope): <description>`
-- **Quality:** Ruff, mypy --strict, Bandit, pytest. CI runs them on every push.
+- **Work on `main`.** No feature branches. This is a small exploratory project with one person on
+  it, and per-change branches fragmented the documentation across states — you could not tell which
+  version of a doc was current. Commit to `main` and push. Branch only for something genuinely
+  risky or long-running, and merge it quickly.
+- **Commits:** Conventional Commits — `<type>(scope): <description>`. Write a real body explaining
+  *why*; that record is the project's memory.
+- **Quality:** Ruff, mypy --strict, Bandit, pytest. CI runs them on every push — keep it green.
+- **Docs live with the code they describe.** When behaviour changes, update the doc in the same
+  commit. A stale doc is worse than a missing one.
