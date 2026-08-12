@@ -63,9 +63,9 @@ What exists and works:
 |---|---|
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema in `schemas/` (M1a, done) — includes `SpecialistResult` / `SpecialistCriterion` (CONT-01). Contract set **2.0.0**: ADR-022 removed `HumanDisposition` and `ReviewSummary` |
 | `packages/gateway/` | `ModelGateway` port with `litellm`, `bedrock`, and `stub` adapters; proven against a real endpoint |
-| `spikes/` | All three ADR-012 bake-off candidates, passing four legs each, plus a retained negative control and `measure.py` |
+| `spikes/` | All three ADR-012 bake-off candidates, passing four legs each, plus a retained negative control, `measure.py`, and `lambda_fit/` (ARCH-03, closed by ADR-023) |
 | `docs/handoff/` | Seven handoff documents, including the scorecard that resolved ADR-012 and `component-architecture.md`, the seventh, which closes Milestone 1a (ARCH-01) |
-| Tests | 159 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 160 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 What does **not** exist yet: `packages/orchestration`, `retrieval`, `ingestion`, `policy`,
 `delivery`, `observability`; `apps/`; `workers/`; `policy-packs/`; `cases/synthetic/`; `evals/`.
@@ -80,10 +80,13 @@ happens in ASAP, not inside a run. The per-component account of what is built, p
 the reason for each cut, lives in `docs/handoff/component-architecture.md`, enforced by
 `tests/architecture/test_build_state_table.py`.
 
-Outstanding before M1 sign-off: cold start and packaging under SAM local, which is unmeasured, has
-no scheduled phase because ARCH-03 was cut by ADR-020, and is the one number that could reopen
-ADR-012. `spikes/test_scorecard.py` still fails the moment a cold-start figure is recorded, which
-keeps the gap visible rather than closing it by omission.
+Outstanding before M1 sign-off: **program-leadership sign-off on the component boundaries**, which
+is a human review and cannot be produced mechanically — tracked in `01-HUMAN-UAT.md`.
+
+ARCH-03 (cold start and packaging under SAM local) is **closed**, not outstanding: ADR-020 cut it,
+ADR-023 measured it in `spikes/lambda_fit/` and closed it, and ADR-012 stands. What is still owed
+is LAMB-01 — proving a Lambda timeout resumes without re-paying for an in-flight model call, which
+depends on ORCH-02 and lands in Phase 2.
 
 **Do not scaffold empty directories.** Create a directory when the first real file lands in it.
 The target layout below is the plan, not the current state.

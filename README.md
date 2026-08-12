@@ -26,11 +26,12 @@ in ASAP (ADR-022).
 
 Milestone 1 is complete.
 
-- **1a — contracts and component architecture: done.** Fourteen data contracts as Pydantic v2
-  models with generated JSON Schema, in `packages/domain/` — the fourteenth is `SpecialistResult`,
-  the typed return value of one specialist sub-call (CONT-01). The component-architecture write-up
-  is complete: [docs/handoff/component-architecture.md](docs/handoff/component-architecture.md)
-  (ARCH-01).
+- **1a — contracts and component architecture: done.** Twelve data contracts as Pydantic v2
+  models with generated JSON Schema, in `packages/domain/`, including `SpecialistResult` — the
+  typed return value of one specialist sub-call (CONT-01). **Contract set 2.0.0:** ADR-022 removed
+  `HumanDisposition` and `ReviewSummary`, because review happens in ASAP after a run rather than
+  as a pause inside one. The component-architecture write-up is complete:
+  [docs/handoff/component-architecture.md](docs/handoff/component-architecture.md) (ARCH-01).
 - **1b — orchestration landscape scan: done.** ADR-012's candidate set amended on evidence:
   four candidates became three.
 - **1c — orchestration bake-off: done (2026-08-11). ADR-012 accepted — the framework is
@@ -40,6 +41,10 @@ Milestone 1 is complete.
   against 56 and 166 for the others. Losing spikes are retained and still run.
   See [`docs/handoff/orchestration-scorecard.md`](docs/handoff/orchestration-scorecard.md)
   and [`spikes/README.md`](spikes/README.md).
+- **Lambda fit: measured (2026-08-11, ADR-023).** ARCH-03 is closed. Each candidate packaged into
+  a real Lambda container under SAM local: ~0.5 s import for the framework-free control against
+  ~1.6–2.3 s for LangGraph, packages 9.1 MB and 19 MB zipped against a 50 MB limit. **ADR-012
+  stands.** See [`spikes/lambda_fit/`](spikes/lambda_fit/README.md).
 
 **Scope is the orchestrator spine (ADR-020).** Three phases, not nine. Nothing was deleted —
 sixteen requirements moved to v2 with their acceptance intact — and the account of what was
@@ -50,7 +55,7 @@ shrank rather than a project that chose.
 
 ```bash
 uv sync
-uv run pytest -q                                   # 126 passed, 8 skipped
+uv run pytest -q                                   # 160 passed, 8 skipped
 uv run python scripts/generate_schemas.py --check  # schemas/ current with the models
 
 # bake-off (needs Docker)

@@ -190,7 +190,7 @@
     },
     "ProposedFinding": {
       "additionalProperties": false,
-      "description": "A machine-proposed finding, pending human disposition.\n\nImmutable by construction (`ContractModel` is frozen). ADR-011 requires that both the machine\nproposal and the human-approved version are retained, which only works if the proposal cannot\nbe edited in place.",
+      "description": "A machine-proposed finding, pending human disposition.\n\nImmutable by construction (`ContractModel` is frozen). An envelope cites the proposal it came\nfrom, and that citation is meaningless if the proposal can be edited in place after the fact.",
       "properties": {
         "schema_version": {
           "const": "2.0.0",

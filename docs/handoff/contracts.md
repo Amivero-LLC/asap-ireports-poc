@@ -1,27 +1,36 @@
 # Data Contracts
 
-**Milestone 1a** · **Date: 2026-08-10, updated 2026-08-11 (CONT-01)** · **Contract version 1.0.0**
-(unchanged by CONT-01 — adding a root contract changes no existing contract's shape) ·
-**Envelope version 1.0.0**
+**Milestone 1a** · **Date: 2026-08-10, updated 2026-08-11 (ADR-022)** · **Contract version 2.0.0**
+· **Envelope version 2.0.0**
 
-Fourteen contracts as Pydantic v2 models with generated JSON Schema. They come before the
+**Breaking change, 2026-08-11.** ADR-022 supersedes ADR-011: iReports has no human interaction, so
+review happens in ASAP after a run finishes rather than as an in-run pause. `HumanDisposition` and
+`ReviewSummary` are **removed**, along with `AWAITING_HUMAN_REVIEW` / `REVIEW_RECORDED`, the
+`human_review_recorded` flag, and the envelope's `human_reviewed` / `reviewer_summary` /
+`human_disposition` / `reviewer_modified` fields. Fourteen contracts became twelve, and both
+versions moved to 2.0.0 because removing a published contract breaks any consumer that had started
+against it.
+
+Twelve contracts as Pydantic v2 models with generated JSON Schema. They come before the
 orchestration bake-off on purpose: **the contracts are the interface the orchestration decision
 has to satisfy** (ROADMAP 1a). A framework that cannot carry this state cheaply through a
-checkpoint, or cannot pause between a proposal and its disposition, is disqualified by these
-types rather than by opinion.
+checkpoint is disqualified by these types rather than by opinion. (That sentence used to end "or
+cannot pause between a proposal and its disposition" — the bake-off's leg 2 tested exactly that
+pause, and ADR-022 removed the workflow it modelled. The spikes retain the v1.0.0 types locally so
+the recorded evidence still runs; see `spikes/harness/.../bakeoff_v1_contracts.py`.)
 
 | Where | What |
 |---|---|
 | `packages/domain/src/ireports_domain/` | The models. Source of truth. |
 | `schemas/*.schema.json` | Generated JSON Schema, for non-Python consumers. |
 | `scripts/generate_schemas.py` | Regenerates. `--check` fails on drift; run it in CI. |
-| `tests/contract/` | The rules, asserted. 107 tests. |
+| `tests/contract/` | The rules, asserted. 114 tests. |
 
 ```bash
 uv sync
 uv run python scripts/generate_schemas.py          # regenerate schemas/
 uv run python scripts/generate_schemas.py --check  # CI: fail if schemas/ drifted
-uv run pytest tests/contract -q                    # 107 passed
+uv run pytest tests/contract -q                    # 114 passed
 ```
 
 ---
@@ -36,17 +45,15 @@ uv run pytest tests/contract -q                    # 107 passed
 | `EvidenceRecord` | `evidence` | A citable span snapshot with retrieval provenance |
 | `ContradictionRecord` | `contradiction` | Two case assertions that cannot both be true |
 | `AuthorityRoutingResult` | `authority-routing` | Which authorities apply, and why |
-| `ProposedFinding` | `finding` | A machine proposal, pending disposition |
+| `ProposedFinding` | `finding` | A machine proposal. The only finding type there is |
 | `SpecialistResult` | `specialist-result` | The typed return value of one specialist sub-call |
 | `RunManifest` | `run` | Everything needed to explain a past run |
-| `HumanDisposition` | `human-disposition` | One officer decision about one finding |
-| `ReviewSummary` | `review-summary` | The run-level review record |
-| `ASAPEnvelope` | `asap-envelope` | One versioned delivery per approved run |
+| `ASAPEnvelope` | `asap-envelope` | One versioned delivery per completed run, pinned `machine_generated` |
 | `OutboxMessage` | `outbox-message` | Transactional-outbox delivery intent |
 | `DeliveryReceipt` | `delivery-receipt` | What ASAP said, for reconciliation |
 
 Supporting types (`Subject`, `CaseContext`, `EvidenceSpan`, `AuthorityRoute`, `FindingAuthority`,
-`InformationGap`, `Budgets`, `DispositionedFinding`, `EvidenceExcerpt`, `SpecialistCriterion`, …)
+`InformationGap`, `Budgets`, `EvidenceExcerpt`, `SpecialistCriterion`, …)
 are nested inside these and appear in the generated `$defs`.
 
 ---
@@ -61,8 +68,10 @@ that proves the mechanism works.
 |---|---|---|
 | **No aggregate person-risk score** (ADR-014) | A test walks every published schema, following `$defs`, and rejects any property whose name functions as an aggregate score or determination | `test_no_contract_carries_an_aggregate_score` |
 | **No determinations, ever** (decision-support boundary) | `DecisionSupportText` — every narrative field a model can write into runs an `AfterValidator` that rejects determinative phrasing | `test_determinative_language_is_rejected`, `test_a_finding_cannot_state_a_determination` |
-| **Nothing reaches ASAP without a human disposition** (ADR-011) | A run in any delivery-side status with `human_review_recorded=False` fails validation; and the transition table is walked to prove no path reaches delivery without passing the gate | `test_no_path_reaches_delivery_without_human_review` |
-| **Both machine proposal and approved version retained** (ADR-011) | `ContractModel` is `frozen=True`; `HumanDisposition` references the proposal by id and carries `approved_text` alongside it | `test_the_machine_proposal_is_immutable`, `test_modification_retains_both_versions` |
+| **iReports models no human decision** (ADR-022) | A test walks every published schema for any field meaning disposition, approval, sign-off, `human_reviewed`, or `release_to_asap`. What an officer decides is ASAP's contract, not ours to guess at | `test_no_contract_models_a_human_decision` |
+| **A run never waits for a person** (ADR-022) | No `RunStatus` member implies waiting; the transition table is walked to prove every state can reach a terminal state unattended, and that `DELIVERED` is reachable with no human step | `test_no_run_state_waits_for_a_person`, `test_every_state_can_reach_a_terminal_state_unattended` |
+| **An envelope never claims to have been reviewed** (ADR-022) | `machine_generated` is pinned `Literal[True]`; `human_reviewed` is absent. An envelope is what gets reviewed, not the product of a review | `test_the_envelope_never_claims_to_have_been_reviewed` |
+| **The machine proposal cannot be edited in place** (ADR-014) | `ContractModel` is `frozen=True` **and** no contract carries a mutable container — every sequence field is `tuple[X, ...]`, because `frozen=True` alone leaves list contents appendable | `test_no_contract_field_is_a_mutable_container`, `test_the_machine_proposal_is_immutable` |
 | **Evidence before inference** (`CLAUDE.md`) | A finding that asserts something about the record must cite it; a span cannot serve two roles; `policy_citations` has `min_length=1` | `test_a_potential_issue_must_cite_evidence`, `test_a_span_cannot_serve_two_roles` |
 | **Never hard-code a model ID** (ADR-008) | `ModelAlias` is a three-member enum; no contract has a free-text model field | `test_model_reference_must_be_an_alias` |
 | **Routing is never inferred** (blueprint §10.2) | `RoutingBasis` has no `INFERRED` member; missing metadata produces `BLOCKED_MISSING_METADATA` with a required `blocking_gap` | `test_missing_routing_metadata_produces_a_blocking_gap` |
@@ -122,7 +131,7 @@ recorded and this repo's decisions win.
 | 3 | §10.6 has a free-text run-level `summary` | `reviewer_summary`, optional, reviewer-authored only, language-guarded | A machine-written run-level narrative is the most likely place for an aggregate characterization of a person to reappear (ADR-014). |
 | 4 | §10.4 validation field named `schema` | `schema_check` | `schema` shadows a `BaseModel` attribute. Cosmetic. |
 | 5 | §10.2 case example includes a `documents_root` and flat context | Same, plus `position_risk_level` / `position_sensitivity` made **optional** | Routing needs them, but a case genuinely may not have them. Optional-plus-blocking-gap is honest; a required field would force a caller to invent a value, which is exactly the inference §10.2 prohibits. |
-| 6 | §10.5 disposition is flat | Adds `DispositionedFinding` binding proposal to disposition, with `effective_*` accessors | Makes "which wording does delivery carry" a resolved question rather than a convention, without discarding either version. |
+| 6 | §10.5 has a disposition contract | **No disposition contract at all** (ADR-022) | Review happens in ASAP after the run. What an officer decides is ASAP's contract to define; publishing our guess at it would invite a downstream system to implement against a shape we do not own. |
 | 7 | — | `AuthorityRoutingResult` requires an explicit decision for **every** authority, including those that do not apply | An absent route is indistinguishable from an oversight. A reviewer needs to see that SEAD-4 was considered and declined, and on what basis. |
 
 `ReviewUrgency` deserves a specific note. It is a sequencing hint for the reviewer's queue — how
@@ -142,14 +151,16 @@ to have, derived from the contracts rather than asserted in advance.
    text stays out of anything widely serialized. This bears directly on the checkpoint-store
    threat model the 1b scan raised: the less that is in the blob, the less a deserialization
    trust boundary can leak.
-2. **The run must be pausable between a proposal and its disposition,** and resumable in a
-   different process — because `AWAITING_HUMAN_REVIEW` is a real state with no bypass, and the
-   disposition arrives out of band. This is ADR-012 spike legs 1 and 2, and the contracts are why
-   they are non-negotiable.
+2. **The run must survive dying mid-flight and resume in a different process.** Under ADR-011 this
+   was framed as pausing between a proposal and its disposition (ADR-012 spike legs 1 and 2).
+   ADR-022 removed that pause, but the requirement is unchanged and now rests on a harder case: a
+   crash mid-fan-out, and — under ADR-023's Lambda shape — a wall-clock timeout, which is the same
+   thing. Leg 1, `1-durable-resume`, is the live one; leg 2 tested the workflow that was removed.
 3. **Bounded fan-out must be enforceable.** `Budgets` is enforced by the deterministic shell, not
    requested of the model. A node that hits a ceiling must produce `INCOMPLETE_DUE_TO_BUDGET`,
-   which routes to human review rather than to failure — a truncated analysis must be visible to
-   a reviewer (blueprint §8.5).
+   which is packaged and delivered rather than failing — a truncated analysis must be visible to a
+   reviewer in ASAP rather than vanishing (blueprint §8.5). The requirement was never that the run
+   pause; only that the partial result arrive.
 4. **Contracts must round-trip through JSON without loss.** Asserted directly in
    `test_full_chain_reaches_a_delivered_envelope`, because a checkpoint is a serialization.
 
@@ -178,10 +189,12 @@ Stated plainly, because this package will be read as authoritative.
   not in the contract (ADR-021 Consequence 2). This is the weakest point in the spine, stated
   plainly here because a handoff reader who assumes an empty list means "clean" would be wrong
   without warning.
-- **`ReviewerRole` has one member.** ADR-011 specifies a single authorized reviewer role. Widening
-  it is a contract change reviewed against Q-07 (policy ownership), not an incidental string.
-- **The language guard is regex-based.** It will not catch a determination phrased in a way we did
-  not anticipate. The human review gate, not this validator, is the actual control.
+- **The language guard is regex-based, and it now carries more weight than it was designed to.**
+  It will not catch a determination phrased in a way we did not anticipate. Under ADR-011 that was
+  acceptable because the human review gate was the actual control; **ADR-022 removed that gate**,
+  so this validator and the fact that `ProposedFinding` is the only finding type are what the
+  decision-support boundary rests on. Stated plainly because it is the most likely place for the
+  boundary to fail quietly.
 - **Bandit flags three `B105` "possible hardcoded password"** on the `ClearanceRequirement` enum
   members (`secret`, `top_secret`, `top_secret_sci`). False positives; no high- or medium-severity
   findings.
@@ -197,11 +210,11 @@ figure that goes stale without anyone noticing.
 | Gate | Result |
 |---|---|
 | `ruff check packages tests scripts` | All checks passed |
-| `ruff format --check packages tests scripts` | 23 files already formatted |
-| `mypy --strict packages tests scripts` | Success: no issues found in 23 source files |
-| `pytest tests/contract` | 107 passed |
-| `pytest` (whole suite) | 142 passed, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
-| `generate_schemas.py --check` | schemas/ is current (14 contracts) |
+| `ruff format --check packages tests scripts` | 22 files already formatted |
+| `mypy --strict packages tests scripts` | Success: no issues found in 22 source files |
+| `pytest tests/contract` | 114 passed |
+| `pytest` (whole suite) | 160 passed, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| `generate_schemas.py --check` | schemas/ is current (12 contracts) |
 | `bandit -r packages` | 0 high, 0 medium severity (3 low-severity false positives, §5) |
 
 These gates are run by hand. There is no CI workflow in this repository yet, so nothing runs them

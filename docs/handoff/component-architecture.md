@@ -402,6 +402,13 @@ mixing these in would misrepresent both.
 | Synthetic cases with analyst-identified issues | `PLANNED` | `cases/synthetic/` | Phase 3, VAL-03 — the ground truth agreement is measured against |
 | Agreement scorer — machine findings vs analyst findings | `PLANNED` | `evals/scorers/agreement.py` | Phase 3, VAL-04 — this is what "human validation" means here |
 
+**Deployment fit.**
+
+| Component | Build state | Path | Notes |
+|---|---|---|---|
+| Lambda cold start and packaging, measured under SAM local | `BUILT` | `spikes/lambda_fit/` | ARCH-03, closed by ADR-023. One function per bake-off candidate, built with real Linux wheels; ADR-012 stands |
+| Timeout-resume across a Lambda invocation boundary | `PLANNED` | `tests/end_to_end/test_lambda_timeout_resume.py` | Phase 2, LAMB-01. Depends on ORCH-02 — a Lambda timeout is a crash mid-fan-out, and today that re-runs an in-flight model call |
+
 **Evidence base and the handoff package itself.**
 
 | Component | Build state | Path | Notes |
@@ -458,11 +465,13 @@ reader never has to guess whether something is **coming later** or **not coming 
 as `PLANNED` rows in §4 naming Phase 2, not as cuts — a reader comparing this document against
 ADR-020's original cut table should not read their absence here as an omission.
 
+**ARCH-03 is not in this table either, for the same reason.** ADR-020 cut it; ADR-023 measured it
+and closed it. It appears in §4 as `BUILT`.
+
 | Component | Build state | Path | Notes |
 |---|---|---|---|
 | Second orchestration adapter, one conformance suite over both | `DESIGNED-NOT-BUILT` | — | ORCH-05. The port plus ORCH-01's no-import test is the lock-in protection; a parallel implementation would double every downstream phase |
 | Outcome-level scorecard comparing both adapters | `DESIGNED-NOT-BUILT` | — | BAKE-01. Needs a second adapter; ADR-012 stands as decided and is no longer under re-test |
-| Cold start and packaging measured under SAM local | `DESIGNED-NOT-BUILT` | — | ARCH-03. Was scoped to the bake-off verdict and now has no scheduled phase; `spikes/test_scorecard.py` still fails the moment a figure is recorded |
 | ADR-012's pre-registered supersession criteria | `DESIGNED-NOT-BUILT` | — | ARCH-05. Existed only to stop a bake-off from choosing its own rubric; the bake-off it would have gated (BAKE-01) is itself cut |
 | Library and framework dependency inventory | `DESIGNED-NOT-BUILT` | — | ARCH-02. The dependency set is small and stable under the narrowed spine |
 | Keyed MAC over serialized checkpoint state, verified on load | `DESIGNED-NOT-BUILT` | — | CKPT-01. The single largest recorded security gap; nothing today detects a tampered checkpoint row that still parses |
@@ -484,10 +493,19 @@ tabulated away:
 checkpoint row that still parses. The spine exercises the checkpoint store unhardened, and that is
 a deliberate, recorded cost rather than an oversight.
 
-**ARCH-03, cold start and packaging under SAM local, is unmeasured and now has no scheduled
-phase.** `spikes/test_scorecard.py` still fails the moment a cold-start figure is recorded, which
-keeps the gap visible rather than closing it by omission. This is the one number most likely to
-reopen ADR-012.
+**ARCH-03 is closed, and was closed by measuring rather than by deciding it did not matter.**
+ADR-020 cut it; ADR-023 restored and settled it. `spikes/lambda_fit/` packages each bake-off
+candidate into a real Lambda container and times the orchestrator import: roughly 0.5 s for the
+framework-free control against 1.6–2.3 s for LangGraph, about 3×, with packages of 9.1 MB and
+19 MB zipped against a 50 MB limit. **ADR-012 stands** — dependency weight was the strongest
+argument against LangGraph and the number does not support it. The figures are load-sensitive and
+are stated as a range rather than a constant; see ADR-023 for what they are and are not.
+
+**What remains unproven is the harder half.** The 15-minute Lambda ceiling is survivable because a
+timeout is a crash mid-fan-out, and the shell checkpoints before the ceiling and resumes in the
+next invocation — but that depends on ORCH-02, which is unbuilt and today re-runs an in-flight
+model call in 11 of 24 crashes. Under Lambda this is worse than locally, because Lambda retries
+automatically. LAMB-01 proves it in Phase 2.
 
 **HAND-03, the `bedrock` adapter, has never been run in any partition.** It is verified as
 correctly constructed and nothing more — a passing test suite is not evidence of connectivity, and
