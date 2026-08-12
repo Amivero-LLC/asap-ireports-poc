@@ -15,8 +15,12 @@ or otherwise make a final suitability, fitness, credentialing, or national-secur
 determination. Final determinations remain with trained and authorized Government personnel.
 
 This is enforced structurally, not by policy statement: no aggregate risk score exists in any
-contract, findings are proposals until a human records a disposition, and nothing reaches ASAP
-without that disposition.
+contract, `ProposedFinding` is the only finding type the system can produce, no contract carries a
+field claiming a human decided anything, and every envelope is pinned `machine_generated`.
+
+iReports runs unattended and has no reviewer-facing surface. **Review happens in ASAP** — an
+authorized officer reads the proposals there, with ASAP's tooling, and their decision is recorded
+in ASAP (ADR-022).
 
 ## Status
 

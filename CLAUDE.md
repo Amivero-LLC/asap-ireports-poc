@@ -28,16 +28,28 @@ information gaps **for review by an authorized officer**. It must never grant, d
 suspend, or otherwise make a final suitability, fitness, credentialing, or national-security
 eligibility determination.
 
+**Review happens in ASAP, not here (ADR-022).** iReports has no human interaction of any kind: it
+runs unattended start to finish and emits proposals. An authorized officer reviews them in ASAP,
+with ASAP's tooling, and their decision is recorded in ASAP. Do not add a review pause, a
+disposition contract, a reviewer role, or any field recording what a human decided — that is
+ASAP's contract to define, and ADR-022 superseded the ADR-011 gate that used to live here.
+
 Concretely, this constrains the code:
 
 - No universal person-risk score. No aggregate "risk level" field on any contract.
-- Every finding is a *proposed* finding until a human reviewer records a disposition.
-- Nothing reaches ASAP without an explicit human disposition — the gate is a state transition,
-  not a config flag.
-- Both the original machine proposal and the human-approved version are retained.
+- Every finding is a *proposed* finding. `ProposedFinding` is the only finding type; nothing
+  promotes it to anything else.
+- No contract carries a field that models a human decision — no disposition, approval,
+  sign-off, `human_reviewed`, or `release_to_asap`.
+- Every envelope is pinned `machine_generated: true` and is un-reviewed by construction.
+- Determinative language is rejected on every text field, whoever wrote it.
 
-If a change would let the system emit a determination, or would let a run reach delivery without
-a recorded human disposition, stop and raise it.
+The boundary used to rest on two mechanisms: a state-machine gate *and* the fact that everything
+emitted is a proposal. **The gate is gone, so the second one now carries it alone** — treat the
+`ProposedFinding` type and `reject_determinative_language` as load-bearing, not as belt-and-braces.
+
+If a change would let the system emit a determination, or would have iReports model, record, or
+wait on a human decision, stop and raise it.
 
 ## Current state
 
@@ -49,11 +61,11 @@ What exists and works:
 
 | Area | State |
 |---|---|
-| `packages/domain/` | 14 Pydantic v2 contracts + generated JSON Schema in `schemas/` (M1a, done) — includes `SpecialistResult` / `SpecialistCriterion` (CONT-01) |
+| `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema in `schemas/` (M1a, done) — includes `SpecialistResult` / `SpecialistCriterion` (CONT-01). Contract set **2.0.0**: ADR-022 removed `HumanDisposition` and `ReviewSummary` |
 | `packages/gateway/` | `ModelGateway` port with `litellm`, `bedrock`, and `stub` adapters; proven against a real endpoint |
 | `spikes/` | All three ADR-012 bake-off candidates, passing four legs each, plus a retained negative control and `measure.py` |
 | `docs/handoff/` | Seven handoff documents, including the scorecard that resolved ADR-012 and `component-architecture.md`, the seventh, which closes Milestone 1a (ARCH-01) |
-| Tests | 126 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 159 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 What does **not** exist yet: `packages/orchestration`, `retrieval`, `ingestion`, `policy`,
 `delivery`, `observability`; `apps/`; `workers/`; `policy-packs/`; `cases/synthetic/`; `evals/`.
@@ -61,9 +73,10 @@ What does **not** exist yet: `packages/orchestration`, `retrieval`, `ingestion`,
 **Scope is the orchestrator spine (ADR-020).** Three phases, not nine. Nothing was deleted:
 eighteen requirements moved to `.planning/REQUIREMENTS.md` § v2 with their acceptance intact, each
 owed a designed-not-built entry in the handoff. ADR-021 restored retrieval to the spine — RETR-01
-and RETR-02 are back, while RETR-03 and CONT-02 stay cut. ADR-011 (the human disposition gate) and
-ADR-014 (no aggregate score) were considered for the cut and explicitly kept — both remain
-NON-NEGOTIABLE. The per-component account of what is built, planned, and designed-not-built, with
+and RETR-02 are back, while RETR-03 and CONT-02 stay cut. ADR-014 (no aggregate score) was considered for the cut
+and explicitly kept — it remains NON-NEGOTIABLE. ADR-011 (the in-run disposition gate) was also
+kept by ADR-020 and has since been **superseded by ADR-022**, which removed it entirely: review
+happens in ASAP, not inside a run. The per-component account of what is built, planned, and designed-not-built, with
 the reason for each cut, lives in `docs/handoff/component-architecture.md`, enforced by
 `tests/architecture/test_build_state_table.py`.
 
@@ -145,7 +158,7 @@ model reasons; it does not decide control flow, and it does not decide whether i
 valid.
 
 **PostgreSQL is the system of record for workflow state.** OpenSearch is a retrieval index.
-Never treat a search index as authoritative for findings, dispositions, or run state.
+Never treat a search index as authoritative for findings or run state.
 
 **Retrieval goes through the port, never a raw client.** All OpenSearch field names, filters, and
 mappings live in one mapping module — the AWS collection's real schema is not fully known yet, so
