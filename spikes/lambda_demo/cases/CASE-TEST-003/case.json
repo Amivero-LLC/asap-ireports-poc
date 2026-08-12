@@ -1,0 +1,38 @@
+{
+  "case_id": "CASE-TEST-003",
+  "case_name": "Periodic Reinvestigation - Hela Odinsdottir",
+  "tenant_id": "AMIVERO-SYNTHETIC",
+  "program_id": "AMILENS-DEMO",
+  "subject": {
+    "subject_id": "SUBJ-003",
+    "display_name": "Hela Odinsdottir",
+    "citizenship": [
+      "United States"
+    ]
+  },
+  "case_context": {
+    "person_status": "applicant",
+    "service_type": "competitive_service",
+    "position_title": "Import Specialist",
+    "position_risk_level": "high_risk_public_trust",
+    "position_sensitivity": "critical_sensitive",
+    "piv_required": true,
+    "conditional_offer_date": "2026-04-02T00:00:00Z",
+    "agency_component": "CBP"
+  },
+  "requested_analyses": [
+    "suitability",
+    "national_security_eligibility"
+  ],
+  "policy_pack_ids": [
+    "federal-core-2026-07-30",
+    "sead4-current"
+  ],
+  "document_expectations": [
+    "security_questionnaire",
+    "report_of_investigation",
+    "subject_interview"
+  ],
+  "created_at": "2026-08-12T00:00:00Z",
+  "created_by": "amilens-fixture-import"
+}
