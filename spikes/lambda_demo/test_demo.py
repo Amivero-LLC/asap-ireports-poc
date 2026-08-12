@@ -19,13 +19,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ireports_domain import ASAPEnvelope
+from ireports_domain import ASAPEnvelope, DecisionDomain
 from ireports_gateway import StubGateway
 from lambda_demo import handler as handler_module
-from lambda_demo.case_loader import load_case
+from lambda_demo.case_loader import LoadedCase, load_case
+from lambda_demo.criteria import CATALOG, NoApplicableCriteriaError, criteria_for
 from lambda_demo.orchestrator import ORCHESTRATORS
 from lambda_demo.package import build_envelope
-from lambda_demo.specialist import CRITERIA, analyze
+from lambda_demo.specialist import analyze
 
 CASE_DIR = Path(__file__).parent / "cases" / "AMI-SYN-FIN-001"
 RUN_ID = "run_test_0001"
@@ -101,7 +102,63 @@ def test_both_orchestrators_produce_the_same_findings(case) -> None:
         for name, result in results.items()
     }
     assert shapes["hand-rolled"] == shapes["langgraph"]
-    assert len(shapes["hand-rolled"]) == len(CRITERIA)
+    assert len(shapes["hand-rolled"]) == len(criteria_for(case.manifest))
+
+
+# ---------------------------------------------------------------------------
+# The fan-out width comes from the case
+# ---------------------------------------------------------------------------
+
+
+def _manifest(case, **overrides):
+    return case.manifest.model_copy(update=overrides)
+
+
+def test_criteria_come_from_the_case_not_a_constant(case) -> None:
+    """Different requests select different criteria. This is the whole point of the change.
+
+    A fan-out whose width is fixed at import time is one line in any framework, so it cannot
+    distinguish two orchestrators. Width as runtime data is what makes the comparison real.
+    """
+    both = criteria_for(case.manifest)
+    suitability_only = criteria_for(
+        _manifest(case, requested_analyses=(DecisionDomain.SUITABILITY,))
+    )
+
+    assert len(suitability_only) < len(both)
+    assert {c.decision_domain for c in suitability_only} == {DecisionDomain.SUITABILITY}
+    # Narrowing the pack list narrows the selection too — both dimensions are live.
+    assert len(criteria_for(_manifest(case, policy_pack_ids=("sead4-current",)))) < len(both)
+
+
+def test_both_orchestrators_fan_out_to_the_width_the_case_asks_for(case) -> None:
+    """The runtime width reaches both implementations, not just the selection function.
+
+    Asserted on `outcomes` rather than `findings`: a criterion that produces no findings still ran,
+    and the count that matters here is how many specialists were dispatched.
+    """
+    narrowed = LoadedCase(
+        manifest=_manifest(case, requested_analyses=(DecisionDomain.SUITABILITY,)),
+        spans=case.spans,
+        root=case.root,
+    )
+    expected = len(criteria_for(narrowed.manifest))
+    assert expected < len(CATALOG)  # otherwise this test proves nothing
+
+    for name, orchestrator in ORCHESTRATORS.items():
+        result = orchestrator.run(narrowed, _gateway(_finding()), RUN_ID)
+        assert len(result.outcomes) == expected, f"{name} fanned out to the wrong width"
+        assert result.criteria == criteria_for(narrowed.manifest)
+
+
+def test_a_case_with_no_applicable_criteria_raises(case) -> None:
+    """Better than a successful run that analysed nothing.
+
+    An empty selection would complete, emit no findings, and be indistinguishable from a case where
+    every criterion came back clean — the one confusion this system can least afford.
+    """
+    with pytest.raises(NoApplicableCriteriaError, match="no criterion matching both"):
+        criteria_for(_manifest(case, policy_pack_ids=("some-pack-we-do-not-have",)))
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +173,7 @@ def test_unresolvable_citation_drops_the_finding(case) -> None:
     the failure this architecture exists to prevent.
     """
     outcome = analyze(
-        CRITERIA[0], case, _gateway(_finding(supporting_evidence=["ev_001", "ev_999"])), RUN_ID
+        CATALOG[0], case, _gateway(_finding(supporting_evidence=["ev_001", "ev_999"])), RUN_ID
     )
     assert outcome.findings == ()
     assert any("ev_999" in reason for reason in outcome.rejected)
@@ -130,7 +187,7 @@ def test_determinative_language_is_rejected_by_the_contract(case) -> None:
     firing on text the prompt explicitly asked the model not to write.
     """
     outcome = analyze(
-        CRITERIA[0],
+        CATALOG[0],
         case,
         _gateway(
             _finding(
@@ -150,7 +207,7 @@ def test_a_span_cited_in_both_roles_is_demoted_and_recorded(case) -> None:
     into the rejection record so it is visible rather than silent.
     """
     outcome = analyze(
-        CRITERIA[0],
+        CATALOG[0],
         case,
         _gateway(_finding(supporting_evidence=["ev_001"], mitigating_evidence=["ev_001"])),
         RUN_ID,
@@ -177,7 +234,7 @@ def test_malformed_model_output_never_crashes_the_shell(case, payload: str) -> N
     one must also leave a reason behind — a silently empty result is indistinguishable from a
     clean analysis, which is the worst outcome this system can produce.
     """
-    outcome = analyze(CRITERIA[0], case, StubGateway(default=payload), RUN_ID, attempts=1)
+    outcome = analyze(CATALOG[0], case, StubGateway(default=payload), RUN_ID, attempts=1)
     assert outcome.findings == ()
     assert outcome.rejected  # rejected with a reason, not silently empty
 
@@ -187,6 +244,8 @@ def test_malformed_model_output_never_crashes_the_shell(case, payload: str) -> N
     [
         pytest.param('{"findings": "[]"}', 0, id="empty-array-as-a-string"),
         pytest.param(None, 1, id="a-bare-object-where-an-array-was-asked-for"),
+        pytest.param("NESTED", 1, id="the-envelope-repeated-inside-itself"),
+        pytest.param("NESTED_EMPTY", 0, id="a-nested-empty-array-is-genuinely-empty"),
     ],
 )
 def test_the_two_observed_shape_coercions(case, payload: str | None, expected: int) -> None:
@@ -197,8 +256,17 @@ def test_the_two_observed_shape_coercions(case, payload: str | None, expected: i
     An empty array stays empty: "the record shows nothing relevant" is a valid answer, and
     manufacturing a rejection for it would be as wrong as manufacturing a finding.
     """
-    text = payload if payload is not None else json.dumps({"findings": _finding()})
-    outcome = analyze(CRITERIA[0], case, StubGateway(default=text), RUN_ID, attempts=1)
+    if payload == "NESTED":
+        # {"findings": {"findings": [ ... ]}} — observed live 2026-08-12. The old coercion wrapped
+        # this instead of unwrapping it and reported "missing every required field".
+        text = json.dumps({"findings": {"findings": [_finding()]}})
+    elif payload == "NESTED_EMPTY":
+        text = json.dumps({"findings": {"findings": []}})
+    elif payload is None:
+        text = json.dumps({"findings": _finding()})
+    else:
+        text = payload
+    outcome = analyze(CATALOG[0], case, StubGateway(default=text), RUN_ID, attempts=1)
     assert len(outcome.findings) == expected
 
 
@@ -264,7 +332,7 @@ def test_handler_returns_an_envelope(monkeypatch) -> None:
     payload = handler_module.handler({"case_id": CASE_DIR.name, "run_id": RUN_ID})
 
     assert payload["run_id"] == RUN_ID
-    assert payload["findings"] == len(CRITERIA)
+    assert payload["findings"] == len(CATALOG)  # this case selects the whole catalog
     assert ASAPEnvelope.model_validate(payload["envelope"])
 
 

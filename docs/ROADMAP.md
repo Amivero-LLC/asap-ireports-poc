@@ -30,17 +30,21 @@ Each item below notes what it tells us about custom Python vs LangGraph.
 
 # Part 1 · Make the orchestration real
 
-## 1 · Fan out from the case, not from a constant
+## 1 · Fan out from the case, not from a constant ✅ done 2026-08-12
 
-`CRITERIA` is a hard-coded tuple of three in `specialist.py`. `CaseManifest` already carries
-`requested_analyses` and `policy_pack_ids` — the specialists should derive from those, so the graph
-shape depends on runtime data.
+Criteria now derive from `requested_analyses` × `policy_pack_ids` via `criteria.py`, so the fan-out
+width is runtime data. Catalog widened to five so selection is real rather than a formality.
 
-Smallest change here, and it is the first thing that makes the two paths meaningfully different.
+**What it told us — the first genuine divergence between the two paths.** The hand-rolled version
+needed *no change at all*; `pool.map` never cared how long the list was. LangGraph had to be rebuilt
+around `Send`, because one-node-per-criterion only works if the criteria are known before the graph
+is built. Not worse — the graph shape is now constant while the work is variable, which is what a
+checkpoint needs — but structural where the other was free. See `LESSONS.md`.
 
-**Tells us:** whether dynamic graph construction is awkward. LangGraph needs its `Send` API for
-runtime-width fan-out; the hand-rolled path just loops over a computed list. This is the first place
-one of them is obviously nicer.
+**It also found a real bug.** Widening the catalog surfaced a response shape
+(`{"findings": {"findings": [...]}}`) that the coercion wrapped instead of unwrapping, so a criterion
+reported zero findings when the model had answered fine. Silent under-analysis, the exact failure
+this system exists to prevent. Fixed; 7 findings instead of 5, and 19.7k tokens instead of 28.8k.
 
 ## 2 · Cross-criterion synthesis
 

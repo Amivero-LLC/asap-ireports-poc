@@ -25,13 +25,54 @@ array was asked for, or as an array containing a bare string. Same schema, same 
 **What it looked like.** Intermittent empty results that read as model nondeterminism or a bad
 prompt. We rewrote the prompt twice before realising the prompt was fine and the *shape* was wrong.
 
-**What to do.** Parse defensively and never index into a model response. Coerce the two recoverable
-shapes (string-encoded JSON, single object where a list was expected), reject everything else with
-a reason recorded. Then allow one bounded retry — bounded, because a node that retries until it
-likes the answer is selecting for agreeable output rather than correct output.
+**What to do.** Parse defensively and never index into a model response. Normalize the recoverable
+shapes, reject everything else with a reason recorded, then allow one bounded retry — bounded,
+because a node that retries until it likes the answer is selecting for agreeable output rather than
+correct output.
 
-See `spikes/lambda_demo/src/lambda_demo/specialist.py`. The four malformed shapes we have actually
-seen are pinned as test cases in `test_demo.py`.
+Every shape below came from the *same* schema and the same prompt:
+
+| Returned | Handling |
+|---|---|
+| `[...]` | The requested shape |
+| `"[...]"` — the array as a JSON string | Parse it |
+| `{...}` — one finding where an array was asked for | Wrap it |
+| `{"findings": [...]}` — **the envelope repeated inside itself** | **Unwrap it** |
+
+See `spikes/lambda_demo/src/lambda_demo/specialist.py`; all of them are pinned as test cases in
+`test_demo.py`.
+
+### The nested-envelope shape caused silent under-analysis for weeks `[measured]`
+
+Worth its own entry, because of *how* it hid.
+
+**What happened.** The coercion above handled a bare object by wrapping it. When the model returned
+`{"findings": {"findings": [...]}}`, wrapping produced `[{"findings": [...]}]` — an object missing
+every required field — which the validator correctly rejected. **So a response the model had
+answered perfectly well, only nested one layer too deep, was recorded as unparseable and the
+criterion reported zero findings.**
+
+**What it looked like.** A criterion that came back clean. Which is precisely the failure this
+system is built to prevent: silent under-analysis is indistinguishable from a clean record, and it
+is the most dangerous thing this architecture can produce.
+
+**How it was found.** The rejection message said `missing/blank ['title', 'observation', ...]` and
+stopped there — true, and useless. Adding the keys that *were* present turned it into
+`missing/blank [...] (keys present: ['findings'])`, and it was diagnosed on the next run.
+
+**The measured effect of the fix**, same case, same criteria, one run each:
+
+| | Before | After |
+|---|---|---|
+| Findings | 5 | 7 |
+| Shape rejections | 5 | **0** |
+| Tokens | 28,759 | 19,717 |
+
+Fewer tokens *and* more findings, because the wasted retries were firing on responses that were
+already fine.
+
+**The lesson is about diagnosability, not parsing.** A rejection that does not say what it saw
+cannot be acted on. Spend the extra line.
 
 ### `output_config.format` is accepted and silently not enforced `[measured]`
 
@@ -142,13 +183,46 @@ production cold-start figure.
 
 ## Orchestration
 
-### LangGraph fan-out state must be defined at module level `[measured]`
+### Every type LangGraph inspects must resolve from module scope `[measured]`
 
-A `TypedDict` defined inside a method raises `NameError: Annotated` at graph construction when the
-module uses `from __future__ import annotations`. Annotations become strings, LangGraph resolves
-them with `get_type_hints`, and a type nested in a function has no resolvable scope.
+We hit this twice, in two different disguises, before seeing the general rule.
 
-It looks exactly like a LangGraph bug. It is not. Define fan-out state at module level.
+1. A `TypedDict` defined inside a method → `NameError: Annotated` at graph construction.
+2. A conditional-edge function annotated `-> list[Send]`, where `Send` is imported *inside* the
+   method → `NameError: name 'Send' is not defined`.
+
+**The rule:** `from __future__ import annotations` turns every annotation into a string, and
+LangGraph resolves them with `get_type_hints` at module scope. So any type named in a signature
+LangGraph inspects — node, conditional edge, state — must be importable from module level.
+
+Both failures look exactly like a LangGraph bug. Neither is. The collision is between two
+individually reasonable choices: postponed annotations, and a lazy framework import that keeps the
+framework optional in the package.
+
+If you must keep the import lazy, **leave the return type unannotated**. That is uglier than the
+alternatives and it is the only one that works.
+
+### A `Send` node receives the payload, not the graph state `[measured]`
+
+Dynamic fan-out goes through `Send("node", payload)`, and the target node's argument is that
+payload — not the accumulated state. So the node signature changes meaning entirely when you move
+from static nodes to `Send`, and no type checker will catch it, because the signature is whatever
+you wrote.
+
+### Dynamic fan-out width is free in Python and structural in LangGraph `[measured]`
+
+Moving fan-out width from a constant to runtime data (derived from the case) was the first change
+where the two orchestration paths genuinely diverged:
+
+| | Change required |
+|---|---|
+| Hand-rolled | **None.** `pool.map` never cared how long the list was |
+| LangGraph | **Rebuilt around a different primitive.** One node per criterion added at construction only works if the criteria are known before the graph is built. They are not, so it became one node dispatched N times via `Send` |
+
+The LangGraph version is not worse — arguably better, because the graph shape is now constant while
+the work is variable, which is the property a checkpoint needs (a checkpoint refers to node names
+that must still exist on resume). But it is a *structural* change where the other path had none,
+and that asymmetry is the kind of evidence ADR-024's decision should rest on.
 
 ### The concurrent-write reducer is the whole trick
 

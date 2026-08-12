@@ -22,7 +22,6 @@ code rather than something the model is asked to be careful about:
 
 from __future__ import annotations
 
-import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,7 +29,6 @@ from typing import Any
 
 from ireports_domain import (
     Confidence,
-    DecisionDomain,
     FindingAuthority,
     FindingClassification,
     FindingValidation,
@@ -43,60 +41,7 @@ from ireports_domain import (
 from ireports_gateway.port import Message, ModelGateway, ModelRequest
 
 from .case_loader import EvidenceSpan, LoadedCase
-
-
-@dataclass(frozen=True)
-class Criterion:
-    """One thing being checked under one named authority.
-
-    Hard-coded here rather than routed from a policy pack: authority routing (ROUT-01) and policy
-    packs are `DESIGNED-NOT-BUILT` under ADR-020, so this spike names its criteria directly and
-    says so instead of pretending to a routing engine it does not have.
-    """
-
-    node_id: str
-    decision_domain: DecisionDomain
-    policy_pack_id: str
-    policy_id: str
-    criterion_id: str
-    question: str
-
-
-CRITERIA: tuple[Criterion, ...] = (
-    Criterion(
-        node_id="foreign_influence_specialist",
-        decision_domain=DecisionDomain.NATIONAL_SECURITY_ELIGIBILITY,
-        policy_pack_id="sead4-current",
-        policy_id="SEAD-4",
-        criterion_id="GUIDELINE-B",
-        question=(
-            "Foreign influence: contacts with foreign nationals, foreign financial interests, "
-            "and any resulting divided loyalties or vulnerability to coercion."
-        ),
-    ),
-    Criterion(
-        node_id="financial_considerations_specialist",
-        decision_domain=DecisionDomain.SUITABILITY,
-        policy_pack_id="federal-core-2026-07-30",
-        policy_id="5-CFR-731",
-        criterion_id="731-202-B-4",
-        question=(
-            "Financial responsibility: delinquent debt, unexplained affluence, and whether the "
-            "record shows a pattern or an explained and resolving isolated event."
-        ),
-    ),
-    Criterion(
-        node_id="candor_specialist",
-        decision_domain=DecisionDomain.SUITABILITY,
-        policy_pack_id="federal-core-2026-07-30",
-        policy_id="5-CFR-731",
-        criterion_id="731-202-B-3",
-        question=(
-            "Candor: material omissions or inconsistencies between what the subject reported "
-            "and what the record shows, and whether the record explains them."
-        ),
-    ),
-)
+from .criteria import Criterion
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -197,6 +142,50 @@ class SpecialistOutcome:
     output_tokens: int
 
 
+MAX_UNWRAP_DEPTH = 3
+"""How many layers of re-wrapping to peel before giving up. Three is generous; two were observed."""
+
+
+def _normalize_findings(raw: Any) -> Any:
+    """Coerce the shapes a model actually returns into the array that was requested.
+
+    ADR-018 in practice. All of these came from the *same* schema and the same prompt:
+
+    | Returned | Handling |
+    |---|---|
+    | `[...]` | The requested shape |
+    | `"[...]"` — the array as a JSON string | Parse it |
+    | `{...}` — one finding where an array was asked for | Wrap it |
+    | `{"findings": [...]}` — the envelope repeated inside itself | **Unwrap it** |
+
+    That last one is why this is a loop rather than the two `if`s it used to be. The old code saw a
+    dict and wrapped it, producing `[{"findings": [...]}]` — an "object missing every required
+    field," which it duly rejected. So a response the model had answered correctly, only nested one
+    layer too deep, was recorded as unparseable.
+
+    **It was invisible for weeks** because the rejection said "missing/blank [title, observation,
+    ...]" and stopped there. Adding `keys present:` to that message identified it in a single run.
+    Diagnosability is a feature; a rejection that does not say what it saw cannot be acted on.
+
+    Unwrapping is only attempted when the dict's *sole* key is `findings`. A dict that has a
+    `findings` key alongside real finding fields is ambiguous, and guessing there would risk
+    discarding an actual finding.
+    """
+    for _ in range(MAX_UNWRAP_DEPTH):
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                return None
+        elif isinstance(raw, dict) and set(raw) == {"findings"}:
+            raw = raw["findings"]
+        elif isinstance(raw, dict):
+            return [raw]
+        else:
+            return raw
+    return raw
+
+
 def _evidence_block(spans: tuple[EvidenceSpan, ...]) -> str:
     return "\n\n".join(
         f"[{s.evidence_id}] (source: {s.source_reliability}, {s.document_id} p.{s.page_number})\n"
@@ -289,18 +278,9 @@ def _attempt(
             output_tokens=response.usage.output_tokens,
         )
 
-    raw_findings = payload.get("findings") if isinstance(payload, dict) else None
-
-    # Observed in practice, and worth naming: the same request with the same tool schema
-    # sometimes returns `findings` as a JSON *string* rather than an array. This is exactly what
-    # ADR-018 means by "a requested schema is verified, not trusted" — a schema is a request, and
-    # the model is free to answer it approximately. One coercion attempt, then reject.
-    if isinstance(raw_findings, str):
-        with contextlib.suppress(json.JSONDecodeError):
-            raw_findings = json.loads(raw_findings)
-    if isinstance(raw_findings, dict):
-        # Also observed: a single finding object where an array was requested. Same lesson.
-        raw_findings = [raw_findings]
+    raw_findings = _normalize_findings(
+        payload.get("findings") if isinstance(payload, dict) else None
+    )
 
     if not isinstance(raw_findings, list):
         return SpecialistOutcome(

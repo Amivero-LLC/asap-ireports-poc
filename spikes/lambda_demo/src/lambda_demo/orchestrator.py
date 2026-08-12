@@ -1,16 +1,20 @@
-"""Two orchestrators behind one port — the architectural claim, made runnable.
+"""Two orchestrators behind one port, both fanning out on runtime data.
 
-ADR-012 chose LangGraph, and the protection against that choice becoming lock-in is that nodes
-depend on **our** interface and never on LangGraph. That is easy to assert and only meaningful if
-someone can run the same case through a second implementation and get the same shape of answer
-out. So there are two here: a hand-rolled one with no orchestration framework at all, and a
-LangGraph one.
+ADR-024 keeps custom Python and LangGraph both live until there is evidence to choose between
+them. The protection against either becoming lock-in is that nodes depend on **our** interface and
+never on a framework — easy to assert, and only meaningful because a second implementation
+genuinely runs the same case and produces the same shape of answer.
 
-`analyze_case` in `specialist.py` is shared by both, untouched. Neither orchestrator knows what a
-criterion is; neither specialist knows what a graph is. That separation is the thing being shown.
+`analyze` in `specialist.py` is shared by both, untouched. Neither orchestrator knows what a
+criterion means; neither specialist knows what a graph is.
+
+**The fan-out width comes from the case** (`criteria_for`), not from a constant. That is what makes
+this a comparison at all: a fixed-width fan-out is one line in any framework, so a fixed one
+measures nothing. With the width decided at runtime the two implementations stop being the same
+program — see `LangGraphOrchestrator`, where it forces a different graph construction entirely.
 
 The no-import rule is enforced rather than described: `test_nodes_do_not_import_langgraph` in
-`spikes/lambda_demo/test_demo.py` fails if the specialist module ever grows a LangGraph import.
+`spikes/lambda_demo/test_demo.py` fails if an analysis module ever grows a LangGraph import.
 """
 
 from __future__ import annotations
@@ -26,7 +30,8 @@ from ireports_domain import ProposedFinding
 from ireports_gateway.port import ModelGateway
 
 from .case_loader import LoadedCase
-from .specialist import CRITERIA, Criterion, SpecialistOutcome, analyze
+from .criteria import Criterion, criteria_for
+from .specialist import SpecialistOutcome, analyze
 
 MAX_PARALLEL = int(os.environ.get("IREPORTS_DEMO_MAX_PARALLEL", "3"))
 """Bounded fan-out. `Budgets.max_parallel_specialists` defaults to 4 and caps at 16; this mirrors
@@ -46,6 +51,10 @@ class RunResult:
     findings: tuple[ProposedFinding, ...]
     outcomes: tuple[SpecialistOutcome, ...]
     wall_seconds: float
+    criteria: tuple[Criterion, ...] = ()
+    """Which criteria this case actually selected. Recorded because the fan-out width is now
+    runtime data — without it, a run of four specialists and a run of two are indistinguishable
+    after the fact, and "why did this case get analysed differently" is unanswerable."""
 
     @property
     def rejected(self) -> tuple[str, ...]:
@@ -97,21 +106,22 @@ def _join_and_sort(outcomes: list[SpecialistOutcome]) -> tuple[ProposedFinding, 
 class HandRolledOrchestrator:
     """No orchestration framework. A thread pool and a loop.
 
-    Retained as the control for the same reason the bake-off retained it: if the framework version
-    produces something this cannot, that is worth knowing, and if it does not, the port is real.
+    Runtime-width fan-out changed **nothing** here: `pool.map` never cared how long the list was.
+    That is the finding, and it is worth stating before the LangGraph version below, which had to
+    be rebuilt around a different primitive to do the same thing.
     """
 
     name = "hand-rolled"
 
     def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult:
         started = datetime.now(UTC)
-        outcomes: list[SpecialistOutcome] = []
+        criteria = criteria_for(case.manifest)
 
         def one(criterion: Criterion) -> SpecialistOutcome:
             return analyze(criterion, case, gateway, run_id)
 
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
-            outcomes = list(pool.map(one, CRITERIA))
+            outcomes = list(pool.map(one, criteria))
 
         return RunResult(
             run_id=run_id,
@@ -119,44 +129,71 @@ class HandRolledOrchestrator:
             findings=_join_and_sort(outcomes),
             outcomes=tuple(outcomes),
             wall_seconds=(datetime.now(UTC) - started).total_seconds(),
+            criteria=criteria,
         )
 
 
 class LangGraphOrchestrator:
-    """The same run as a LangGraph `StateGraph`.
+    """The same run as a LangGraph graph, fanning out on runtime data.
 
-    The import is local to this method, not module-level, so that a package built without
-    LangGraph can still import this module and run the hand-rolled candidate. That is not a trick
-    to dodge a dependency — it is what "the framework is one adapter behind a port" means when you
-    try to package it.
+    **This is where the two paths stop being the same program.** The previous version added one
+    node per criterion at construction time, which only works when the criteria are known before
+    the graph is built. They are not: `criteria_for` reads the case. A graph cannot be built per
+    case without rebuilding it per case — and rebuilding a graph you intend to checkpoint is a
+    problem, because the checkpoint refers to node names that must still exist on resume.
+
+    So this uses `Send`, LangGraph's dynamic-dispatch primitive: **one** node, dispatched N times
+    from a conditional edge, where N is decided at runtime. The graph shape is now constant while
+    the work is variable, which is the property a checkpoint needs.
+
+    Two consequences worth knowing before you copy this:
+
+    1. **A `Send` node receives the sent payload, not the graph state.** `specialist_node` takes a
+       `Criterion`, not a `FanOutState`. This is easy to miss and type checkers will not catch it,
+       because the node signature is whatever you wrote.
+    2. **The reducer is still load-bearing and still silent when wrong.** Every dispatch writes
+       `outcomes` concurrently. Without `operator.add` LangGraph raises on the concurrent update;
+       with a plain (unreduced) value the dispatches clobber one another and you lose findings with
+       no error at all.
+
+    The import stays local to this method so a package built without LangGraph can still import
+    this module and run the hand-rolled path — which is what "the framework is one adapter behind a
+    port" has to mean when you actually try to package it.
     """
 
     name = "langgraph"
 
     def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult:
-        from typing import TypedDict
-
         from langgraph.graph import END, START, StateGraph
+        from langgraph.types import Send
 
         started = datetime.now(UTC)
+        criteria = criteria_for(case.manifest)
 
-        # The reducer is the whole trick, and getting it wrong is silent. Several branches write
-        # to `outcomes` concurrently; without `operator.add` LangGraph raises on the concurrent
-        # update, and with a plain dict state the branches clobber one another instead.
-        class State(TypedDict):
-            outcomes: Annotated[list[SpecialistOutcome], operator.add]
+        def fan_out(_state: FanOutState):
+            """One dispatch per criterion. The list length is the fan-out width.
 
-        def make_node(criterion: Criterion):
-            def node(_state: State) -> dict[str, list[SpecialistOutcome]]:
-                return {"outcomes": [analyze(criterion, case, gateway, run_id)]}
+            **The return type is deliberately unannotated.** Writing `-> list[Send]` raises
+            `NameError: name 'Send' is not defined` at graph construction: `from __future__ import
+            annotations` turns it into a string, LangGraph resolves it with `get_type_hints`, and
+            `Send` is imported in this method's scope rather than at module level. `_state` is fine
+            because `FanOutState` *is* module level.
 
-            return node
+            The general rule, of which the `FanOutState` placement is the other half: **every type
+            named in a signature LangGraph inspects must be resolvable from module scope.** A lazy
+            framework import and postponed annotations are individually reasonable and collide
+            here.
+            """
+            return [Send("specialist", criterion) for criterion in criteria]
 
-        graph: StateGraph = StateGraph(State)
-        for criterion in CRITERIA:
-            graph.add_node(criterion.node_id, make_node(criterion))
-            graph.add_edge(START, criterion.node_id)
-            graph.add_edge(criterion.node_id, END)
+        def specialist_node(criterion: Criterion) -> dict[str, list[SpecialistOutcome]]:
+            # Takes a Criterion, not FanOutState — see the class docstring.
+            return {"outcomes": [analyze(criterion, case, gateway, run_id)]}
+
+        graph: StateGraph = StateGraph(FanOutState)
+        graph.add_node("specialist", specialist_node)
+        graph.add_conditional_edges(START, fan_out, ["specialist"])
+        graph.add_edge("specialist", END)
 
         final = graph.compile().invoke({"outcomes": []})
         outcomes = list(final["outcomes"])
@@ -166,6 +203,7 @@ class LangGraphOrchestrator:
             findings=_join_and_sort(outcomes),
             outcomes=tuple(outcomes),
             wall_seconds=(datetime.now(UTC) - started).total_seconds(),
+            criteria=criteria,
         )
 
 
