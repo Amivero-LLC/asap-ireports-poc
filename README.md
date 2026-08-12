@@ -24,7 +24,10 @@ in ASAP (ADR-022).
 
 ## Status
 
-Milestone 1 is complete.
+**Milestone 1's build is complete; the milestone is not.** 1a, 1b, and 1c are done and every gate
+runs in CI. What remains is a human step: **program leadership has not yet signed off on the
+component boundaries**, which is the second clause of the milestone's own first success criterion
+and cannot be produced mechanically. The write-up is ready for that review.
 
 - **1a — contracts and component architecture: done.** Twelve data contracts as Pydantic v2
   models with generated JSON Schema, in `packages/domain/`, including `SpecialistResult` — the

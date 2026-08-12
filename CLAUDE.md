@@ -53,7 +53,9 @@ wait on a human decision, stop and raise it.
 
 ## Current state
 
-**Last updated 2026-08-11.** Milestone 1 is closed — 1a, 1b, and 1c are all done. If this section
+**Last updated 2026-08-11.** Milestone 1's *build* is done — 1a, 1b, and 1c — but **the milestone
+is not closed**: it needs program-leadership sign-off on the component boundaries, which is a human
+review and is still outstanding (see below, and `01-HUMAN-UAT.md`). If this section
 disagrees with `.planning/STATE.md`, STATE.md is newer — and fix this section, because a stale
 "what exists" note is the single most expensive thing in this file.
 

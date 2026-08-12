@@ -30,7 +30,8 @@ candidates themselves are retained under `spikes/`, losers included (ADR-001).
 | Distributions beyond the harness baseline `[measured]` | **0** | 31 | 42 |
 | Added installed size `[measured]` | **0.0 MB** | 18.0 MB | 47.3 MB |
 | Open advisories, pinned set (`pip-audit`) `[measured]` | 0 | 0 | 0 |
-| Cold start under SAM local | **not run** | **not run** | **not run** |
+| Import cost under SAM local `[measured]` | **~0.5 s** | ~1.6–2.3 s | ~1.5–1.8 s |
+| Package under Linux wheels, zipped `[measured]` | **9.1 MB** | 19 MB | 34 MB |
 | Duplicate paid model call, 24 mid-fan-out crashes `[measured]` | 12/24 | 11/24 | 0/24 † |
 | Budget and allowlist enforcement `[judged]` | adequate | adequate | adequate |
 | State inspectability `[judged]` | adequate | **good** | adequate |
@@ -77,12 +78,22 @@ met.
 
 ### The two qualifications that ride with this recommendation
 
-**Cold start under SAM local has not been measured for any candidate.** It is the one outstanding
-measurement most likely to reopen this decision: 31 distributions and 18 MB is either irrelevant
-or decisive depending on what it does to a Lambda cold start, and ADR-004 commits to building and
-exercising that adapter. `test_cold_start_is_null_and_stays_visible` in `spikes/test_scorecard.py`
-fails the moment a number is filled in, which forces this section to be re-read rather than left
-standing by default.
+**Cold start under SAM local — measured 2026-08-11, and it does not reopen the decision.** This
+was the one outstanding measurement most likely to: 31 distributions and 18 MB is either
+irrelevant or decisive depending on what it does to a Lambda cold start. ADR-023 took it in
+`spikes/lambda_fit/`, packaging each candidate into a real Lambda container with Linux wheels.
+LangGraph imports in roughly 1.6–2.3 s against ~0.5 s for the framework-free control — about 3× —
+at 19 MB zipped against a 50 MB limit. On a workload where a single specialist model call runs
+tens of seconds, and where cold starts occur on scale-up rather than per request, that is
+affordable. **The dependency-weight objection was the strongest argument against LangGraph and the
+number does not support it.**
+
+Two honest notes on the figure. It is load-sensitive — three runs on one machine moved LangGraph's
+median between 1.565 s and 2.303 s — so it is a comparison between candidates on identical
+footing, not a production cold-start number `[unverified]`; a real one needs a deploy to Lambda,
+gated on Q-01. And `test_cold_start_is_null_and_stays_visible`, which used to fail the moment a
+number was filled in, has done its job and been replaced: `spikes/test_scorecard.py` now guards
+the *conclusion* — figures under a 3 s ceiling, LangGraph within 5× the control.
 
 **The hand-rolled candidate is a genuine runner-up, not a strawman.** If the program refuses the
 dependency surface, 195 lines that pass the same four legs is a defensible answer with a known
@@ -153,8 +164,8 @@ test.
 
 - **It does not say the losers would fail.** All three passed identical assertions. Both are
   retained in the repository with their reasoning, per ADR-001.
-- **It does not include cold start, packaging size under Linux wheels, or OpenTelemetry export.**
-  Blueprint §9.4 lists all three; none was run.
+- **It does not include OpenTelemetry export.** Blueprint §9.4 lists it alongside cold start and
+  packaging size; those two were run under ADR-023, this one was not.
 - **It does not measure real model behaviour.** The gateway is a deterministic stub, deliberately:
   all four legs are about control flow, and leg 3 is a simulated timeout by definition. This also
   keeps the bake-off decoupled from Q-01, which cannot be answered without GovCloud account
