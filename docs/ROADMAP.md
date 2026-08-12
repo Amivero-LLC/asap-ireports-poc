@@ -46,20 +46,29 @@ checkpoint needs — but structural where the other was free. See `LESSONS.md`.
 reported zero findings when the model had answered fine. Silent under-analysis, the exact failure
 this system exists to prevent. Fixed; 7 findings instead of 5, and 19.7k tokens instead of 28.8k.
 
-## 2 · Cross-criterion synthesis
+## 2 · Cross-criterion synthesis ✅ done 2026-08-12
 
-Today we fan out and **concatenate**. In our own synthetic case the foreign business interest
-surfaces in three criteria independently, and each specialist reports it as its own discovery.
+A second stage that reads every specialist's findings and reports only what is invisible from one
+criterion. Split by who is competent to answer:
 
-A second stage that reads all findings and reasons across them — these three concern the same
-underlying fact, the SF-86 answer contradicts the interview, this concern is mitigated by that
-evidence — is real analytical value and the first genuine fan-in → reason → emit stage.
+- **Computed** — which findings rest on the same evidence span. Set arithmetic, free, exact.
+- **Model** — contradictions and information gaps across the record.
 
-Constraint: synthesis produces more `ProposedFinding`s or annotates existing ones. It never produces
-a summary judgment, and never an aggregate score.
+**What it produces.** On the demo case the computed half reports that `ev_003` and `ev_004` each
+carry findings under **four** criteria — the "you are looking at one fact four times" signal, which
+is what item 1 predicted would be needed. The model half reported zero contradictions (correctly,
+since the candor specialist had already found the obvious one) and instead surfaced gaps genuinely
+invisible from any single criterion: *the financial criterion evaluated the debt in isolation while
+the foreign income was treated only as a disclosure issue, and nobody cross-referenced them.*
 
-**Tells us:** how each path handles a second level with a real join. This is where LangGraph's state
-reducers stop being ceremony.
+**What it told us — a null result, which counts.** The fan-in barrier was expected to favour
+LangGraph and did not. One line each: exiting the `ThreadPoolExecutor` context, or LangGraph's
+superstep model. Whatever separates these two paths, it is not joining.
+
+**Constraint held:** no summary, no ranking, no aggregate. It emits `ProposedFinding`s of the two
+classifications the contract already had for this, and the same validators reject its output —
+a contradiction citing one span, or naming a criterion nobody analysed, is dropped like anything
+else.
 
 ## 3 · Conditional routing
 

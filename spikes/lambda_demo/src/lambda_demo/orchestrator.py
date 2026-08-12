@@ -32,6 +32,7 @@ from ireports_gateway.port import ModelGateway
 from .case_loader import LoadedCase
 from .criteria import Criterion, criteria_for
 from .specialist import SpecialistOutcome, analyze
+from .synthesis import SynthesisOutcome, synthesize
 
 MAX_PARALLEL = int(os.environ.get("IREPORTS_DEMO_MAX_PARALLEL", "3"))
 """Bounded fan-out. `Budgets.max_parallel_specialists` defaults to 4 and caps at 16; this mirrors
@@ -56,13 +57,21 @@ class RunResult:
     runtime data — without it, a run of four specialists and a run of two are indistinguishable
     after the fact, and "why did this case get analysed differently" is unanswerable."""
 
+    synthesis: SynthesisOutcome | None = None
+    """The cross-criterion stage. None when it did not run (fewer than two findings to reason
+    across)."""
+
     @property
     def rejected(self) -> tuple[str, ...]:
-        return tuple(r for o in self.outcomes for r in o.rejected)
+        found = tuple(r for o in self.outcomes for r in o.rejected)
+        return found + (self.synthesis.rejected if self.synthesis else ())
 
     @property
     def total_tokens(self) -> int:
-        return sum(o.input_tokens + o.output_tokens for o in self.outcomes)
+        spent = sum(o.input_tokens + o.output_tokens for o in self.outcomes)
+        if self.synthesis:
+            spent += self.synthesis.input_tokens + self.synthesis.output_tokens
+        return spent
 
 
 class FanOutState(TypedDict):
@@ -76,9 +85,14 @@ class FanOutState(TypedDict):
 
     The `operator.add` reducer is the load-bearing part: several branches write `outcomes`
     concurrently, and without it LangGraph rejects the concurrent update.
+
+    `synthesis` is a list holding at most one item, which looks odd and is deliberate: it is
+    written by a single node, but every key in a fan-out state still needs a reducer that can
+    merge, and a list with `operator.add` is the honest way to say "appended to, not overwritten."
     """
 
     outcomes: Annotated[list[SpecialistOutcome], operator.add]
+    synthesis: Annotated[list[SynthesisOutcome], operator.add]
 
 
 class Orchestrator(Protocol):
@@ -89,17 +103,26 @@ class Orchestrator(Protocol):
     def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult: ...
 
 
-def _join_and_sort(outcomes: list[SpecialistOutcome]) -> tuple[ProposedFinding, ...]:
+def _join_and_sort(
+    outcomes: list[SpecialistOutcome],
+    synthesis: SynthesisOutcome | None = None,
+) -> tuple[ProposedFinding, ...]:
     """Fan-in.
 
     Sorted by finding_id so that two implementations producing the same findings produce the same
     *order*, which is what makes their outputs comparable at all. An unordered join would make
     every diff noise.
+
+    Synthesis findings join the same pool rather than living in a separate section: they are
+    `ProposedFinding`s like any other, and giving them a privileged place in the envelope would
+    imply they carry more weight than a specialist's. They do not.
     """
     seen: dict[str, ProposedFinding] = {}
     for outcome in outcomes:
         for finding in outcome.findings:
             seen.setdefault(finding.finding_id, finding)
+    for finding in synthesis.findings if synthesis else ():
+        seen.setdefault(finding.finding_id, finding)
     return tuple(sorted(seen.values(), key=lambda f: f.finding_id))
 
 
@@ -120,16 +143,21 @@ class HandRolledOrchestrator:
         def one(criterion: Criterion) -> SpecialistOutcome:
             return analyze(criterion, case, gateway, run_id)
 
+        # `pool.map` is the barrier. The second stage needs every specialist's findings, and
+        # exiting the context manager is what guarantees they are all in — one line, no primitive.
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
             outcomes = list(pool.map(one, criteria))
+
+        synthesis = synthesize(case, tuple(outcomes), criteria, gateway, run_id)
 
         return RunResult(
             run_id=run_id,
             candidate=self.name,
-            findings=_join_and_sort(outcomes),
+            findings=_join_and_sort(outcomes, synthesis),
             outcomes=tuple(outcomes),
             wall_seconds=(datetime.now(UTC) - started).total_seconds(),
             criteria=criteria,
+            synthesis=synthesis,
         )
 
 
@@ -190,20 +218,37 @@ class LangGraphOrchestrator:
             # Takes a Criterion, not FanOutState — see the class docstring.
             return {"outcomes": [analyze(criterion, case, gateway, run_id)]}
 
+        def synthesis_node(state: FanOutState) -> dict[str, list[SynthesisOutcome]]:
+            """The second stage. Reads every specialist's output from accumulated state.
+
+            **The barrier is free here.** LangGraph runs in supersteps, so this node does not start
+            until every `Send` dispatched above has finished — no join primitive, no waiting code.
+            The hand-rolled path gets the same guarantee from exiting the `ThreadPoolExecutor`
+            context, which is also one line. Neither is harder; they are the same idea spelled
+            differently.
+            """
+            return {
+                "synthesis": [synthesize(case, tuple(state["outcomes"]), criteria, gateway, run_id)]
+            }
+
         graph: StateGraph = StateGraph(FanOutState)
         graph.add_node("specialist", specialist_node)
+        graph.add_node("synthesis", synthesis_node)
         graph.add_conditional_edges(START, fan_out, ["specialist"])
-        graph.add_edge("specialist", END)
+        graph.add_edge("specialist", "synthesis")
+        graph.add_edge("synthesis", END)
 
-        final = graph.compile().invoke({"outcomes": []})
+        final = graph.compile().invoke({"outcomes": [], "synthesis": []})
         outcomes = list(final["outcomes"])
+        synthesis = final["synthesis"][0] if final["synthesis"] else None
         return RunResult(
             run_id=run_id,
             candidate=self.name,
-            findings=_join_and_sort(outcomes),
+            findings=_join_and_sort(outcomes, synthesis),
             outcomes=tuple(outcomes),
             wall_seconds=(datetime.now(UTC) - started).total_seconds(),
             criteria=criteria,
+            synthesis=synthesis,
         )
 
 

@@ -209,6 +209,56 @@ payload — not the accumulated state. So the node signature changes meaning ent
 from static nodes to `Send`, and no type checker will catch it, because the signature is whatever
 you wrote.
 
+### The fan-in barrier is free in both paths `[measured]`
+
+Adding a second stage that needs *every* specialist's output looked like the place a graph
+framework would pull ahead. It was not:
+
+| | How the barrier happens |
+|---|---|
+| Hand-rolled | Exiting the `ThreadPoolExecutor` context. `pool.map` has already collected everything |
+| LangGraph | Supersteps. A node downstream of a `Send` fan-out does not start until every dispatch finishes |
+
+One line each, neither of them written by hand. **Recorded because it is a null result and those
+are worth as much as the other kind** — the prediction was that LangGraph would win here, and it
+did not. What LangGraph adds shows up in the *next* stage (conditional routing) and in
+checkpointing, not in joining.
+
+### Decide what the model is competent to answer, and don't pay for the rest `[measured]`
+
+The second stage does two things that look similar and are not:
+
+- **Which findings rest on the same evidence span** — set arithmetic. Exact, instant, free.
+- **Whether two statements in the record conflict** — a judgement about meaning. Worth a model
+  call.
+
+We nearly asked the model for both. The computed half turned out to be the more useful output: on
+the demo case it reports that `ev_003` and `ev_004` each carry findings under **four** criteria,
+which is precisely the "you are looking at one fact four times" signal a reviewer needs — and a
+model asked the same question would be slower, cost money, and occasionally be wrong about
+something with an exact answer.
+
+Before writing a prompt, check whether the question has an exact answer.
+
+### Telling a synthesis step *not* to restate is what makes it useful `[measured]`
+
+The first instinct is to let a cross-criterion stage summarise. Two rules changed its output from
+noise to signal:
+
+- **"Do not restate a finding a single analyst already made."** Without this it rewrites the
+  specialists' work back at you.
+- **"One fact reported under several criteria is not a contradiction."** Without this it reports
+  the overlap as a discrepancy — the thing we compute deterministically, guessed at badly.
+
+With both, it reported zero contradictions on a case that has an obvious one — correctly, because
+the candor specialist had already found it — and instead surfaced gaps that were genuinely
+invisible from any single criterion: *the financial criterion evaluated the debt in isolation while
+the foreign income was treated only as a disclosure issue, and nobody cross-referenced them.*
+
+Also load-bearing: **no summary, no ranking, no overall assessment.** A "synthesis" that concluded
+something about the person would be the determination this system must never make, wearing a
+helpful-sounding name.
+
 ### Dynamic fan-out width is free in Python and structural in LangGraph `[measured]`
 
 Moving fan-out width from a constant to runtime data (derived from the case) was the first change

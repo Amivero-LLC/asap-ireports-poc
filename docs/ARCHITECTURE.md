@@ -119,15 +119,18 @@ subject violated SEAD-4," the prompt had already failed and the type is what sto
 ```mermaid
 flowchart TB
     subgraph app["Application"]
-        H[handler] --> O[orchestrator port]
+        H[handler] --> C[criteria selection]
+        C --> O[orchestrator port]
         O --> HR[custom Python]
         O --> LG[LangGraph]
-        HR --> S[specialist]
+        HR --> S[specialist ×N]
         LG --> S
     end
 
     subgraph shared["Shared, framework-free"]
         S --> G[ModelGateway port]
+        S --> Y[synthesis]
+        Y --> V[validators]
         S --> V[validators]
         V --> P[packager]
     end
@@ -149,7 +152,7 @@ flowchart TB
 |---|---|
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema. The vocabulary everything else speaks |
 | `packages/gateway/` | The **only** component permitted to call a model. One port, three adapters |
-| `spikes/lambda_demo/` | The runnable proof: case loader, specialist, both orchestrators, packager, Lambda handler |
+| `spikes/lambda_demo/` | The runnable proof: case loader, criteria routing, specialist, synthesis, both orchestrators, packager, Lambda handler |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 
 ---
@@ -165,24 +168,31 @@ class Orchestrator(Protocol):
     def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult: ...
 ```
 
-### The orchestration is currently a stub, and that matters
+### How far the comparison has actually got
+
+The orchestration started as a fixed three-node fan-out, at which shape the two paths were
+indistinguishable — a fixed-width fan-out is one line in either. It is now two stages with runtime
+width:
 
 ```
-hand-rolled:   pool.map(one, CRITERIA)          # one line
-langgraph:     START ──▶ 3 fixed nodes ──▶ END  # one level, fixed width
+START ──▶ select criteria (from the case) ──▶ N specialists ──▶ synthesis ──▶ END
 ```
 
-One level deep, hard-coded width of three, no conditional edges, no second stage, no state carried
-across steps. **At this shape the two paths cannot be told apart** — a fixed single-level fan-out is
-trivial in both, so a comparison here measures nothing.
+Two comparison points so far, one of each kind:
 
-What the demo does prove is narrower, and still worth having: the port holds, one shared specialist
-serves both paths, and the gateway is the only thing that touches a model.
+| Change | Hand-rolled | LangGraph |
+|---|---|---|
+| **Runtime fan-out width** | No change — `pool.map` never cared about list length | **Structural.** Rebuilt around `Send`, because one-node-per-criterion needs the criteria known at construction |
+| **Fan-in barrier for stage two** | Free — exiting the `ThreadPoolExecutor` context | Free — supersteps; a node after a `Send` waits for every dispatch |
 
-**So the decision waits until the orchestration is real enough to strain one of them** — dynamic
-fan-out width, a synthesis stage, conditional routing, multi-step specialists, then crash/resume.
-[`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls out of the work
-instead of needing a separate exercise.
+The second is a null result and counts as evidence: joining was expected to favour LangGraph and
+did not. The first is real asymmetry, though not obviously a point *against* LangGraph — its
+version keeps the graph shape constant while the work varies, which is what a checkpoint needs.
+
+**Still to come before the decision:** conditional routing, multi-step specialists, and
+crash/resume. [`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls
+out of the work rather than needing a separate exercise, and each result lands in
+[`LESSONS.md`](LESSONS.md) as it happens.
 
 **The rule that makes this work: no module that analyzes a case may import LangGraph.** A test
 enforces it. This began as insurance against lock-in; with two implementations actually running, it
@@ -229,10 +239,17 @@ case.json + evidence.json
    │
    ├─▶ load and validate ──────────────── typed contracts
    │
+   ├─▶ select criteria ───────────────── from requested_analyses × policy_pack_ids,
+   │                                      so the fan-out width is runtime data
+   │
    ├─▶ fan out, bounded by max_parallel
    │     ├── criterion A ──┐
    │     ├── criterion B ──┼── each: model call → parse → check citations → build finding
    │     └── criterion C ──┘
+   │
+   ├─▶ synthesis ─────────────────────── reason ACROSS criteria:
+   │     ├── computed: which findings rest on the same span (set arithmetic, free)
+   │     └── model:    contradictions and information gaps
    │
    ├─▶ join, sort by finding_id ───────── deterministic order, so runs are comparable
    │
@@ -241,6 +258,16 @@ case.json + evidence.json
 
 Findings are sorted by ID at the join so two runs produce comparable output. An unordered join makes
 every diff noise.
+
+**Synthesis is the second stage, and it is deliberately narrow.** Until it existed the run fanned
+out and *concatenated* — when one underlying fact bore on four criteria, four specialists reported
+it independently and the reviewer had to work out they were seeing one fact four times. Synthesis
+computes that overlap exactly, and spends a model call only on the part that needs judgement.
+
+It may not summarise, rank, or assess. It emits `ProposedFinding`s classified `contradiction` or
+`information_gap` — both of which the contract already had — and its output is validated by the
+same shell as everything else. A synthesis that concluded something about the person would be the
+determination this system must never make, wearing a helpful-sounding name.
 
 **Storage roles are not interchangeable:** PostgreSQL is the system of record for workflow state.
 OpenSearch is a retrieval index. Never treat a search index as authoritative for findings or run
@@ -256,7 +283,9 @@ state.
 |---|---|
 | Data contracts | 12 Pydantic v2 models + JSON Schema |
 | Model gateway | Port + `litellm` / `bedrock` / `stub` adapters. LiteLLM proven live; **bedrock never run** |
-| Both orchestrators | Custom Python and LangGraph, one shared specialist |
+| Both orchestrators | Custom Python and LangGraph, one shared specialist and one shared synthesis stage |
+| Criteria selection | Derived from the case manifest, so fan-out width is runtime data |
+| Cross-criterion synthesis | Computed overlap + a model pass for contradictions and gaps |
 | Citation + contract validation | Enforced, with rejections recorded |
 | Envelope packaging | Validated `ASAPEnvelope` |
 | Lambda packaging | `sam build --use-container`, invoked locally, envelopes on disk |

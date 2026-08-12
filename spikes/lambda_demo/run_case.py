@@ -187,6 +187,19 @@ def _report(payload: dict[str, Any], out_file: Path | None) -> None:
             f"  {criterion['criterion_id']:<14} "
             f"{criterion['findings']} findings, {criterion['rejected']} rejected"
         )
+    synthesis = payload.get("synthesis")
+    if synthesis:
+        if not synthesis["ran"]:
+            print("  synthesis   skipped — fewer than two findings to reason across")
+        else:
+            print(f"  synthesis    {synthesis['findings']} cross-criterion findings")
+        for overlap in synthesis["overlaps"]:
+            # The cheapest useful output in the whole run: set arithmetic, no model call.
+            print(
+                f"    {overlap['evidence_id']} carries findings under "
+                f"{len(overlap['criterion_ids'])} criteria: {overlap['criterion_ids']}"
+            )
+
     for reason in payload.get("rejected", []):
         # Not an error log. Every line here is the deterministic shell refusing something the
         # model produced, which is the part of this architecture worth watching.

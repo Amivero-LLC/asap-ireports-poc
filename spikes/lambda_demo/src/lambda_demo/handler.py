@@ -166,6 +166,24 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         ],
     }
 
+    if result.synthesis is not None:
+        payload["synthesis"] = {
+            # None means the stage short-circuited without paying for a call.
+            "ran": result.synthesis.resolved_model is not None,
+            "findings": len(result.synthesis.findings),
+            "rejected": list(result.synthesis.rejected),
+            # Computed, not inferred — which findings rest on the same span. This is the part that
+            # tells a reviewer "these are several views of one fact."
+            "overlaps": [
+                {
+                    "evidence_id": o.evidence_id,
+                    "criterion_ids": list(o.criterion_ids),
+                    "finding_ids": list(o.finding_ids),
+                }
+                for o in result.synthesis.overlaps
+            ],
+        }
+
     try:
         envelope = build_envelope(case, result.findings, run_id)
     except ValueError as exc:

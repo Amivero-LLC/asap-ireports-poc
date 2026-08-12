@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from ireports_domain import ASAPEnvelope, DecisionDomain
+from ireports_domain import ASAPEnvelope, DecisionDomain, FindingClassification
 from ireports_gateway import StubGateway
 from lambda_demo import handler as handler_module
 from lambda_demo.case_loader import LoadedCase, load_case
@@ -354,3 +354,124 @@ def test_handler_reports_an_empty_run_rather_than_crashing(monkeypatch) -> None:
     assert payload["envelope"] is None
     assert "no findings survived" in payload["envelope_error"]
     assert payload["rejected"]
+
+
+# ---------------------------------------------------------------------------
+# Synthesis — the second stage
+# ---------------------------------------------------------------------------
+
+
+def _synth_gateway(contradictions=(), gaps=(), findings=None) -> StubGateway:
+    """A stub that answers specialists and the synthesis node differently.
+
+    Keyed on `node_id`, which is what makes this possible at all: the synthesis node asks a
+    different question and gets a different schema back, and a single canned response could not
+    stand in for both.
+    """
+    return StubGateway(
+        responses={
+            "synthesis": json.dumps(
+                {"contradictions": list(contradictions), "information_gaps": list(gaps)}
+            )
+        },
+        default=json.dumps({"findings": [findings or _finding()]}),
+    )
+
+
+def _contradiction(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "title": "SF-86 answer conflicts with the interview disclosure",
+        "observation": "The questionnaire records 'No' (ev_003); the interview records a 4 percent"
+        " interest (ev_004). Both cannot describe the same holding.",
+        "policy_relevance": "The conflict may be relevant to what the record establishes.",
+        "recommended_officer_action": "Review both statements and resolve which is accurate.",
+        "criterion_id": "731-202-B-3",
+        "conflicting_evidence": ["ev_003", "ev_004"],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_overlap_is_computed_not_inferred(case) -> None:
+    """The most useful thing the fan-in produces, and it costs nothing.
+
+    Which findings rest on the same span is set arithmetic. Asking a model would be slower, cost
+    money, and be occasionally wrong about something with an exact answer.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(case, _synth_gateway(), RUN_ID)
+    assert result.synthesis is not None
+
+    # The stub gives every criterion the same finding on ev_001, so ev_001 spans every criterion.
+    found = {o.evidence_id: o for o in result.synthesis.overlaps}
+    assert "ev_001" in found
+    assert len(found["ev_001"].criterion_ids) == len(result.criteria) > 1
+
+
+def test_synthesis_findings_reach_the_envelope(case) -> None:
+    result = ORCHESTRATORS["hand-rolled"].run(
+        case, _synth_gateway(contradictions=[_contradiction()]), RUN_ID
+    )
+    contradictions = [
+        f for f in result.findings if f.classification is FindingClassification.CONTRADICTION
+    ]
+    assert len(contradictions) == 1
+    # First span is the assertion, the rest are what conflicts with it — the contract counts
+    # supporting + contradicting >= 2.
+    assert contradictions[0].supporting_evidence == ("ev_003",)
+    assert contradictions[0].contradicting_evidence == ("ev_004",)
+    assert ASAPEnvelope.model_validate(
+        build_envelope(case, result.findings, RUN_ID).model_dump(mode="json")
+    )
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        pytest.param(
+            {"conflicting_evidence": ["ev_003"]}, "needs two conflicting spans", id="one-span"
+        ),
+        pytest.param(
+            {"conflicting_evidence": ["ev_003", "ev_999"]},
+            "cited unknown evidence",
+            id="unknown-span",
+        ),
+        pytest.param(
+            {"criterion_id": "GUIDELINE-Z"}, "which was not analysed", id="uninvolved-criterion"
+        ),
+    ],
+)
+def test_synthesis_is_validated_like_everything_else(case, override, expected: str) -> None:
+    """The second stage gets no more trust than the first.
+
+    A contradiction naming a criterion nobody analysed, or resting on one span, or citing evidence
+    that is not in the case, is dropped with a reason — same shell, same rules.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(
+        case, _synth_gateway(contradictions=[_contradiction(**override)]), RUN_ID
+    )
+    assert result.synthesis is not None
+    assert not result.synthesis.findings
+    assert any(expected in reason for reason in result.synthesis.rejected)
+
+
+def test_synthesis_does_not_pay_for_a_call_it_cannot_use(case) -> None:
+    """Fewer than two findings cannot contradict each other."""
+    gateway = StubGateway(default=json.dumps({"findings": []}))
+    result = ORCHESTRATORS["hand-rolled"].run(case, gateway, RUN_ID)
+
+    assert result.synthesis is not None
+    assert result.synthesis.resolved_model is None  # no model call was made
+    assert not any(call.node_id == "synthesis" for call in gateway.calls)
+
+
+def test_both_orchestrators_synthesize_identically(case) -> None:
+    """The second stage is a real graph edge in one and a second statement in the other."""
+    shapes = {}
+    for name, orchestrator in ORCHESTRATORS.items():
+        result = orchestrator.run(case, _synth_gateway(contradictions=[_contradiction()]), RUN_ID)
+        assert result.synthesis is not None, name
+        shapes[name] = (
+            [f.finding_id for f in result.synthesis.findings],
+            [(o.evidence_id, o.criterion_ids) for o in result.synthesis.overlaps],
+        )
+    assert shapes["hand-rolled"] == shapes["langgraph"]
