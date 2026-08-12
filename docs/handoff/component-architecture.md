@@ -352,18 +352,26 @@ the API and delivery surfaces, the spikes, the handoff documents, and the four n
 
 **Orchestration and retrieval — the spine Phase 2 builds.**
 
+Each `PLANNED` row below names the **specific file** intended to hold it, not the package
+directory. That is deliberate: when eight rows shared `packages/orchestration/`, the first commit
+creating that directory would have failed all eight at once, and the flip rule stated after §4
+would then have invited six `BUILT` claims for things that were not built (CR-02). One file per
+row means one row flips per capability. The paths are the *intended* location — if Phase 2 lands
+a capability somewhere else, update the row; the guard failing is the prompt to do so, not a
+reason to move the code.
+
 | Component | Build state | Path | Notes |
 |---|---|---|---|
-| Orchestration port (our own interface) | `PLANNED` | `packages/orchestration/` | Phase 2, ORCH-01 |
-| LangGraph adapter behind the port | `PLANNED` | `packages/orchestration/` | Phase 2, ORCH-01; no analysis node imports LangGraph |
-| Checkpoint store (`PostgresSaver` over PostgreSQL) | `PLANNED` | `packages/orchestration/` | Phase 2, ORCH-01/ORCH-02; `durability="sync"` and strict deserialization set in code |
-| Model-call idempotency | `PLANNED` | `packages/orchestration/` | Phase 2, ORCH-02; the most expensive item ADR-020 retained |
-| Deterministic budget/loop-limit shell | `PLANNED` | `packages/orchestration/` | Phase 2, ORCH-03 |
-| LangSmith egress-deny at every entry point | `PLANNED` | `packages/orchestration/` | Phase 2, ORCH-04; extends `spikes/langgraph/test_langsmith_egress.py`'s negative control |
-| Retrieval port and OpenSearch mapping module | `PLANNED` | `packages/retrieval/` | Phase 2, RETR-01; header must name Q-02 as unconfirmed |
-| Local ingestion of one synthetic case into OpenSearch | `PLANNED` | `packages/retrieval/` | Phase 2, RETR-02; development only (ADR-007) |
-| Specialist sub-call (criterion-specific tool allowlist) | `PLANNED` | `packages/orchestration/` | Phase 2, SPEC-01 |
-| Refusal / `StructuredOutputError` logging | `PLANNED` | `packages/orchestration/` | Phase 2, VAL-02 (reduced to logging, ADR-021) |
+| Orchestration port (our own interface) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/port.py` | Phase 2, ORCH-01 |
+| LangGraph adapter behind the port | `PLANNED` | `packages/orchestration/src/ireports_orchestration/langgraph_adapter.py` | Phase 2, ORCH-01; no analysis node imports LangGraph |
+| Checkpoint store (`PostgresSaver` over PostgreSQL) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/checkpoint.py` | Phase 2, ORCH-01/ORCH-02; `durability="sync"` and strict deserialization set in code |
+| Model-call idempotency | `PLANNED` | `packages/orchestration/src/ireports_orchestration/idempotency.py` | Phase 2, ORCH-02; the most expensive item ADR-020 retained |
+| Deterministic budget/loop-limit shell | `PLANNED` | `packages/orchestration/src/ireports_orchestration/budget.py` | Phase 2, ORCH-03 |
+| LangSmith egress-deny at every entry point | `PLANNED` | `packages/orchestration/src/ireports_orchestration/egress.py` | Phase 2, ORCH-04; extends `spikes/langgraph/test_langsmith_egress.py`'s negative control |
+| Retrieval port and OpenSearch mapping module | `PLANNED` | `packages/retrieval/src/ireports_retrieval/mapping.py` | Phase 2, RETR-01; header must name Q-02 as unconfirmed |
+| Local ingestion of one synthetic case into OpenSearch | `PLANNED` | `packages/retrieval/src/ireports_retrieval/ingest.py` | Phase 2, RETR-02; development only (ADR-007) |
+| Specialist sub-call (criterion-specific tool allowlist) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/specialist.py` | Phase 2, SPEC-01 |
+| Refusal / `StructuredOutputError` logging | `PLANNED` | `packages/orchestration/src/ireports_orchestration/refusal_log.py` | Phase 2, VAL-02 (reduced to logging, ADR-021) |
 
 **Human review, typed output, and delivery.**
 
@@ -372,9 +380,9 @@ the API and delivery surfaces, the spikes, the handoff documents, and the four n
 | Human disposition contract | `BUILT` | `packages/domain/src/ireports_domain/disposition.py` | `HumanDisposition`, `DispositionedFinding` |
 | Run status state machine (the review gate) | `BUILT` | `packages/domain/src/ireports_domain/run.py` | `AWAITING_HUMAN_REVIEW` is unbypassable by construction (ADR-011) |
 | `ASAPEnvelope` contract | `BUILT` | `packages/domain/src/ireports_domain/asap.py` | Validated; the transport that would deliver it does not ship (DEL-01, §5) |
-| Review pause and resume across a process boundary | `PLANNED` | `apps/api/` | Phase 3, REV-01 |
-| No-bypass proof across the transition table | `PLANNED` | `apps/api/` | Phase 3, REV-02 |
-| One command, case to human-approved envelope | `PLANNED` | `apps/api/` | Phase 3, DEL-02 |
+| Review pause and resume across a process boundary | `PLANNED` | `apps/api/review.py` | Phase 3, REV-01 |
+| No-bypass proof across the transition table | `PLANNED` | `tests/end_to_end/test_no_bypass.py` | Phase 3, REV-02 |
+| One command, case to human-approved envelope | `PLANNED` | `apps/api/main.py` | Phase 3, DEL-02 |
 
 **Evidence base and the handoff package itself.**
 
@@ -406,11 +414,14 @@ before and nothing caught it.
 **How far that enforcement actually reaches, stated rather than implied.** The test runs when
 someone runs the suite — which is the same condition under which the earlier staleness went
 uncaught, since **this repository has no CI**. It is a guard against a reader being misled, not an
-automatic one. Two known gaps in it are recorded in `01-REVIEW.md` and are open at the time of
-writing: several violation categories the checker computes are not yet asserted by a named test
-(CR-01), and multiple `PLANNED` rows share a directory-level path, so the first commit under
-Phase 2 will fail several unrelated rows at once (CR-02). Read the guard as narrower than the
-paragraph above implies until both are closed.
+automatic one. Wiring it into a pipeline is the handoff team's to own.
+
+Within that limit the guard is now complete rather than partial. Every violation it can report is
+asserted, and each one has a negative control proving it still fires — coverage is enforced by a
+test, so adding a category without a failing example fails the suite. Both gaps recorded against
+the first version (CR-01, CR-02 in `01-REVIEW.md`) are closed. Writing those controls also
+surfaced a branch that no document text could reach: a path escaping the repository via a symlink,
+which needs a filesystem to demonstrate and now has a test that builds one.
 
 ---
 
