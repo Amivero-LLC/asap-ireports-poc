@@ -68,8 +68,12 @@ adapting to it must be a single-file change.
 ## Two orchestration paths (ADR-024)
 
 **Custom Python and LangGraph are both live**, behind this project's own port, sharing one
-specialist implementation. The framework decision is deferred until crash/resume and model-call
-idempotency exist, since that is the seam where they actually differ.
+specialist implementation.
+
+**The orchestration today is a stub** — one level, fixed width of three, no conditional edges, no
+second stage — so the two paths are currently indistinguishable and no comparison between them means
+anything yet. The decision waits until the orchestration is real enough to strain one of them; see
+`docs/ROADMAP.md`, which is ordered around that.
 
 **No module that analyzes a case may import LangGraph.** A test enforces it
 (`spikes/lambda_demo/test_demo.py`). With two implementations genuinely running, this is the working

@@ -165,13 +165,24 @@ class Orchestrator(Protocol):
     def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult: ...
 ```
 
-The hand-rolled path is a `ThreadPoolExecutor` and a loop. The LangGraph path is a `StateGraph` with
-one node per criterion. For the current shape — one invocation, in-process fan-out — the framework
-is not carrying much weight. Its advantage was concentrated in durable checkpointing, and
-checkpointing is not built yet.
+### The orchestration is currently a stub, and that matters
 
-**So the decision is deferred until it can be made on evidence**, which means when crash/resume and
-model-call idempotency exist. That is the seam where the two genuinely differ.
+```
+hand-rolled:   pool.map(one, CRITERIA)          # one line
+langgraph:     START ──▶ 3 fixed nodes ──▶ END  # one level, fixed width
+```
+
+One level deep, hard-coded width of three, no conditional edges, no second stage, no state carried
+across steps. **At this shape the two paths cannot be told apart** — a fixed single-level fan-out is
+trivial in both, so a comparison here measures nothing.
+
+What the demo does prove is narrower, and still worth having: the port holds, one shared specialist
+serves both paths, and the gateway is the only thing that touches a model.
+
+**So the decision waits until the orchestration is real enough to strain one of them** — dynamic
+fan-out width, a synthesis stage, conditional routing, multi-step specialists, then crash/resume.
+[`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls out of the work
+instead of needing a separate exercise.
 
 **The rule that makes this work: no module that analyzes a case may import LangGraph.** A test
 enforces it. This began as insurance against lock-in; with two implementations actually running, it
