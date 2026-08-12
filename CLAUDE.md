@@ -70,10 +70,17 @@ adapting to it must be a single-file change.
 **Custom Python and LangGraph are both live**, behind this project's own port, sharing one
 specialist implementation.
 
-**The orchestration today is a stub** — one level, fixed width of three, no conditional edges, no
-second stage — so the two paths are currently indistinguishable and no comparison between them means
-anything yet. The decision waits until the orchestration is real enough to strain one of them; see
-`docs/ROADMAP.md`, which is ordered around that.
+The orchestration is now real enough to tell them apart: runtime fan-out width, a synthesis stage,
+and conditional routing. Three results so far, in `docs/LESSONS.md`:
+
+| Change | Hand-rolled | LangGraph |
+|---|---|---|
+| Runtime fan-out width | No change | Structural — rebuilt around `Send` |
+| Fan-in barrier | Free | Free (supersteps) — a null result |
+| Conditional routing after fan-out | `if should_synthesize(...)` | Needs a `join` node; the naive version fires per dispatch on partial state **and fails silently** |
+
+None is decisive, and none yet touches what LangGraph was chosen for — durable checkpointing.
+**ORCH-02 is what closes this.**
 
 **No module that analyzes a case may import LangGraph.** A test enforces it
 (`spikes/lambda_demo/test_demo.py`). With two implementations genuinely running, this is the working
@@ -90,13 +97,20 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | Area | State |
 |---|---|
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema in `schemas/` |
-| `packages/gateway/` | `ModelGateway` port; `litellm` (proven live), `bedrock` (never run), `stub` (tests only) |
-| `spikes/lambda_demo/` | The runnable demo — both orchestrators, real model calls, validated envelopes, Lambda handler |
+| `packages/gateway/` | `ModelGateway` port — `litellm` (proven live), `bedrock` (never run), `stub`. Plus an `EmbeddingGateway`, Titan via the proxy |
+| `packages/retrieval/` | OpenSearch hybrid vector + lexical, mandatory case filter, bounded K. **All field names in `mapping.py`** (Q-02) |
+| `spikes/lambda_demo/` | The runnable demo — criteria routing, both orchestrators, synthesis, real model calls, validated envelopes, Lambda handler |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
-| Tests | 177 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
+| Tests | 205 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
-**Not built:** retrieval, crash/resume, model-call idempotency, budgets and loop limits, authority
-routing, policy packs, ingestion, `apps/`, `evals/`.
+**Not built:** crash/resume, model-call idempotency, wall-clock and token budgets, authority routing
+from policy packs, ingestion, `apps/`, `evals/`.
+
+**Built but at the wrong address:** the orchestrator, specialist, synthesis and criteria modules
+live in `spikes/lambda_demo/` and use a local `SpecialistOutcome` rather than the published
+`SpecialistResult` contract. Graduating them into `packages/orchestration/` is what closes ORCH-01
+and SPEC-01 — see `docs/REQUIREMENTS.md`.
 
 **Don't scaffold empty directories.** Create one when the first real file lands in it.
 
