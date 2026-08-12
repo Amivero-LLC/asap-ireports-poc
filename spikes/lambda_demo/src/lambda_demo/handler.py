@@ -146,6 +146,10 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         "init_seconds": round(_INIT_SECONDS, 4),
         "wall_seconds": round(result.wall_seconds, 2),
         "findings": len(result.findings),
+        # A criterion nobody could analyse is not a criterion that came back clean. Surfaced at
+        # the top of the payload because a reader scanning for "did this run actually work"
+        # should not have to total up a per-criterion table to find out.
+        "not_analysed": [o.criterion.criterion_id for o in result.outcomes if not o.analysed],
         "tokens": {
             "input": sum(o.input_tokens for o in result.outcomes),
             "output": sum(o.output_tokens for o in result.outcomes),
@@ -159,6 +163,7 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
             {
                 "node_id": o.criterion.node_id,
                 "criterion_id": o.criterion.criterion_id,
+                "status": o.status.value,
                 "findings": len(o.findings),
                 "rejected": len(o.rejected),
             }

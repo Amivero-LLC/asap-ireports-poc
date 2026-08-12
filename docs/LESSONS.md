@@ -94,6 +94,38 @@ The tempting fix — stripping the Markdown fence — is wrong twice: it hides t
 is a per-model-group property, and it turns a detectable fault into a lenient parser that will
 eventually accept something that is not a finding at all.
 
+### One refusal killed the entire run `[measured]`
+
+`gateway.complete()` was called bare inside the specialist. A model refusal raised through the
+thread pool or the graph and **took the whole run down**, discarding every other specialist's
+completed and already-paid-for work.
+
+**Under Lambda it is worse than on a laptop:** the invocation fails, Lambda retries automatically,
+every model call is paid for a second time, and the retry hits the same refusal.
+
+Two things made this survive for weeks:
+
+- It needs a refusal to trigger, and refusals do not happen on every run.
+- ADR-021 had already decided the node should catch it. **A decision that is recorded but not
+  implemented reads exactly like a decision that was implemented** — nothing in the code or the
+  tests contradicted the ADR, because nothing tested it.
+
+If a decision record says "the node catches it," write the test that proves the node catches it.
+
+### `completed with no findings` and `refused` must not look alike `[measured]`
+
+Both produce zero findings. If the run cannot tell them apart it reports **silent under-analysis as
+a clean record**, which is the worst output this system can produce.
+
+So the outcome carries a status — `COMPLETED` / `REFUSED` / `FAILED` — and the run surfaces
+`not_analysed` at the top of its payload. It costs one enum and it is the difference between "this
+criterion is clean" and "nobody looked at this criterion."
+
+Note what this does *not* do: it does not put the distinction in the envelope. ADR-021 §2 weighed
+that and chose to keep it out of the contract. So a reviewer in ASAP still cannot tell — the gap is
+narrowed to the operator, not closed. **That remains the weakest point in the design**, and
+closing it means superseding ADR-021, deliberately.
+
 ### A refusal returns HTTP 200 `[measured]`
 
 Claude can decline a request and still return 200, with `stop_reason: "refusal"` and a possibly
@@ -208,6 +240,47 @@ Dynamic fan-out goes through `Send("node", payload)`, and the target node's argu
 payload — not the accumulated state. So the node signature changes meaning entirely when you move
 from static nodes to `Send`, and no type checker will catch it, because the signature is whatever
 you wrote.
+
+### A conditional edge after `Send` fires per dispatch, on partial state `[measured]`
+
+**The most dangerous LangGraph behaviour found so far**, because it fails silently and produces a
+plausible answer.
+
+A `Send` fan-out dispatches one node N times. Put a **conditional edge** on that node and the
+router runs **N times, each seeing only its own dispatch's contribution to state.** Measured
+directly with five dispatches:
+
+```
+router invoked 5 times; outcomes visible each time: [1, 1, 1, 1, 1]
+```
+
+Never five. So a routing decision about the *aggregate* of a fan-out — "did we find enough to be
+worth a second stage?" — is made five times on one-fifth of the evidence. In our case every branch
+saw one finding, the threshold was two, and **synthesis silently never ran.** No error, no warning.
+
+A **plain** edge behaves differently: it joins, and the target runs once. So the fix is a do-nothing
+node whose only job is to be the join point, with the conditional edge leaving *it*:
+
+```python
+graph.add_edge("specialist", "join")                       # plain edge: joins, runs once
+graph.add_conditional_edges("join", route, ["synthesis", END])
+```
+
+The hand-rolled equivalent of this whole problem is `if should_synthesize(outcomes):`.
+
+**This is the clearest evidence yet in the ADR-024 comparison** — not because LangGraph is wrong,
+but because the correct construction is non-obvious, the incorrect one runs cleanly, and you only
+find out by counting.
+
+### Route on shared code, not in each orchestrator `[measured]`
+
+`should_synthesize()` lives in one place that both paths call. The pull is to inline it — an `if`
+in one, a router in the other — and that is how two implementations of the same run drift into
+producing different envelopes for reasons nobody can see.
+
+We nearly shipped a version of this: the "should this stage run" rule existed *both* in the router
+and as an early return inside `synthesize()`. Two copies, and the second one silently won on one
+path. Policy in one function; the orchestrators only choose how to schedule it.
 
 ### The fan-in barrier is free in both paths `[measured]`
 

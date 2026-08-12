@@ -183,9 +183,13 @@ def _report(payload: dict[str, Any], out_file: Path | None) -> None:
         f"{payload['findings']} findings"
     )
     for criterion in payload.get("criteria", []):
+        status = criterion.get("status", "completed")
+        # "completed with 0 findings" and "refused" are different facts, and the run output is
+        # where that distinction has to be visible or it is not visible anywhere.
+        marker = "" if status == "completed" else f"  <-- {status.upper()}, NOT ANALYSED"
         print(
             f"  {criterion['criterion_id']:<14} "
-            f"{criterion['findings']} findings, {criterion['rejected']} rejected"
+            f"{criterion['findings']} findings, {criterion['rejected']} rejected{marker}"
         )
     synthesis = payload.get("synthesis")
     if synthesis:
@@ -204,6 +208,8 @@ def _report(payload: dict[str, Any], out_file: Path | None) -> None:
         # Not an error log. Every line here is the deterministic shell refusing something the
         # model produced, which is the part of this architecture worth watching.
         print(f"  rejected: {reason}")
+    if payload.get("not_analysed"):
+        print(f"  NOT ANALYSED: {payload['not_analysed']} — these criteria have no result")
     if payload.get("envelope") is None:
         print(f"  NO ENVELOPE — {payload.get('envelope_error', 'unknown reason')}")
     elif out_file is not None:

@@ -70,19 +70,33 @@ classifications the contract already had for this, and the same validators rejec
 a contradiction citing one span, or naming a criterion nobody analysed, is dropped like anything
 else.
 
-## 3 · Conditional routing
+## 3 · Conditional routing ✅ done 2026-08-12
 
-Right now every path through the graph is the same path.
+Refusals contained, statuses explicit, synthesis skipped when there is nothing to reason across.
 
-- **Refusal → an explicit "not analyzed" outcome.** This closes the worst gap in the current design:
-  a refused specialist produces an empty findings list that is indistinguishable in the artifact from
-  a criterion that came back clean. Refusals are expected here — adjudicative files routinely discuss
-  criminal conduct, substance use, and foreign contacts
-- **Zero findings → skip downstream work** rather than running synthesis over nothing
-- **Failure → route somewhere,** instead of a try/except inside one function
+**It found a real bug first.** `gateway.complete()` was called bare, so **one refused criterion
+killed the entire run** on both paths, discarding every other specialist's completed and paid-for
+work. Under Lambda that is worse — the invocation is retried automatically and every model call is
+paid for again, into the same refusal. ADR-021 §3 had already decided the node should catch it;
+the decision was recorded and never implemented, and nothing tested it, so nothing contradicted it.
 
-**Tells us:** conditional edges are LangGraph's home ground. If the hand-rolled version stays
-readable through this, that is a real result.
+Now: `SpecialistStatus` is `COMPLETED` / `REFUSED` / `FAILED`, refusals are not retried (ADR-015),
+and the run surfaces `not_analysed` at the top of its payload. **`completed with no findings` and
+`refused` are different facts** and no longer look alike to an operator.
+
+**What it told us — the clearest LangGraph result so far.** A conditional edge leaving a
+`Send`-dispatched node fires **once per dispatch, each seeing only its own contribution to state**.
+Measured: five dispatches, five router calls, `[1, 1, 1, 1, 1]` outcomes visible, never five. Every
+branch decided on one-fifth of the evidence and synthesis silently never ran — no error, no
+warning. The fix is a do-nothing `join` node so the conditional edge leaves a joined point. The
+hand-rolled equivalent of the entire problem is `if should_synthesize(outcomes):`.
+
+Not that LangGraph is wrong — but the correct construction is non-obvious, the incorrect one runs
+cleanly, and you only find out by counting.
+
+**Still open, deliberately:** the envelope does not carry the refused/clean distinction. ADR-021 §2
+weighed that and kept it out of the contract, so a reviewer in ASAP still cannot tell. The gap is
+narrowed to the operator, not closed — closing it means superseding ADR-021 on purpose.
 
 ## 4 · Budgets as control flow
 

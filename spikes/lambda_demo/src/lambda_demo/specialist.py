@@ -23,8 +23,10 @@ code rather than something the model is asked to be careful about:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from ireports_domain import (
@@ -38,10 +40,18 @@ from ireports_domain import (
     ReviewUrgency,
     ValidationOutcome,
 )
-from ireports_gateway.port import Message, ModelGateway, ModelRequest
+from ireports_gateway.port import (
+    GatewayError,
+    Message,
+    ModelGateway,
+    ModelRefusalError,
+    ModelRequest,
+)
 
 from .case_loader import EvidenceSpan, LoadedCase
 from .criteria import Criterion
+
+_LOG = logging.getLogger(__name__)
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -126,6 +136,32 @@ Rules, in order of importance:
    information_gaps rather than reasoning past it."""
 
 
+class SpecialistStatus(StrEnum):
+    """Whether this criterion was actually analysed.
+
+    **`COMPLETED` with no findings and `REFUSED` are different facts**, and conflating them is the
+    failure mode this whole architecture is built against: silent under-analysis that reads as a
+    clean record. A criterion that came back clean and a criterion nobody could analyse must not
+    look the same.
+
+    This lives on the local orchestration type, not on the `SpecialistResult` contract — ADR-021 §2
+    says that contract carries no completion status, and this does not change it. What it changes
+    is that the *run* knows, which ADR-021 §3 always intended ("the node catches it, logs it").
+    """
+
+    COMPLETED = "completed"
+    """The call returned. Zero findings here is a real answer — nothing in the record was
+    relevant to this criterion."""
+
+    REFUSED = "refused"
+    """The model declined. **Not** an error to retry — ADR-015. Expected in normal operation here,
+    because adjudicative files routinely discuss criminal conduct, substance use, and foreign
+    contacts."""
+
+    FAILED = "failed"
+    """Transport, timeout, or a structured-output fault. The criterion was not analysed."""
+
+
 @dataclass(frozen=True)
 class SpecialistOutcome:
     """What one specialist produced, including what was thrown away and why.
@@ -140,6 +176,11 @@ class SpecialistOutcome:
     resolved_model: str
     input_tokens: int
     output_tokens: int
+    status: SpecialistStatus = SpecialistStatus.COMPLETED
+
+    @property
+    def analysed(self) -> bool:
+        return self.status is SpecialistStatus.COMPLETED
 
 
 MAX_UNWRAP_DEPTH = 3
@@ -194,6 +235,23 @@ def _evidence_block(spans: tuple[EvidenceSpan, ...]) -> str:
     )
 
 
+def _not_analysed(criterion: Criterion, status: SpecialistStatus, reason: str) -> SpecialistOutcome:
+    """A criterion that was not analysed, carrying why.
+
+    Zero tokens because nothing was billed, and `resolved_model` is empty because no model served
+    it. Both are true and both matter for the budget record.
+    """
+    return SpecialistOutcome(
+        criterion=criterion,
+        findings=(),
+        rejected=(reason,),
+        resolved_model="",
+        input_tokens=0,
+        output_tokens=0,
+        status=status,
+    )
+
+
 def analyze(
     criterion: Criterion,
     case: LoadedCase,
@@ -211,10 +269,18 @@ def analyze(
     The retry is bounded at two deliberately. An unbounded retry over a paid model call is the
     budget failure `Budgets.max_model_calls_per_node` exists to prevent, and a node that keeps
     asking until it likes the answer is selecting for agreeable output rather than correct output.
+
+    **A gateway failure here is contained, not propagated** (ADR-021 §3). Until 2026-08-12 it was
+    not: `gateway.complete` was called bare, so one refused criterion raised through the thread
+    pool or the graph and **killed the whole run**, discarding every other specialist's completed
+    and already-paid-for work. Under Lambda that is worse still, because the invocation is retried
+    automatically and every model call is paid for again — into the same refusal.
     """
     outcome = _attempt(criterion, case, gateway, run_id)
     for _ in range(attempts - 1):
-        if outcome.findings:
+        # A refusal or a transport failure is not fixed by asking again, and ADR-015 is explicit
+        # that a refusal must not be retried blindly.
+        if outcome.findings or not outcome.analysed:
             return outcome
         retry = _attempt(criterion, case, gateway, run_id)
         # Keep the retry's findings, but carry both attempts' rejections so the record shows the
@@ -226,6 +292,7 @@ def analyze(
             resolved_model=retry.resolved_model,
             input_tokens=outcome.input_tokens + retry.input_tokens,
             output_tokens=outcome.output_tokens + retry.output_tokens,
+            status=retry.status,
         )
     return outcome
 
@@ -249,15 +316,49 @@ def _attempt(
         "Analyze the record against this criterion only. Other criteria are analyzed separately."
     )
 
-    response = gateway.complete(
-        ModelRequest(
-            alias=ModelAlias.THINKING,
-            messages=(Message(role="user", content=prompt),),
-            system=SYSTEM,
-            response_schema=RESPONSE_SCHEMA,
-            node_id=criterion.node_id,
-        )
+    request = ModelRequest(
+        alias=ModelAlias.THINKING,
+        messages=(Message(role="user", content=prompt),),
+        system=SYSTEM,
+        response_schema=RESPONSE_SCHEMA,
+        node_id=criterion.node_id,
     )
+
+    # ADR-021 §3: the node catches it, logs it with run_id / case_id / criterion, and the run
+    # continues. Every log line below carries identifiers only — never prompt or case text.
+    try:
+        response = gateway.complete(request)
+    except ModelRefusalError as exc:
+        _LOG.warning(
+            "specialist refused",
+            extra={
+                "run_id": run_id,
+                "case_id": case.manifest.case_id,
+                "criterion_id": criterion.criterion_id,
+                "refusal_category": exc.category,
+            },
+        )
+        return _not_analysed(
+            criterion,
+            SpecialistStatus.REFUSED,
+            f"{criterion.criterion_id}: model declined the request "
+            f"(category={exc.category or 'unspecified'}) — criterion NOT analysed",
+        )
+    except GatewayError as exc:
+        _LOG.warning(
+            "specialist failed",
+            extra={
+                "run_id": run_id,
+                "case_id": case.manifest.case_id,
+                "criterion_id": criterion.criterion_id,
+                "error": type(exc).__name__,
+            },
+        )
+        return _not_analysed(
+            criterion,
+            SpecialistStatus.FAILED,
+            f"{criterion.criterion_id}: {type(exc).__name__} — criterion NOT analysed",
+        )
 
     known = {s.evidence_id for s in case.spans}
     findings: list[ProposedFinding] = []

@@ -103,6 +103,19 @@ class Orchestrator(Protocol):
     def run(self, case: LoadedCase, gateway: ModelGateway, run_id: str) -> RunResult: ...
 
 
+def should_synthesize(outcomes: list[SpecialistOutcome]) -> bool:
+    """Whether the second stage has anything to reason across.
+
+    Shared by both paths deliberately: this is a *policy* decision about the run, and if each
+    orchestrator decided it separately they would drift, and the drift would show up as two runs
+    of the same case producing different envelopes for reasons nobody could see.
+
+    Fewer than two findings cannot contradict each other, so the call would be paid for and
+    guaranteed useless.
+    """
+    return sum(len(o.findings) for o in outcomes) >= 2
+
+
 def _join_and_sort(
     outcomes: list[SpecialistOutcome],
     synthesis: SynthesisOutcome | None = None,
@@ -148,7 +161,12 @@ class HandRolledOrchestrator:
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
             outcomes = list(pool.map(one, criteria))
 
-        synthesis = synthesize(case, tuple(outcomes), criteria, gateway, run_id)
+        # The routing decision, as an `if`. That is the whole of it on this path.
+        synthesis = (
+            synthesize(case, tuple(outcomes), criteria, gateway, run_id)
+            if should_synthesize(outcomes)
+            else None
+        )
 
         return RunResult(
             run_id=run_id,
@@ -231,11 +249,40 @@ class LangGraphOrchestrator:
                 "synthesis": [synthesize(case, tuple(state["outcomes"]), criteria, gateway, run_id)]
             }
 
+        def join(_state: FanOutState) -> dict[str, list[SpecialistOutcome]]:
+            """A node that does nothing, and is required.
+
+            **A conditional edge leaving a `Send`-dispatched node fires once per dispatch, and
+            each firing sees only that dispatch's own state contribution — not the merged state.**
+            Measured: five dispatches produced five router calls, each seeing exactly one outcome,
+            never five. So a routing decision about the *aggregate* of a fan-out cannot be made on
+            the edge leaving the fan-out node; every branch reads `len(outcomes) == 1` and decides
+            on a run that does not exist.
+
+            A *plain* edge behaves differently — it joins, and the target runs once. So this node
+            exists purely to be that join point, and the conditional edge leaves it instead.
+
+            The failure mode is the dangerous kind: no error, no warning, just a routing decision
+            made on one-fifth of the evidence. `test_synthesis_runs_once_not_once_per_specialist`
+            is what stops it coming back.
+            """
+            return {}
+
+        def route_after_specialists(state: FanOutState):  # return type unannotated; see fan_out
+            """Skip the second stage when there is nothing to reason across.
+
+            Safe here, and only here, because `join` has already collapsed the fan-out — this sees
+            every specialist's output.
+            """
+            return "synthesis" if should_synthesize(state["outcomes"]) else END
+
         graph: StateGraph = StateGraph(FanOutState)
         graph.add_node("specialist", specialist_node)
+        graph.add_node("join", join)
         graph.add_node("synthesis", synthesis_node)
         graph.add_conditional_edges(START, fan_out, ["specialist"])
-        graph.add_edge("specialist", "synthesis")
+        graph.add_edge("specialist", "join")  # plain edge: joins, runs once
+        graph.add_conditional_edges("join", route_after_specialists, ["synthesis", END])
         graph.add_edge("synthesis", END)
 
         final = graph.compile().invoke({"outcomes": [], "synthesis": []})

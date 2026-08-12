@@ -20,13 +20,13 @@ from typing import Any
 
 import pytest
 from ireports_domain import ASAPEnvelope, DecisionDomain, FindingClassification
-from ireports_gateway import StubGateway
+from ireports_gateway import ModelRefusalError, StubGateway
 from lambda_demo import handler as handler_module
 from lambda_demo.case_loader import LoadedCase, load_case
 from lambda_demo.criteria import CATALOG, NoApplicableCriteriaError, criteria_for
 from lambda_demo.orchestrator import ORCHESTRATORS
 from lambda_demo.package import build_envelope
-from lambda_demo.specialist import analyze
+from lambda_demo.specialist import SpecialistStatus, analyze
 
 CASE_DIR = Path(__file__).parent / "cases" / "AMI-SYN-FIN-001"
 RUN_ID = "run_test_0001"
@@ -454,16 +454,6 @@ def test_synthesis_is_validated_like_everything_else(case, override, expected: s
     assert any(expected in reason for reason in result.synthesis.rejected)
 
 
-def test_synthesis_does_not_pay_for_a_call_it_cannot_use(case) -> None:
-    """Fewer than two findings cannot contradict each other."""
-    gateway = StubGateway(default=json.dumps({"findings": []}))
-    result = ORCHESTRATORS["hand-rolled"].run(case, gateway, RUN_ID)
-
-    assert result.synthesis is not None
-    assert result.synthesis.resolved_model is None  # no model call was made
-    assert not any(call.node_id == "synthesis" for call in gateway.calls)
-
-
 def test_both_orchestrators_synthesize_identically(case) -> None:
     """The second stage is a real graph edge in one and a second statement in the other."""
     shapes = {}
@@ -475,3 +465,110 @@ def test_both_orchestrators_synthesize_identically(case) -> None:
             [(o.evidence_id, o.criterion_ids) for o in result.synthesis.overlaps],
         )
     assert shapes["hand-rolled"] == shapes["langgraph"]
+
+
+# ---------------------------------------------------------------------------
+# Conditional routing
+# ---------------------------------------------------------------------------
+
+
+class _RefusesOne(StubGateway):
+    """Refuses one named criterion. Every other criterion would succeed."""
+
+    def __init__(self, node_id: str, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._refuse = node_id
+        self.refusals = 0
+        """Counted here rather than read from `gateway.calls`: this raises *before* delegating,
+        so a refused attempt never reaches the stub's own call log."""
+
+    def complete(self, request):  # type: ignore[no-untyped-def]
+        if request.node_id == self._refuse:
+            self.refusals += 1
+            raise ModelRefusalError(category="sensitive_content")
+        return super().complete(request)
+
+
+def test_one_refusal_does_not_kill_the_run(case) -> None:
+    """Regression. Until 2026-08-12 it did, on both paths.
+
+    `gateway.complete` was called bare, so a refusal raised through the thread pool or the graph
+    and discarded every other specialist's completed, already-paid-for work. Under Lambda that is
+    worse: the invocation is retried automatically and every model call is paid for again, into
+    the same refusal.
+    """
+    for name, orchestrator in ORCHESTRATORS.items():
+        result = orchestrator.run(
+            case,
+            _RefusesOne("candor_specialist", default=json.dumps({"findings": [_finding()]})),
+            RUN_ID,
+        )
+        assert len(result.outcomes) == len(result.criteria), name
+        assert result.findings, f"{name} lost the surviving specialists' work"
+
+
+def test_a_refused_criterion_is_not_a_clean_one(case) -> None:
+    """The distinction the architecture exists to protect.
+
+    A criterion nobody could analyse and a criterion that came back clean both have zero findings.
+    If they look the same, the run reports silent under-analysis as a clean record.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(
+        case,
+        _RefusesOne("candor_specialist", default=json.dumps({"findings": [_finding()]})),
+        RUN_ID,
+    )
+    by_node = {o.criterion.node_id: o for o in result.outcomes}
+
+    refused = by_node["candor_specialist"]
+    assert refused.status is SpecialistStatus.REFUSED
+    assert not refused.analysed
+    assert any("NOT analysed" in reason for reason in refused.rejected)
+
+    # And a criterion that genuinely found nothing is still COMPLETED, not conflated with it.
+    clean = ORCHESTRATORS["hand-rolled"].run(
+        case, StubGateway(default=json.dumps({"findings": []})), RUN_ID
+    )
+    assert all(o.status is SpecialistStatus.COMPLETED for o in clean.outcomes)
+    assert all(o.analysed for o in clean.outcomes)
+
+
+def test_a_refusal_is_not_retried(case) -> None:
+    """ADR-015: a refusal is not a transport failure and must not be retried blindly."""
+    gateway = _RefusesOne("candor_specialist", default=json.dumps({"findings": []}))
+    ORCHESTRATORS["hand-rolled"].run(case, gateway, RUN_ID)
+    assert gateway.refusals == 1, "a refused criterion was asked again"
+
+
+def test_synthesis_runs_once_not_once_per_specialist(case) -> None:
+    """The trap that cost a `join` node, and would have been silent.
+
+    A conditional edge leaving a `Send`-dispatched node fires **once per dispatch**, and each
+    firing sees only that dispatch's own state contribution. Measured directly: five dispatches
+    gave five router calls, each seeing one outcome, never five. Routing on the aggregate of a
+    fan-out therefore has to happen after an explicit join, or every branch decides on a run that
+    does not exist.
+
+    No error, no warning — just a decision made on one-fifth of the evidence.
+    """
+    for name, orchestrator in ORCHESTRATORS.items():
+        gateway = StubGateway(
+            responses={"synthesis": json.dumps({"contradictions": [], "information_gaps": []})},
+            default=json.dumps({"findings": [_finding()]}),
+        )
+        orchestrator.run(case, gateway, RUN_ID)
+        calls = [c for c in gateway.calls if c.node_id == "synthesis"]
+        assert len(calls) == 1, f"{name} ran synthesis {len(calls)} times"
+
+
+def test_both_paths_skip_synthesis_on_the_same_condition(case) -> None:
+    """The routing policy is shared code, so the two paths cannot drift.
+
+    If each orchestrator decided this separately, two runs of the same case would produce
+    different envelopes for a reason nobody could see.
+    """
+    for name, orchestrator in ORCHESTRATORS.items():
+        gateway = StubGateway(default=json.dumps({"findings": []}))
+        result = orchestrator.run(case, gateway, RUN_ID)
+        assert result.synthesis is None, f"{name} ran synthesis with nothing to reason across"
+        assert not any(c.node_id == "synthesis" for c in gateway.calls), name

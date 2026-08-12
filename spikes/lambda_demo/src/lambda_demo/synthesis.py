@@ -215,20 +215,12 @@ def synthesize(
 ) -> SynthesisOutcome:
     """One model call across every specialist's findings, plus the computed overlaps.
 
-    Returns an empty outcome without calling a model when there is nothing to reason across —
-    fewer than two findings cannot contradict each other, and paying for a call to be told so is
-    waste.
+    **Whether this stage should run at all is not decided here.** `orchestrator.should_synthesize`
+    owns that, so the two orchestration paths cannot drift into disagreeing about it — and a
+    second copy of the rule living in this module would be exactly that drift waiting to happen.
+    This function assumes it was called because it should have been.
     """
     computed = overlaps(outcomes)
-    all_findings = [f for o in outcomes for f in o.findings]
-    if len(all_findings) < 2:
-        return SynthesisOutcome(
-            findings=(),
-            overlaps=computed,
-            rejected=(),
-            resolved_model=None,
-        )
-
     known_spans = {s.evidence_id for s in case.spans}
     by_criterion = {c.criterion_id: c for c in criteria}
 
