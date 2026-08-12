@@ -1,0 +1,61 @@
+{
+  "_comment": "Synthetic only. No real case data, ever (CLAUDE.md). Every span below is invented for this demo; any resemblance to a real subject is unintended. Written to contain both aggravating and mitigating facts, and one genuine information gap, so the analysis has something honest to find rather than a single planted answer.",
+  "spans": [
+    {
+      "evidence_id": "ev_001",
+      "document_id": "doc_sf86_001",
+      "page_number": 22,
+      "source_reliability": "subject_statement",
+      "text": "Section 18 (Relatives): Subject reports two siblings who are citizens and residents of a foreign country. Subject reports contact by messaging application approximately weekly, and one in-person visit in the last three years."
+    },
+    {
+      "evidence_id": "ev_002",
+      "document_id": "doc_roi_001",
+      "page_number": 8,
+      "source_reliability": "investigator_finding",
+      "text": "Investigator confirmed the two siblings reside abroad and are employed in the private sector. No indication either is affiliated with a foreign government, military, or intelligence service. Subject's contact pattern is consistent with ordinary family relations."
+    },
+    {
+      "evidence_id": "ev_003",
+      "document_id": "doc_sf86_001",
+      "page_number": 31,
+      "source_reliability": "subject_statement",
+      "text": "Section 20A (Foreign Business Activities): Subject answered 'No' to holding any financial interest in a foreign business."
+    },
+    {
+      "evidence_id": "ev_004",
+      "document_id": "doc_interview_001",
+      "page_number": 4,
+      "source_reliability": "subject_statement",
+      "text": "During the subject interview, Subject stated they hold a 4 percent non-controlling interest in a family-owned import business located in the same foreign country, inherited in 2021. Subject stated they did not consider an inherited minority interest reportable and did not intend to omit it."
+    },
+    {
+      "evidence_id": "ev_005",
+      "document_id": "doc_roi_001",
+      "page_number": 14,
+      "source_reliability": "investigator_finding",
+      "text": "Corporate registry records list Subject as holding 4 percent of the referenced business. Records show no officer, director, or signatory role. Annual distributions over the last three years averaged the equivalent of USD 1,900."
+    },
+    {
+      "evidence_id": "ev_006",
+      "document_id": "doc_credit_001",
+      "page_number": 2,
+      "source_reliability": "record_check",
+      "text": "Credit report shows one collection account opened 2023 in the amount of USD 4,180, related to a medical debt. Account shows a payment plan established 2024 and a current balance of USD 610, paid as agreed for fourteen consecutive months."
+    },
+    {
+      "evidence_id": "ev_007",
+      "document_id": "doc_interview_001",
+      "page_number": 9,
+      "source_reliability": "subject_statement",
+      "text": "Subject stated the medical debt arose from an emergency procedure during a lapse in coverage between employers, and provided documentation of the payment plan."
+    },
+    {
+      "evidence_id": "ev_008",
+      "document_id": "doc_roi_001",
+      "page_number": 19,
+      "source_reliability": "investigator_finding",
+      "text": "The record does not contain a response from Subject's former employer regarding the dates of the coverage lapse. One employment verification request remains outstanding as of the date of this report."
+    }
+  ]
+}
