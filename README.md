@@ -53,6 +53,7 @@ decides nothing. That last part is structural, not stylistic — see below.
 | [`docs/LESSONS.md`](docs/LESSONS.md) | What cost us time. The most useful thing in this repo |
 | [`docs/AWS.md`](docs/AWS.md) | GovCloud availability, the region constraint, local↔AWS parity |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Why each significant choice was made |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | What to build next, in priority order |
 | [`spikes/lambda_demo/`](spikes/lambda_demo/README.md) | The demo — what it proves and what it does not |
 
 Reference material, kept but no longer growing: `docs/handoff/` (contract details, the orchestration

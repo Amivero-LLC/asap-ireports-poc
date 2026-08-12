@@ -1,207 +1,121 @@
-# Roadmap
+# What to build next
 
-> **Superseded — historical reference only (2026-08-12).**
->
-> This file describes an older, wider milestone shape and states the orchestration framework as
-> decided. Both are out of date: **ADR-024 keeps custom Python and LangGraph both live** until
-> crash/resume exists, and the project is now framed as an exploratory proof of concept rather
-> than a formal milestone sequence.
->
-> For current state see [`../README.md`](../README.md) and
-> [`ARCHITECTURE.md`](ARCHITECTURE.md) § What exists. Kept because the sequencing reasoning is
-> still useful to a reader deciding what to build in what order.
+A working list, in rough priority order. Not a formal plan — no requirement IDs, no acceptance
+criteria to sign off. If something here turns out to be wrong or unnecessary, change it.
 
-Sequenced so that the riskiest architectural claims are settled first and every milestone leaves
-behind an artifact the ASAP program team can act on (ADR-001).
+**Where we are:** a case runs end to end through a Lambda, against real models, through both
+orchestration paths, and produces a validated envelope. What is missing is everything that makes it
+survive contact with production: retrieval, budgets, and crash recovery.
+
+The previous milestone-based roadmap is in git history (`docs/ROADMAP.md` before 2026-08-12) if you
+want the earlier sequencing reasoning.
 
 ---
 
-## Milestone 1 — Architecture sign-off and the orchestration decision
+## 1 · Shared orchestration core
 
-**Goal:** produce an architecture the program can sign off on, with the orchestration framework
-chosen on evidence rather than assertion.
+**Why first:** ADR-024 keeps two orchestration paths alive, and the way that stays cheap is building
+the logic *once* in framework-free code both paths call. Do this before adding features, or you will
+add each of them twice.
 
-**The orchestration decision is made (2026-08-11): LangGraph, ADR-012 Accepted**, on the scorecard
-in `docs/handoff/orchestration-scorecard.md`. The one item still open in this milestone is the 1a
-component-architecture write-up.
+- Budgets: ceilings on model calls, tokens, and wall clock — per node and per run
+- Loop and fan-out limits, replacing the current `IREPORTS_DEMO_MAX_PARALLEL` env var
+- A `BudgetConsumption` record on the run so spend is accountable after the fact
 
-This milestone exists because the agentic orchestrator is the part of this system most likely to
-be underestimated, and the framework choice is the hardest thing to reverse once analysis nodes
-are written against it.
+The orchestrators keep only what is genuinely theirs: how work is scheduled. Everything about
+*what* work is allowed belongs in shared code.
 
-### 1a · Architecture package
+**Watch for:** where a feature is easy in one path and awkward in the other. That is real evidence
+for the framework decision, and it goes in `LESSONS.md`.
 
-- Component architecture with the boundaries that matter marked: what is ours, what the AWS
-  ingestion pipeline owns, what ASAP owns, and where the human review gate sits. — **outstanding**
-- Library and framework inventory with versions, and the reason each one is there. —
-  **partly covered** by the 1b scan's measured footprint and version tables; the non-orchestration
-  layers still need writing up.
-- Data contracts as Pydantic models with generated JSON Schema: case, document, evidence, finding,
-  run manifest, human disposition, ASAP envelope. Contracts first — they are the interface the
-  orchestration decision has to satisfy. — **done (2026-08-10)**
-- The authority-routing model: how a case maps to 5 CFR 731 suitability/fitness, SEAD-4, or both.
-  — **contract done**, routing engine itself is Milestone 2.
+## 2 · Local AWS parity
 
-**Contracts delivered.** Thirteen contracts in `packages/domain/`, published to `schemas/`,
-documented in `docs/handoff/contracts.md`. ADR-014, ADR-011, ADR-008, and the decision-support
-boundary are enforced structurally and asserted by 56 tests rather than left to review. Deferred:
-`ChunkRecord`, `EntityCandidate`, `TimelineEvent`, and `PolicyRecord` (blocked on Q-02), and
-`SpecialistResult` (deliberately deferred until ADR-012 resolves, since its shape is the one most
-likely to be influenced by the framework).
+**Why:** you asked for the local environment to be architecturally compatible with what GovCloud
+actually offers, and today `infrastructure/docker/` is one PostgreSQL container.
 
-**Exit:** program leadership can sign off on components, libraries, and contracts.
-**Status:** contracts ready for sign-off; the component-architecture write-up is outstanding.
+- **OpenSearch in the compose file**, configured to mirror the Serverless vector collection —
+  same index shape, same vector engine settings, so local behaviour predicts AWS behaviour
+- **The mapping module**: every field name, filter, and facet in one file, so swapping to the real
+  AWS collection schema is a single-file edit. Its header should say the schema is unconfirmed
+- **LocalStack as an opt-in profile** for the S3 and trigger path — not in the default `pytest`
+  loop, which stays fast and service-free
+- A short "what runs where" check so a developer can confirm their local stack matches `docs/AWS.md`
 
-### 1b · Orchestration landscape scan — **complete (2026-08-10)**
+**Decide early:** GovCloud US-West or US-East. `bedrock-mantle` is US-West only, and that decides
+whether our `bedrock` adapter works as written or needs a `bedrock-runtime` sibling.
 
-Survey current agentic-orchestration frameworks — maintenance activity, release cadence, API
-stability, production adoption, licensing, and dependency footprint. The candidate set in ADR-012
-was drawn from a document written earlier; confirm it is still the right set before spending spike
-effort, and add or drop candidates with a recorded reason.
+## 3 · Retrieval
 
-**Exit met.** `docs/handoff/orchestration-landscape.md`. ADR-012's candidate set amended: PydanticAI
-/ Pydantic Graph dropped (Pydantic Graph 2.x has no state-persistence API, so it cannot attempt
-spike leg 1); AutoGen and Semantic Kernel removed from consideration (maintenance mode since April
-2026); Microsoft Agent Framework, DBOS, Temporal, and Restate recorded as considered-and-not-spiked.
-Four candidates became three. The scan also added three spike deliverables to 1c and raised Q-14.
+**Why:** right now specialists are *handed* evidence from a file. A specialist that retrieves its
+own evidence is the actual architecture — the fixture version demonstrates a fan-out, not this
+system.
 
-### 1c · Orchestration bake-off (partial spike) — **complete (2026-08-11)**
+- Vector + lexical query against local OpenSearch, with a **mandatory case filter** and bounded K
+- One synthetic case indexed and retrieved against
+- No graph database, ever (ADR-006)
 
-Each candidate — **LangGraph, Strands Agents SDK, hand-rolled Python** (three, per the 1b scan) —
-implements the same narrow scenario, covering only the legs where frameworks actually differ:
+**Known limitation to write down, not solve:** if the embedding model used at query time differs
+from the one that populated the AWS collection, nothing errors — retrieval just gets quietly worse.
+Local retrieval quality is never predictive of AWS retrieval quality.
 
-1. Durable checkpoint and **resume in a separate process** after the first exits
-2. **Human-in-the-loop interrupt** — pause mid-run, record a disposition out of band, resume
-3. **Survive a simulated model timeout** without losing or duplicating completed work
-4. Bounded parallel fan-out of two specialist nodes, then join and de-duplicate
+## 4 · Crash, resume, and idempotency
 
-Scored on blueprint §9.4: framework-specific lines of code, serialized state size, resume
-correctness, budget and tool-allowlist enforcement, ease of inspecting and replaying state, test
-determinism, dependency and vulnerability footprint, cold-start and image size, and developer
-comprehension after a short onboarding exercise.
+**Why:** this is the hard one, the highest technical risk, and **the thing that decides the
+framework question**. It is the only seam where custom Python and LangGraph meaningfully differ.
 
-Plus three deliverables the 1b scan added, each a question reading could not settle: assert on
-**resume semantics under a mid-node process kill** (does completed work re-execute?); a **LangSmith
-egress-deny test** if LangGraph is selected, since `langsmith` is a mandatory transitive dependency
-of `langchain-core`; and a **checkpoint-store threat model** treating the checkpoint blob as a
-deserialization trust boundary in every design, hand-rolled included.
+- Checkpoint after each node; resume in a *separate process* without re-running completed work
+- **A crash mid-fan-out must not re-run an in-flight model call.** Today that fails: the bake-off
+  measured 11 of 24 duplicate paid calls for LangGraph and 12 of 24 hand-rolled
+- Set `durability="sync"` and strict checkpoint deserialization on the LangGraph path — both
+  defaults are wrong here and invisible when reading the graph
+- Then prove it across a Lambda invocation boundary. **A Lambda timeout is a crash mid-fan-out**,
+  and Lambda retries automatically, so without idempotency a timeout re-pays for every model call
 
-**All three candidates built and passing (2026-08-11).** Full results, measurement method, and
-the fair reading of every number: `spikes/README.md`. Headline, one ruler across all three
-(`spikes/measure.py`):
+**When this works, make the framework call** and close ADR-024.
 
-| | hand-rolled | LangGraph | Strands |
-|---|---|---|---|
-| Four legs | pass | pass | pass |
-| Candidate-specific lines | **195** | 266 (192 net of spike-only instrumentation) | 373 |
-| State at the review interrupt | 16,346 B | **16,115 B** (37,033 B retained for the run) | 23,739 B |
-| Distributions / size beyond baseline | **0 / 0.0 MB** | 31 / 18.0 MB | 42 / 47.3 MB |
-| `pip-audit` advisories, pinned set | 0 | 0 | 0 |
+## 5 · A case the system has never seen
 
-**Both LangGraph-specific deliverables the 1b scan required are done.** The LangSmith egress-deny
-test (`spikes/langgraph/test_langsmith_egress.py`) proves the default is closed, proves an
-explicit `langsmith.configure(enabled=False)` pin beats a hostile inherited `LANGSMITH_TRACING`,
-and — via a negative control — proves the risk is real rather than theoretical: unpinned, a run
-`POST`s roughly 90 KB of graph state including finding text to `api.smith.langchain.com`, **and
-still succeeds**, because LangSmith swallows the failure. The framework-independent
-`docs/handoff/checkpoint-threat-model.md` records the checkpoint blob as a deserialization trust
-boundary in every design, together with the controls this project did *not* build.
+**Why:** every run so far uses `AMI-SYN-FIN-001`, built alongside the system, and it contains real
+concerns. So we have shown it finds issues when issues exist. We have *not* shown the opposite —
+whether it manufactures concern on a clean record to look thorough.
 
-Two LangGraph defaults are wrong for this architecture and invisible in the code: `durability`
-defaults to `async` rather than `sync`, and checkpoint deserialization defaults to permissive —
-the library's own source says *"any Python callable stored in checkpoint data will be imported and
-executed on load"* without `LANGGRAPH_STRICT_MSGPACK`. The candidate sets both in code.
+- A second synthetic case with a different shape: a clean record, or one where concern is strongly
+  mitigated
+- The interesting result is **fewer findings, or none**. An empty envelope is refused by design, so
+  a genuinely clean case should produce a run that says so rather than an envelope that invents
+  something
 
-**The duplicate-model-call window is universal, not an artifact.** The 2026-08-10 write-up
-predicted that Strands' 0/12 was an artifact of our synchronous node bodies and that a candidate
-with genuine concurrent fan-out would show the window. LangGraph is that candidate and it does:
-over 24 trials the sibling's call was in flight at crash time in **24/24** and cost a duplicate
-paid call in **11/24**, against hand-rolled's 12/24 and Strands' 0/24. Model-call-level
-idempotency (blueprint §8.5 duplicate-query detection) is owed by **all three**.
+This is cheap and it is the single strongest evidence improvement available.
 
-**Superseded figures, recorded rather than quiet.** The 2026-08-10 line counts (hand-rolled 202,
-Strands 367) came from an unrecorded method and could not be reproduced; re-counted by
-`spikes/measure.py` they are 195 and 373 — within 4%, ordering unchanged.
+## 6 · One command, end to end
 
-**What the harness guarantees**, unchanged since 2026-08-10: node bodies are shared so that
-"framework-specific lines of code" measures wiring and nothing else; the stub gateway logs every
-model call to PostgreSQL outside the framework so leg 1 is answerable; candidates are driven
-across a real process boundary; and a permanently retained broken candidate proves leg 1 can
-actually fail something. Leg 1 was once tightened to assert on every specialist and then reverted
-— re-running work the orchestrator never observed completing is correct at-least-once behaviour,
-so the stricter assertion is flaky rather than strict.
+Fold the demo into something a developer runs without knowing about SAM staging:
 
-**The scan's highest-value unknown, settled (2026-08-10, unchanged).** The third-party claim that
-Strands restores *conversation* rather than resuming *execution* **does not hold for `Graph` in
-`strands-agents` 1.51.0**: `serialize_state` carries `completed_nodes` and `next_nodes_to_execute`,
-state is synced after every node, and after a hard `os._exit(9)` no completed node re-executed.
-The same was asserted rather than assumed for LangGraph, with the same result. What *is* true of
-Strands is that its state container is conversation-shaped — a node's durable result must be an
-`AgentResult`, which persists only `message` and `stop_reason` — so typed contracts are flattened
-into a message body and re-validated on the way out, which is also why its checkpoint is the
-largest of the three.
+```
+ireports run --case AMI-SYN-FIN-001
+```
 
-**Exit met (2026-08-11). ADR-012 is Accepted: the orchestration framework is LangGraph.**
-`docs/handoff/orchestration-scorecard.md` and `orchestration-scorecard.json` — the latter a
-validated `Scorecard` contract generated by `spikes/bakeoff_scorecard.py`, so a candidate row is
-either complete or it fails to build.
-
-The decision turns on the capability ADR-012 named as load-bearing: durable checkpointing over
-PostgreSQL cost **two lines** with LangGraph's first-party `PostgresSaver`, against 56 for the
-hand-rolled store and 166 for the `SessionRepository` Strands does not ship. Net of spike-only
-instrumentation LangGraph's wiring is ~192 lines, below the hand-rolled floor of 195, while also
-providing scheduling, a native interrupt, and declarative retry — and it is the only candidate
-with a written semver commitment, which is what a version-pinning, ATO-bound program most needs.
-Hand-rolled is the recorded runner-up and the fallback if the dependency surface is refused;
-Strands is dominated on every measured dimension except AWS alignment. Both spikes are retained.
-
-**Remaining, and carried into Milestone 2 rather than blocking the exit:** cold start and
-packaging under SAM local, unmeasured for all three and the one number most likely to reopen the
-choice — `spikes/test_scorecard.py` fails the moment it is recorded, so the recommendation must be
-re-read against it rather than left standing. Model-call-level idempotency (blueprint §8.5) is
-owed by all three candidates and built by none.
+Load, retrieve, fan out, enforce budgets, validate, package, write the envelope. Unattended, no
+point at which it waits for a person.
 
 ---
 
-## Milestone 2 — The orchestrator produces an iReport
+## Not scheduled, deliberately
 
-**Goal:** the general orchestrator runs end to end and produces an iReport from a single
-sub-agent query — the simplest path that touches every seam, before any optimization.
+| | Why not |
+|---|---|
+| Document ingestion | Not ours — the AWS pipeline owns upload, extraction, chunking, indexing (ADR-007) |
+| Authority routing from policy packs | Criteria are hard-coded in `specialist.py` and that is honest for a PoC. Real routing needs approved policy content that does not exist yet |
+| Checkpoint row integrity | The largest known security gap. A tampered checkpoint that still parses would not be detected. Worth doing before anything real runs on this, not before the PoC is proven |
+| Agreement scoring against analyst findings | Needs synthetic cases with analyst-identified ground truth. Worth doing once there is something to measure |
+| Bedrock AgentCore | Reached GovCloud US-West 2026-05-05 and is a live alternative to the Lambda adapter. Never evaluated — worth a look before committing to Lambda |
 
-- Orchestrator on **LangGraph** (ADR-012), behind our own port so nodes never import it directly
-- Model-call-level idempotency (blueprint §8.5 duplicate-query detection) — owed by every 1c
-  candidate and built by none; a crash mid-fan-out currently re-runs an in-flight model call
-- One synthetic case, ingested locally and indexed into local OpenSearch
-- Authority routing selects the policy pack
-- A single specialist sub-agent query produces proposed findings against one criterion
-- Deterministic validators: schema, citation resolution, policy effectivity, prohibited content
-- Human review gate — run pauses, disposition recorded, run resumes
-- Delivery to the ASAP mock through the outbox with an idempotency key
+## The refusal gap
 
-**Exit:** one command takes a synthetic case to a delivered, human-approved iReport. Every seam
-has been exercised once.
+Worth stating plainly because it is the weakest point in the current design: **a refused specialist
+produces an empty findings list that is indistinguishable, in the artifact, from a criterion that
+came back clean.** The distinction exists only in the log.
 
----
-
-## Milestone 3 — Optimize
-
-Widen and deepen against measurements from M2, in the order the evidence justifies. Candidates:
-the full specialist set across both authority families; retrieval quality work (hybrid fusion,
-query planning, reranking); the contradiction and challenge stages; multi-criterion fan-out;
-model-tier tuning across the three aliases; the evaluation harness and red-team scenarios.
-
-Sequence this from M2 findings — not from this list.
-
----
-
-## Continuous — the handoff package
-
-Built as we go, not written up at the end (ADR-001):
-
-- `docs/DECISIONS.md` — every decision with its reasoning, kept current
-- `docs/OPEN-QUESTIONS.md` — what remains unresolved and what it would cost to be wrong
-- The bake-off scorecard and the retained spikes
-- Contracts and schemas
-- Deployment and packaging notes, including whatever Q-01 turns up about GovCloud
-- Known failure modes and things we tried that did not work — the most useful and most commonly
-  omitted artifact in a handoff
+Refusals are expected in normal operation here — adjudicative files routinely discuss criminal
+conduct, substance use, and foreign contacts. Closing this means surfacing "this criterion was not
+analyzed" as a first-class outcome rather than as silence. It is not hard; it just has not been done.
