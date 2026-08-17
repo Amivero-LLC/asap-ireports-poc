@@ -1,6 +1,7 @@
 """Run one synthetic case through both Lambdas and write the envelopes where you can open them.
 
-    docker compose -f infrastructure/docker/compose.yaml up -d    # not needed; no Postgres here
+    docker compose -f infrastructure/docker/compose.yaml up -d    # OpenSearch: required
+    uv run --env-file .env python spikes/lambda_demo/index_cases.py
     uv run python spikes/lambda_demo/build.py
     cd spikes/lambda_demo && sam build --use-container --parallel && cd -
     uv run --env-file .env python spikes/lambda_demo/run_case.py
@@ -8,6 +9,16 @@
 The last command is the point of the whole spike. It invokes both functions under SAM local, and
 each writes `out/<candidate>-<run_id>.json` — a validated `ASAPEnvelope` plus the run's accounting.
 Open one. That file is what the architecture produces.
+
+**The compose line used to say "not needed; no Postgres here" and was wrong from the day
+specialists started retrieving their own evidence.** OpenSearch holds the indexed cases, and
+without it a run completes reporting `nothing in the record matched` for every criterion — a
+missing service that reads like a clean record. `preflight()` now refuses to start on that, and on
+a stopped Docker daemon, rather than letting either surface a minute later as something else.
+
+`--verbose` prints the raw SAM and container streams, including the Lambda runtime's
+`START` / `END` / `REPORT` records and the handler's own structured log lines. The default output
+is a reading of the response; `--verbose` is a record of the invocation.
 
 **Real model calls, real money.** A full run is roughly 22k tokens across six thinking-tier calls
 (three specialists x two candidates, plus any bounded retry). Nothing in CI runs this, and nothing
@@ -27,9 +38,11 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +64,10 @@ ENV_PREFIXES = ("IREPORTS_",)
 
 DEFAULT_CONTAINER_OPENSEARCH = "http://host.docker.internal:9201"
 """Where the compose stack's OpenSearch lives *from inside a SAM container*."""
+
+HOST_OPENSEARCH = "http://localhost:9201"
+"""The same cluster, from this shell. `preflight` checks it here rather than guessing whether the
+container can see it — a host-side failure is the one a developer can actually act on."""
 ENV_EXCLUDE = frozenset(
     {
         # Postgres for the bake-off's crash/resume legs. This demo has no checkpointer, and a DSN
@@ -158,7 +175,53 @@ def _payload_from(stdout: str) -> dict[str, Any]:
     return max(found, key=lambda v: ("findings" in v, len(v)))
 
 
-def invoke(function: str, event: dict[str, Any], env_vars: Path) -> dict[str, Any]:
+def preflight() -> None:
+    """Fail at the door, naming the service, rather than sixty seconds in.
+
+    Both of these were paid for by hand before they were checked here, and they fail differently:
+
+    * **No container runtime** — `sam local invoke` reports "requires a container runtime" after
+      the script has already written an env-vars file and printed "real model calls, this takes
+      ~20s". Loud, but at the wrong moment and about the wrong layer.
+    * **No OpenSearch** — far worse, because it does not fail. Retrieval returns nothing, every
+      criterion reports `nothing in the record matched`, the run completes, and the output reads
+      like a broken *analysis* rather than a missing *service*. That is the same
+      indistinguishable-from-a-clean-record failure this system exists to prevent, wearing
+      infrastructure clothes.
+
+    The cluster is checked from the host, at the host-side port, so a misconfigured
+    `IREPORTS_OPENSEARCH_URL` still gets a clear message rather than a container-side timeout.
+    """
+    if shutil.which("docker") is None:
+        raise SystemExit(
+            "docker is not on PATH. SAM runs the function inside a Lambda container image, so a "
+            "container runtime is required.\n  open -a Docker"
+        )
+    probe = subprocess.run(["docker", "info"], capture_output=True, text=True, check=False)
+    if probe.returncode != 0:
+        raise SystemExit(
+            "the docker daemon is not running, so SAM has nowhere to invoke the function.\n"
+            "  open -a Docker    # then re-run this"
+        )
+
+    url = os.environ.get("IREPORTS_OPENSEARCH_URL") or HOST_OPENSEARCH
+    health = url.replace("host.docker.internal", "localhost").rstrip("/") + "/_cluster/health"
+    try:
+        with urllib.request.urlopen(health, timeout=5) as response:
+            json.loads(response.read())
+    except (OSError, ValueError):
+        raise SystemExit(
+            f"OpenSearch is not reachable at {health}. The specialists retrieve their evidence "
+            "from it, and without it every criterion reports 'nothing in the record matched' — a "
+            "missing service that reads like a clean record.\n"
+            "  docker compose -f infrastructure/docker/compose.yaml up -d\n"
+            "  uv run --env-file .env python spikes/lambda_demo/index_cases.py"
+        ) from None
+
+
+def invoke(
+    function: str, event: dict[str, Any], env_vars: Path, verbose: bool = False
+) -> dict[str, Any]:
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
         json.dump(event, handle)
         event_path = Path(handle.name)
@@ -181,6 +244,18 @@ def invoke(function: str, event: dict[str, Any], env_vars: Path) -> dict[str, An
         )
     finally:
         event_path.unlink(missing_ok=True)
+
+    if verbose:
+        # Both streams, unfiltered. SAM's own chatter and the container mount go to stderr; the
+        # handler's structured log lines and the Lambda runtime's START/END/REPORT records come
+        # back on stdout. Printed rather than summarised because "show me what actually happened
+        # inside the function" has no other answer — the summary below is a reading of the
+        # response, not a record of the invocation.
+        print(f"\n----- {function}: sam stderr " + "-" * 34)
+        print(result.stderr.rstrip())
+        print(f"----- {function}: container stdout " + "-" * 30)
+        print(result.stdout.rstrip())
+        print("-" * 72)
 
     if result.returncode != 0 and not result.stdout.strip():
         raise SystemExit(f"sam local invoke {function} failed:\n{result.stderr[-2000:]}")
@@ -235,6 +310,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case-id", default="AMI-SYN-FIN-001")
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print raw sam and container output, including the Lambda START/END/REPORT records",
+    )
+    parser.add_argument(
         "--candidate",
         choices=sorted(FUNCTIONS),
         action="append",
@@ -249,6 +329,7 @@ def main() -> int:
             "  cd spikes/lambda_demo && sam build --use-container --parallel"
         )
 
+    preflight()
     candidates = args.candidate or sorted(FUNCTIONS)
     env_vars = write_env_vars()
     OUT_DIR.mkdir(exist_ok=True)
@@ -260,6 +341,7 @@ def main() -> int:
             FUNCTIONS[candidate],
             {"case_id": args.case_id, "candidate": candidate},
             env_vars,
+            verbose=args.verbose,
         )
         out_file = None
         if payload.get("envelope") is not None:

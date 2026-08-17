@@ -41,7 +41,15 @@ no checkpointer.
 wheel will not load in a Lambda container; a host build would package something that cannot run.
 
 `--candidate langgraph` runs one orchestrator instead of both. `--case-id` picks a different case
-directory.
+directory. `--verbose` prints the raw SAM and container streams — the Lambda runtime's
+`START` / `END` / `REPORT` records and the handler's own structured log lines. The default output
+is a reading of the response; `--verbose` is a record of the invocation.
+
+**Two services have to be up, and they fail differently.** Docker, because SAM runs the function
+inside a Lambda container image; and the compose stack, because OpenSearch holds the indexed cases
+the specialists retrieve from. The first fails loudly. The second does not fail at all — retrieval
+returns nothing, every criterion reports `nothing in the record matched`, and a missing service
+reads like a clean record. `run_case.py` checks both before spending anything.
 
 **This costs money.** A full run is roughly 22k–34k tokens across six thinking-tier calls. Nothing
 in CI runs it and nothing should. The offline half — `test_demo.py` here plus
