@@ -403,6 +403,7 @@ mixing these in would misrepresent both.
 | Boundary guards in code | `BUILT` | `tests/contract/test_decision_support_boundary.py` | Asserts no contract models a human decision, no run state waits for one, and the envelope never claims review |
 | One command, case to validated envelope | `PLANNED` | `apps/api/main.py` | Phase 3, DEL-02 |
 | Synthetic cases with analyst-identified issues | `PLANNED` | `cases/synthetic/` | Phase 3, VAL-03 — the ground truth agreement is measured against |
+| Ground-truth-free property scorer over saved runs | `BUILT` | `evals/scorers/properties.py` | Nine invariants, each descending from an incident that actually happened. Scores saved run files, so it costs nothing and is re-runnable as the checks improve. **Necessary, not sufficient** — a green board says well-formed, not correct |
 | Agreement scorer — machine findings vs analyst findings | `PLANNED` | `evals/scorers/agreement.py` | Phase 3, VAL-04 — this is what "human validation" means here |
 
 **Deployment fit.**

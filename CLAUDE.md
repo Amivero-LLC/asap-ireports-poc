@@ -105,10 +105,17 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `spikes/lambda_demo/` | The runnable wrapper — case loading off disk, envelope packaging, Lambda handler, `run_case.py`, and the synthetic corpus |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
-| Tests | 227 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| `evals/` | Scores **saved run files** offline — nine invariants, each descending from a real incident, plus a corpus check no single run can make about itself. `uv run python -m evals.score_run` |
+| Tests | 246 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 **Not built:** crash/resume, model-call idempotency, wall-clock and token budgets, authority routing
-from policy packs, ingestion, `apps/`, `evals/`.
+from policy packs, ingestion, `apps/`, ground-truth agreement scoring (VAL-03/04).
+
+**Known open defect.** `specialist.py` hard-codes `classification=POTENTIAL_ISSUE` and the response
+schema never asks for one, so `MITIGATING_INFORMATION` and `NO_ISSUE_IDENTIFIED` are unreachable. On
+a clean record every finding ships mislabelled. `evals` fails on it by design until it is fixed —
+see `docs/ROADMAP.md` item 8, and note the rule conflict it sits on (an empty findings array is a
+good answer, but an envelope with no findings is refused).
 
 **Graduated 2026-08-12.** The orchestrator, specialist, synthesis and criteria modules now live in
 `packages/orchestration/` and specialists return the published `SpecialistResult`. `SpecialistStatus`

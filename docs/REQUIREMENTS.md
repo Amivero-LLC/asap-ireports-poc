@@ -169,6 +169,18 @@ a system that has no human interaction at all, so there is nothing to defer.*
       validated; the transactional outbox and ASAP mock (DEL-01) are cut by ADR-020.**
       *Traces:* docs/ROADMAP.md §Milestone 2 Exit (narrowed) · ADR-010 (contract stands, transport
       does not ship) · ADR-022.
+- [ ] **VAL-05**: A run's output can be scored without ground truth, offline, and repeatably.
+      *Acceptance:* a scorer reads a saved run file and reports invariants that must hold for any
+      correct run — citations resolving to what the specialist was shown, no determinative
+      language in the shipped envelope, no aggregate under any field name, every criterion
+      accounted for, rejection volume bounded, and **at least one corpus-level check that a single
+      run cannot make about itself**. Each check names the incident it descends from, and each has
+      a negative control proving it can fire.
+      *Traces:* added 2026-08-17 after a hard-coded classification survived every existing test.
+  - *Status:* **Done.** `evals/scorers/properties.py`, nine checks, scored over saved runs by
+    `uv run python -m evals.score_run`. Necessary and not sufficient: a green board says the run
+    is well-formed and internally honest, not that the analysis is right. That needs VAL-03/04
+
 - [ ] **VAL-03**: Synthetic cases carry the issues a human analyst identified, as ground truth.
       *Acceptance:* at least one synthetic case in `cases/synthetic/` has an `expected/` record
       naming the issues a human found, each tied to the criterion and the evidence span that
@@ -323,6 +335,7 @@ originals below. Recorded **unordered and unscoped**.
 | REV-01 | — | **Withdrawn (ADR-022)** |
 | REV-02 | — | **Withdrawn (ADR-022)** |
 | DEL-02 | Phase 3 | Pending |
+| VAL-05 | — | Done (2026-08-17) |
 | VAL-03 | Phase 3 | Pending |
 | VAL-04 | Phase 3 | Pending |
 | HAND-01 | Phase 3 | Pending |

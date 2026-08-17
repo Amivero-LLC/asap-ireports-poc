@@ -541,6 +541,53 @@ Put your real constraints in types and validators. Prompts are requests.
 
 ---
 
+## Validating the output
+
+### Build the checks from the bugs you actually had `[measured]`
+
+`evals/` scores **saved run files**, not live runs, and every check descends from a named incident.
+Both of those are deliberate.
+
+**Scoring is separated from running** because a run costs real money and is nondeterministic while
+scoring is free and exact. Without the split, every improvement to a check means re-paying for the
+runs it checks — and a harness nobody can afford to run is a harness nobody runs.
+
+**Checks come from incidents, not from imagination.** A check nobody has ever needed is a check
+nobody maintains. Run against nineteen saved runs on its first day, the scorer independently
+reproduced this project's entire bug history with no model calls and no ground truth: the 4,547
+one-character rejections, the two runs where a failed synthesis stage carried no explicit state,
+and the hard-coded classification found by hand hours earlier.
+
+**The corpus check is the one worth copying.** `classification_is_not_a_constant` needs no ground
+truth — only more than one case. Every individual run looked fine, because `potential_issue` is a
+legitimate classification; only the corpus showed no other value was reachable. The general form:
+**a constant that is usually right is indistinguishable from a decision until you look across
+cases.** Any enum a node "chooses" from is a candidate.
+
+### A scorer needs negative controls more than the thing it scores `[measured]`
+
+A check that cannot fire is indistinguishable from a check that passes, and a green board that
+cannot go red is the silent-under-analysis failure aimed at the people reviewing the *system*.
+
+Every check therefore has a crafted run that must make it fail, and a test asserts the controls
+cover the checks — so adding a check without a control is itself a failure. This is not
+theoretical: writing those controls immediately found **two defects in the scorer**. `no_aggregate_
+score` was anchored on word boundaries and could not see `overall_risk_score`, because an
+underscore is a word character — the single field name an aggregate is most likely to use was the
+one it was blind to. And `excerpt_integrity` printed "SKIPPED" in its detail while returning a
+pass, so a run with no case text to compare against scored green.
+
+### Skip is a third outcome, and omitting it makes the board unreadable `[measured]`
+
+The first full scoring run showed 25 failures. Twenty of them meant "this file is old" — the
+earliest saved runs predate retrieval, per-criterion status, and the synthesis stage entirely, so
+checks for those fields failed on artifacts made before the fields existed.
+
+Adding an explicit SKIP took the board to 5, every one a real bug. **A check that cannot
+distinguish "violated" from "not applicable" produces a board nobody reads** — the same failure as
+the 4,547 rejections, one level up. A skipped check is never counted as a pass; it has told you
+nothing, and saying so is the point.
+
 ## Process
 
 ### An unanswerable question is often just an unasked one

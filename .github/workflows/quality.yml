@@ -40,9 +40,9 @@ jobs:
         # here rather than be silently resolved into something nobody has run locally.
         run: uv sync --locked --all-extras --dev
 
-      - run: uv run ruff check packages tests scripts spikes
-      - run: uv run ruff format --check packages tests scripts spikes
-      - run: uv run mypy --strict packages tests scripts
+      - run: uv run ruff check packages tests scripts spikes evals
+      - run: uv run ruff format --check packages tests scripts spikes evals
+      - run: uv run mypy --strict packages tests scripts evals
 
       - name: Schemas match the models
         # The gate that was failing live and uncaught. `--check` regenerates in memory and
@@ -64,7 +64,7 @@ jobs:
         #
         # Verified not vacuous: planting a `subprocess.call(..., shell=True)` and a
         # `yaml.load()` in `packages/` makes this step exit 1 on both.
-        run: uv run bandit -r packages -q --severity-level medium
+        run: uv run bandit -r packages evals -q --severity-level medium
 
   spikes:
     name: orchestration bake-off
