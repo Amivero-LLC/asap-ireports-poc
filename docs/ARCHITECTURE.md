@@ -132,70 +132,59 @@ subject violated SEAD-4," the prompt had already failed and the type is what sto
 
 ```mermaid
 flowchart TB
-    subgraph WRAP["spikes/lambda_demo — the runnable wrapper, no analysis in it"]
-        HAND["handler.py<br/>one invocation, one run"]
-        LOAD["case_loader.py<br/>disk to typed case"]
-        PACK["package.py<br/>findings to ASAPEnvelope"]
+    LOAD["spikes · case_loader.py<br/>disk to typed case"]
+    HAND["spikes · handler.py<br/>one invocation, one run"]
+    PACK["spikes · package.py<br/>findings to ASAPEnvelope"]
+
+    PORT["orchestration · port.py<br/>Orchestrator protocol, RunResult<br/>routing policy both paths share"]
+    HR["orchestration · handrolled.py<br/>a thread pool and a loop"]
+    LG["orchestration · langgraph_adapter.py<br/>the only module that imports a framework"]
+
+    subgraph ANALYSIS["orchestration — shared analysis, framework-free, both paths call it"]
+        direction LR
+        CRIT["criteria.py<br/>fan-out width<br/>comes from the case"]
+        SPEC["specialist.py<br/>one criterion,<br/>citation-checked"]
+        SYN["synthesis.py<br/>overlap computed,<br/>conflicts by model"]
+        COER["coercion.py<br/>response shapes,<br/>rejection caps"]
     end
 
-    subgraph ORCHP["packages/orchestration — the reference implementation"]
-        PORT["port.py<br/>Orchestrator protocol, RunResult<br/>routing policy both paths share"]
-        HR["handrolled.py<br/>thread pool and a loop"]
-        LG["langgraph_adapter.py<br/>the only module that imports the framework"]
-        CRIT["criteria.py<br/>fan-out width comes from the case"]
-        SPEC["specialist.py<br/>one criterion, citation-checked"]
-        SYN["synthesis.py<br/>overlap computed, conflicts by model"]
-        COER["coercion.py<br/>response shapes, rejection caps"]
-    end
+    GW["gateway · ModelGateway<br/>the only caller of a model"]
+    RETR["retrieval · Retriever<br/>every field name in mapping.py"]
+    PROXY["LiteLLM proxy to Bedrock<br/>not ours"]
+    OS[("OpenSearch<br/>not ours in AWS")]
+    ENV[("ASAPEnvelope<br/>out/*.json")]
+    EVAL["evals · scorers/properties.py<br/>scores saved runs, offline"]
 
-    subgraph PORTS["packages/ — the boundary to everything outside"]
-        GW["gateway/<br/>ModelGateway, the only caller of a model"]
-        RETR["retrieval/<br/>Retriever, every field name in mapping.py"]
-    end
-
-    DOM["packages/domain/ — 12 contracts + generated JSON Schema<br/>the vocabulary every box above speaks"]
-
-    subgraph OUTSIDE["Not ours"]
-        PROXY["LiteLLM proxy, resolves alias to model id"]
-        OS[("OpenSearch")]
-    end
-
-    ENV[("ASAPEnvelope<br/>spikes/lambda_demo/out/")]
-
-    EVAL["evals/scorers/properties.py<br/>scores saved runs offline, after the fact"]
-
-    HAND --> LOAD
+    LOAD --> HAND
     HAND --> PORT
     PORT --> HR
     PORT --> LG
-    HR --> CRIT
-    LG --> CRIT
-    HR --> SPEC
-    LG --> SPEC
-    HR --> SYN
-    LG --> SYN
-    SPEC --> COER
-    SYN --> COER
-    SPEC --> GW
-    SYN --> GW
-    SPEC --> RETR
+    HR --> ANALYSIS
+    LG --> ANALYSIS
+    ANALYSIS --> GW
+    ANALYSIS --> RETR
     GW --> PROXY
     RETR --> OS
     HAND --> PACK
     PACK --> ENV
     ENV -.->|no model calls, no services| EVAL
 
-    style ORCHP fill:#e8f0fe,stroke:#1a73e8
-    style PORTS fill:#e6f4ea,stroke:#137333
-    style OUTSIDE fill:#f5f5f5,stroke:#9aa0a6
+    style ANALYSIS fill:#e8f0fe,stroke:#1a73e8
+    style GW fill:#e6f4ea,stroke:#137333
+    style RETR fill:#e6f4ea,stroke:#137333
     style LG fill:#fef7e0,stroke:#f9ab00
+    style PROXY fill:#f5f5f5,stroke:#9aa0a6
+    style OS fill:#f5f5f5,stroke:#9aa0a6
 ```
 
-**What the picture is meant to show.** The wrapper at the top holds no analysis — it loads a case,
-calls a port, and packages the result. Everything that reasons about a case lives in
-`packages/orchestration/`, and everything that touches the outside world goes through a port. Only
-the yellow box knows a framework exists, and a test enforces that against every other module in
-its package.
+**What the picture is meant to show.** Read it top to bottom. The `spikes` boxes hold no analysis
+— they load a case, call a port, and package the result. Everything that reasons about a case is in
+`packages/orchestration/`, and the two adapters converge on **one** shared analysis block, which is
+the ADR-024 arrangement drawn rather than described: swapping the orchestrator changes the two boxes
+above that block and nothing inside it.
+
+Green boxes are ports — the only places anything reaches outside. The yellow box is the only module
+that knows a framework exists, and a test enforces that against every other module in its package.
 
 `evals/` hangs off the envelope rather than off the run, and that is the design: it scores **saved
 output**, so it costs nothing and can be re-run as the checks improve.
