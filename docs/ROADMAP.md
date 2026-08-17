@@ -223,7 +223,7 @@ sub-calls is not a real claim if resuming double-pays.
 
 # Part 4 · Prove it
 
-## 8 · A case the system has never seen
+## 8 · A case the system has never seen ✅ built 2026-08-17, and it found something
 
 Every run so far uses `AMI-SYN-FIN-001`, built alongside the system, and it contains real concerns.
 So we have shown it finds issues when issues exist. We have **not** shown the opposite — whether it
@@ -236,6 +236,25 @@ something.
 
 Cheap, fast, and the single strongest evidence improvement available. Do it earlier if you want a
 confidence check before investing in Parts 1–3.
+
+**Built as `AMI-SYN-CLR-001`** — same five criteria, clean record with every concerning-looking
+item explained *in the record*: a late payment that was the creditor's addressing error with a
+written correction, foreign in-laws who are retired dual citizens, a below-threshold foreign
+account the subject volunteered unprompted.
+
+**The substance was right and the labelling was wrong.** Seven findings instead of ten, text that
+led with the mitigation and deferred the judgment — and every one stamped `potential_issue`,
+because `specialist.py` hard-coded that classification and the schema never asked. Two of the
+contract's five values had never been reachable. See `LESSONS.md`.
+
+**Two things this run did *not* establish**, and neither should be rounded up:
+
+- **The contradiction test never ran.** Synthesis failed on `max_tokens` — contained correctly and
+  reported as `failed` rather than `skipped`, which is two earlier fixes working, but the stage
+  did not execute. "Zero contradictions" is not a result here.
+- **Only the hand-rolled path ran.** The LangGraph run was interrupted. The finding lives in the
+  shared specialist so it is path-independent by construction, but that is reasoning, not
+  measurement.
 
 ## 9 · Local AWS parity
 

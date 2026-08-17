@@ -464,6 +464,37 @@ Both are deliberate. Neither is obvious from reading one file.
 
 ---
 
+### A hard-coded classification is invisible until the record is clean `[measured]`
+
+`specialist.py` set `classification=FindingClassification.POTENTIAL_ISSUE` as a **constant**, and
+the response schema never asked the model to classify at all. Two of the contract's five values —
+`MITIGATING_INFORMATION` and `NO_ISSUE_IDENTIFIED` — were unreachable from the specialist path
+from the day it was written.
+
+Nothing caught it for weeks because every case run against the system contained real concerns, and
+on those records the constant is right most of the time. The first deliberately clean case
+(`AMI-SYN-CLR-001`, 2026-08-17) produced seven findings whose *text* was correct and whose *label*
+was not:
+
+| Finding title | Delivered as |
+|---|---|
+| "Criminal history and financial record checks returned **no indicators** of criminal or dishonest conduct" | `potential_issue` |
+| "Investigator's consistency assessment identifies **no material omissions or inconsistencies**" | `potential_issue` |
+
+The analysis was good — it found the creditor's written admission of error, led with the
+resolution, and deferred the judgment to the officer. The envelope still told a reviewer it had
+found seven potential issues on a clean file.
+
+**The general lesson is about the test, not the field.** A constant that is usually correct is
+indistinguishable from a decision until you run the case where it is wrong. Every fixture built
+alongside a system inherits that system's assumptions; the case that disagrees with you is the one
+worth building.
+
+**And it surfaced a rule conflict nobody had noticed.** The specialist prompt says an empty
+findings array is a good answer. `EnvelopeAnalysis.findings` has `min_length=1`, so a run with no
+findings produces no envelope at all. On a genuinely clean record those two rules cannot both be
+satisfied — and a model with no way to say "clean" will reach for the only classification it has.
+
 ## Contracts and validation
 
 ### Prefixed IDs catch transpositions — and fail far from the mistake

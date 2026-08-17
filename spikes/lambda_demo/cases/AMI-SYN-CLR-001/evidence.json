@@ -1,0 +1,100 @@
+{
+  "spans": [
+    {
+      "evidence_id": "ev_001",
+      "document_id": "doc_sf86_001",
+      "page_number": 22,
+      "source_reliability": "subject_statement",
+      "title": "SF-86 — 18. Relatives — Spouse's parents residing abroad",
+      "text": "Section 18 (Relatives): Subject reports that their spouse's parents are dual citizens of the United States and Canada, residing in Ontario, Canada. Both are retired; one from secondary school teaching, one from a regional credit union. Subject reports in-person contact two to three times per year at family gatherings and telephone contact roughly monthly. Subject reports no financial dependency in either direction and no business relationship."
+    },
+    {
+      "evidence_id": "ev_002",
+      "document_id": "doc_roi_001",
+      "page_number": 6,
+      "source_reliability": "investigator_finding",
+      "title": "ROI — Foreign relatives verification",
+      "text": "Investigator verified the identities, citizenship, and residence of Subject's parents-in-law as reported. Both hold dual United States and Canadian citizenship acquired at birth and by naturalization respectively. Neither has any recorded affiliation with a foreign government, military, intelligence service, or state-owned enterprise. Employment histories were confirmed with the named institutions and are consistent with Subject's report. Contact frequency described by Subject is consistent with the pattern described independently by Subject's spouse. Investigator identified no indication of foreign preference, divided loyalty, or susceptibility to coercion arising from these relationships."
+    },
+    {
+      "evidence_id": "ev_003",
+      "document_id": "doc_sf86_001",
+      "page_number": 31,
+      "source_reliability": "subject_statement",
+      "title": "SF-86 — 20A. Foreign Business Activities",
+      "text": "Section 20A (Foreign Business Activities): Subject answered 'No' to holding any financial interest in a foreign business, and 'No' to any foreign real estate, benefit, or support from a foreign government."
+    },
+    {
+      "evidence_id": "ev_004",
+      "document_id": "doc_roi_001",
+      "page_number": 11,
+      "source_reliability": "record_check",
+      "title": "ROI — Foreign financial interest checks",
+      "text": "Financial record checks returned no foreign-held accounts, securities, real property, or business registrations associated with Subject or Subject's spouse. Cross-check against the reported Canadian family connection returned no jointly held assets, no beneficiary designations, and no transfers. Subject's Section 20A responses are corroborated by the record."
+    },
+    {
+      "evidence_id": "ev_005",
+      "document_id": "doc_interview_001",
+      "page_number": 3,
+      "source_reliability": "subject_statement",
+      "title": "Subject interview — Voluntary disclosure of a closed foreign account",
+      "text": "During the subject interview, Subject volunteered that between 2016 and 2018 they maintained a Canadian chequing account with a balance that did not exceed approximately 900 Canadian dollars, opened for convenience while assisting with an in-law's medical appointments and closed in 2018. Subject stated they did not report the account on the questionnaire because the reporting threshold did not apply to it and the account had been closed for eight years, but raised it unprompted so the record would be complete. Subject provided the closing statement during the interview."
+    },
+    {
+      "evidence_id": "ev_006",
+      "document_id": "doc_roi_001",
+      "page_number": 12,
+      "source_reliability": "investigator_finding",
+      "title": "ROI — Assessment of the volunteered account disclosure",
+      "text": "Investigator reviewed the closing statement provided by Subject and confirmed the account was closed in 2018 with a final balance of 412 Canadian dollars transferred to Subject's domestic account. The account fell below the questionnaire's reporting threshold and was not required to be listed; Subject's answer was therefore accurate as given. Investigator notes the disclosure was unprompted, made before any record check had surfaced the account, and supported by documentation Subject brought to the interview."
+    },
+    {
+      "evidence_id": "ev_007",
+      "document_id": "doc_credit_001",
+      "page_number": 1,
+      "source_reliability": "record_check",
+      "title": "Credit report — Summary",
+      "text": "Consumer credit report reflects eleven accounts in good standing, no collections, no charge-offs, no judgments, no liens, no bankruptcy, and no accounts past due as of the report date. Total revolving utilisation is 8 percent. One historical delinquency appears: a single payment recorded 32 days past due in March 2021 on a closed retail card."
+    },
+    {
+      "evidence_id": "ev_008",
+      "document_id": "doc_roi_001",
+      "page_number": 14,
+      "source_reliability": "investigator_finding",
+      "title": "ROI — Resolution of the 2021 late payment",
+      "text": "Investigator examined the single 2021 delinquency. Subject relocated in February 2021 and submitted a change of address to the creditor; the creditor's records show the address change was applied to the wrong account within Subject's household profile, and the statement was mailed to the former address. Subject paid the balance in full on discovery. The creditor issued a written correction dated May 2021 acknowledging the error, which Subject provided; the creditor also reversed the late fee. No other delinquency appears in Subject's history before or since. Investigator assesses the event as a billing error rather than an indicator of financial irresponsibility."
+    },
+    {
+      "evidence_id": "ev_009",
+      "document_id": "doc_roi_001",
+      "page_number": 15,
+      "source_reliability": "investigator_finding",
+      "title": "ROI — Income, assets, and unexplained affluence check",
+      "text": "Reported income is consistent with employment records obtained from Subject's two most recent employers and with filed tax transcripts for the three preceding years. Assets and lifestyle observed during the investigation are proportionate to reported income. No unexplained deposits, no undisclosed income streams, and no indication of affluence inconsistent with the record."
+    },
+    {
+      "evidence_id": "ev_010",
+      "document_id": "doc_roi_001",
+      "page_number": 4,
+      "source_reliability": "record_check",
+      "title": "ROI — Criminal history record checks",
+      "text": "National, state, and local criminal history checks returned no arrests, no charges, no convictions, and no pending matters. Checks covered all jurisdictions of residence for the preceding ten years. Civil litigation search returned no results. No adverse employment separations were reported by any former employer contacted."
+    },
+    {
+      "evidence_id": "ev_011",
+      "document_id": "doc_roi_001",
+      "page_number": 9,
+      "source_reliability": "investigator_finding",
+      "title": "ROI — Employment gap, 2019 to 2020",
+      "text": "Subject reported a fourteen-month gap in employment between August 2019 and October 2020 attributed to full-time graduate study. The registrar of the named institution confirmed full-time enrolment and degree conferral for the period stated. Dates on the questionnaire match the registrar's record exactly. No unreported employment appears in earnings records for the period."
+    },
+    {
+      "evidence_id": "ev_012",
+      "document_id": "doc_roi_001",
+      "page_number": 18,
+      "source_reliability": "investigator_finding",
+      "title": "ROI — Questionnaire consistency assessment",
+      "text": "Investigator compared each questionnaire response against the developed record. Residences, employments, education, references, foreign contacts, and financial responses are consistent with independently obtained information. No omissions, no material discrepancies, and no instances of Subject correcting an answer only after being confronted with contrary information were identified. Two references independently characterised Subject as forthcoming during the process."
+    }
+  ]
+}
