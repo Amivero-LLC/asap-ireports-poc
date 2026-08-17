@@ -162,7 +162,7 @@ flowchart LR
         ORCH["packages/orchestration/<br/>our port + both adapters<br/>criteria, specialists, synthesis<br/>BUILT"]
         RETR["packages/retrieval/<br/>retrieval port + mapping module<br/>BUILT"]
         PG[("PostgreSQL<br/>system of record for<br/>workflow state<br/>PLANNED - Phase 2")]
-        OSLOCAL[("Local OpenSearch<br/>dev mirror of the AWS collection<br/>PLANNED - Phase 2")]
+        OSLOCAL[("Local OpenSearch<br/>hybrid vector + lexical, case-filtered<br/>BUILT - whether it mirrors the AWS<br/>collection is unconfirmed, Q-02")]
     end
 
     subgraph AWSSIDE["AWS ingestion pipeline (NOT OURS)"]
@@ -258,15 +258,16 @@ flowchart TD
         direction TB
         STEP3A["Case-filtered, bounded-K<br/>vector + lexical query<br/>through the retrieval port"]
         STEP3B["Retrieved spans become<br/>the evidence the model reasons over"]
-        STEP3C["One call through the ModelGateway port<br/>on a tier alias, with a<br/>criterion-specific tool allowlist"]
+        STEP3C["One call through the ModelGateway port<br/>on a tier alias. A specialist has no tool<br/>surface at all, so SPEC-01's allowlist<br/>clause is vacuous rather than met"]
         STEP3D["Deserialized into a SpecialistResult:<br/>criterion, provenance, and<br/>proposed findings with citations"]
         STEP3A --> STEP3B --> STEP3C --> STEP3D
     end
 
-    SHELL{"4. Deterministic shell checks<br/>budgets, loop limits, and<br/>no-progress between steps"}
-    BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>still packaged and delivered, not failed"]
+    SHELL{"4. Deterministic shell checks<br/>budgets, loop limits, and<br/>no-progress between steps<br/>NOT BUILT - ORCH-03"}
+    BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>still packaged and delivered, not failed<br/>NOT BUILT - ORCH-03"]
     AGG["Aggregate the SpecialistResults<br/>no aggregate score, ever (ADR-014)"]
-    STEP5["5. Checkpoint durably,<br/>before the node returns"]
+    SYNTH["4b. Cross-criterion synthesis<br/>overlap computed, conflicts and gaps by model<br/>skipped when there is nothing to reason across<br/>BUILT"]
+    STEP5["5. Checkpoint durably,<br/>before the node returns<br/>NOT BUILT - ORCH-02"]
     STEP6["6. Package the proposals"]
     STEP7B["7. Emit a validated ASAPEnvelope<br/>written to disk - run is DELIVERED"]
     ASAPREVIEW["Reviewed in ASAP by an authorized officer<br/>NOT OURS - outside this diagram (ADR-022)"]
@@ -278,10 +279,16 @@ flowchart TD
     SHELL -- "ceiling hit" --> BUDGETSTOP
     SHELL -- "all criteria done" --> AGG
     BUDGETSTOP --> AGG
-    AGG --> STEP5 --> STEP6
+    AGG --> SYNTH --> STEP5 --> STEP6
     STEP6 --> STEP7B
     STEP7B -. "handed off" .-> ASAPREVIEW
 ```
+
+**This diagram is the target shape, and three of its boxes do not exist yet** — they are marked
+`NOT BUILT` with the requirement that owns each. It is drawn whole because the shape is what a
+government team is being asked to build; §4's build-state table is the authority on what resolves
+to real code today. A design diagram that quietly reads as a status diagram is the specific way a
+handoff overstates itself, so the two are separated on the page rather than in a reader's head.
 
 Two properties are drawn rather than described, because they are the reason the spine exists
 (ADR-020): the **fan-out** (`STEP2 -- per criterion --> SPECIALIST`, one instance per criterion)

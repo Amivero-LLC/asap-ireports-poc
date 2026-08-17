@@ -24,8 +24,10 @@ flowchart LR
     end
 
     subgraph OURS["iReports"]
-        OR[orchestrator] --> SP[specialists]
+        CR[criteria from the case] --> SP[specialists, one per criterion]
+        SP --> SY[cross-criterion synthesis]
         SP --> VA[validators]
+        SY --> VA
         VA --> EN[envelope]
     end
 
@@ -34,7 +36,7 @@ flowchart LR
     end
 
     IX -.retrieve.-> SP
-    OR -->|one invocation| EN
+    CR -->|one invocation, no pause| EN
     EN ==>|proposals| RV
 
     style OURS fill:#e8f0fe,stroke:#1a73e8
@@ -61,27 +63,39 @@ valid. Everything load-bearing is ordinary code:
 
 ```mermaid
 flowchart TD
-    A[criterion + evidence] --> B[model call via port]
-    B --> C{parses?}
-    C -->|no| R1[reject, record why]
-    C -->|yes| D{citations resolve?}
+    A[criterion + retrieved spans] --> B[model call via port]
+    B -->|refused or transport error| N[criterion NOT analysed<br/>run continues]
+    B --> C{known shape?}
+    C -->|coercible| C2[normalize: string, bare object,<br/>envelope nested in itself]
+    C -->|no| R1[reject, record what it was]
+    C2 --> D
+    C -->|yes| D{citations resolve<br/>to spans it was shown?}
     D -->|no| R2[drop finding, record why]
     D -->|yes| E{passes contract?}
     E -->|no| R3[reject, record why]
     E -->|yes| F[ProposedFinding]
-    R1 --> G[rejection record]
+    R1 --> G[rejection record<br/>capped, with a count]
     R2 --> G
     R3 --> G
+    N --> G
     F --> H[envelope]
     G --> H
 
     style B fill:#fef7e0,stroke:#f9ab00
     style F fill:#e6f4ea,stroke:#137333
     style G fill:#fce8e6,stroke:#c5221f
+    style N fill:#fce8e6,stroke:#c5221f
 ```
 
-Only the yellow box is probabilistic. Schema validation, citation validation, budget and loop
-limits, and the decision-support language guard are all deterministic code.
+Only the yellow box is probabilistic. Shape coercion, citation validation, containment of a
+refusal, and the decision-support language guard are all deterministic code. **Budget and loop
+limits belong on this diagram and are not on it, because they are not built** — see
+[`ROADMAP.md`](ROADMAP.md) item 4.
+
+Two paths here exist because they were once missing. A refusal used to propagate and kill the whole
+run, discarding every other specialist's paid-for work; and a response whose `findings` array
+arrived as a JSON string was rejected as unparseable rather than coerced. Both are in
+[`LESSONS.md`](LESSONS.md).
 
 **The rejection record is output, not error logging.** It ships with the run. A pipeline that hides
 its rejections looks cleaner and tells you nothing about where its safety lives.
@@ -118,35 +132,73 @@ subject violated SEAD-4," the prompt had already failed and the type is what sto
 
 ```mermaid
 flowchart TB
-    subgraph app["Application"]
-        H[handler] --> C[criteria selection]
-        C --> O[orchestrator port]
-        O --> HR[custom Python]
-        O --> LG[LangGraph]
-        HR --> S[specialist ×N]
-        LG --> S
+    subgraph WRAP["spikes/lambda_demo — the runnable wrapper, no analysis in it"]
+        HAND["handler.py<br/>one invocation, one run"]
+        LOAD["case_loader.py<br/>disk to typed case"]
+        PACK["package.py<br/>findings to ASAPEnvelope"]
     end
 
-    subgraph shared["Shared, framework-free"]
-        S --> G[ModelGateway port]
-        S --> Y[synthesis]
-        Y --> V[validators]
-        S --> V[validators]
-        V --> P[packager]
+    subgraph ORCHP["packages/orchestration — the reference implementation"]
+        PORT["port.py<br/>Orchestrator protocol, RunResult<br/>routing policy both paths share"]
+        HR["handrolled.py<br/>thread pool and a loop"]
+        LG["langgraph_adapter.py<br/>the only module that imports the framework"]
+        CRIT["criteria.py<br/>fan-out width comes from the case"]
+        SPEC["specialist.py<br/>one criterion, citation-checked"]
+        SYN["synthesis.py<br/>overlap computed, conflicts by model"]
+        COER["coercion.py<br/>response shapes, rejection caps"]
     end
 
-    subgraph adapters["Adapters"]
-        G --> L1[litellm]
-        G --> L2[bedrock]
-        G --> L3[stub · tests only]
+    subgraph PORTS["packages/ — the boundary to everything outside"]
+        GW["gateway/<br/>ModelGateway, the only caller of a model"]
+        RETR["retrieval/<br/>Retriever, every field name in mapping.py"]
     end
 
-    P --> E[(ASAPEnvelope)]
+    DOM["packages/domain/ — 12 contracts + generated JSON Schema<br/>the vocabulary every box above speaks"]
 
-    style shared fill:#e8f0fe,stroke:#1a73e8
-    style HR fill:#e6f4ea,stroke:#137333
-    style LG fill:#e6f4ea,stroke:#137333
+    subgraph OUTSIDE["Not ours"]
+        PROXY["LiteLLM proxy, resolves alias to model id"]
+        OS[("OpenSearch")]
+    end
+
+    ENV[("ASAPEnvelope<br/>spikes/lambda_demo/out/")]
+
+    EVAL["evals/scorers/properties.py<br/>scores saved runs offline, after the fact"]
+
+    HAND --> LOAD
+    HAND --> PORT
+    PORT --> HR
+    PORT --> LG
+    HR --> CRIT
+    LG --> CRIT
+    HR --> SPEC
+    LG --> SPEC
+    HR --> SYN
+    LG --> SYN
+    SPEC --> COER
+    SYN --> COER
+    SPEC --> GW
+    SYN --> GW
+    SPEC --> RETR
+    GW --> PROXY
+    RETR --> OS
+    HAND --> PACK
+    PACK --> ENV
+    ENV -.->|no model calls, no services| EVAL
+
+    style ORCHP fill:#e8f0fe,stroke:#1a73e8
+    style PORTS fill:#e6f4ea,stroke:#137333
+    style OUTSIDE fill:#f5f5f5,stroke:#9aa0a6
+    style LG fill:#fef7e0,stroke:#f9ab00
 ```
+
+**What the picture is meant to show.** The wrapper at the top holds no analysis — it loads a case,
+calls a port, and packages the result. Everything that reasons about a case lives in
+`packages/orchestration/`, and everything that touches the outside world goes through a port. Only
+the yellow box knows a framework exists, and a test enforces that against every other module in
+its package.
+
+`evals/` hangs off the envelope rather than off the run, and that is the design: it scores **saved
+output**, so it costs nothing and can be re-run as the checks improve.
 
 | Component | What it is |
 |---|---|
