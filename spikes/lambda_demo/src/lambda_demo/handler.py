@@ -163,6 +163,13 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         },
         # The rejections are part of the result, not an error log. They are the deterministic
         # shell doing its job, and a demo that hid them would put the safety story out of view.
+        # A truncated run must be visibly truncated. `RunStatus.INCOMPLETE_DUE_TO_BUDGET` routes
+        # to PACKAGING rather than FAILED (ADR-025 predates this; see `run.py`), so a run that hit
+        # a ceiling still delivers what it has — and has to say so at the top, next to the other
+        # facts a reader scans for "did this run actually cover the case".
+        "incomplete_due_to_budget": result.breach is not None,
+        "budget_breach": str(result.breach) if result.breach else None,
+        "consumption": (result.consumption.model_dump(mode="json") if result.consumption else None),
         "rejected": list(result.rejected),
         "resolved_models": sorted({o.resolved_model for o in result.outcomes}),
         "criteria": [

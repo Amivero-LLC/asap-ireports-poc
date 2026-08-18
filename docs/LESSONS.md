@@ -447,6 +447,40 @@ the behaviour was correct. `mypy` reported it as an incompatible assignment on t
 The lesson is not about that variable. It is that `spikes/` being outside the quality gate is a
 real gap, and the moment code stops being a spike it should stop being exempt.
 
+### Early termination mid-fan-out is symmetric — a third null result `[measured]`
+
+Budgets were expected to separate the two paths, on the reasoning that stopping a graph mid-flight
+would be harder than breaking a loop. They did not.
+
+| | Hand-rolled | LangGraph |
+|---|---|---|
+| Skip a criterion once a ceiling is crossed | 3 lines in the mapped function | 3 lines in the node |
+| Decline to pay for synthesis | one `and` on an existing `if` | one `if` on an existing conditional edge |
+
+**Neither path can withdraw work it has already dispatched.** `pool.map` has queued every
+criterion; `Send` has dispatched every criterion. Both can only make a criterion reached after the
+ceiling *cheap* — no model call, an explicit `SKIPPED_BUDGET` status — rather than un-scheduling it.
+Genuine early exit would need sequential dispatch or cancellation, and neither framework gives that
+for free.
+
+The one asymmetry runs slightly toward LangGraph: declining the second stage costs one boolean on a
+conditional edge that already existed. That is smaller than any of the three asymmetries measured
+in the other direction.
+
+### A test double that reports zero makes a whole class of decision untestable `[measured]`
+
+`StubGateway` reported `ModelUsage(input_tokens=0, output_tokens=0)`. Every offline test of a token
+budget therefore passed while exercising the branch where no ceiling is ever reached — the tests
+were green, and they were green about nothing.
+
+**Zero is not a neutral default for a quantity the system makes decisions on.** A real model always
+reports usage; a double that never does cannot stand in for it anywhere spend influences control
+flow. The stub now returns a deterministic character-based estimate, which is wrong in magnitude
+and right in the only way that matters: it is non-zero and it scales with the prompt.
+
+The general form is worth carrying to any double: ask what decisions depend on the field you are
+defaulting, and whether the default silently selects one branch forever.
+
 ### The concurrent-write reducer is the whole trick
 
 When several branches write the same state key, you need `Annotated[list[X], operator.add]`.
@@ -490,10 +524,41 @@ indistinguishable from a decision until you run the case where it is wrong. Ever
 alongside a system inherits that system's assumptions; the case that disagrees with you is the one
 worth building.
 
+**Fixed 2026-08-18 (ADR-025)**, and the fix has a shape worth copying: the schema now *asks*, the
+model answers from a constrained enum, and an unrecognised answer defaults to the conservative
+value **and is recorded as a rejection**. Defaulting silently is how the original survived. The
+corpus check in `evals` that caught it stays pointed at the field, because the same failure can
+recur the moment someone adds a fourth value nothing ever emits.
+
+**Measured after the fix**, same two cases, same prompt version, one run each:
+
+| | Clean record | Concerning record |
+|---|---|---|
+| `potential_issue` | **0** | **6** |
+| `mitigating_information` | 4 | 2 |
+| `no_issue_identified` | 9 | 2 |
+| `information_gap` | 3 | 2 |
+
+Before the fix both records produced nothing but `potential_issue`. The control run matters as much
+as the fix: without re-running the concerning case, a clean sweep of zero would be equally
+consistent with "the labels work" and "concern detection is broken".
+
+**The finding count went *up* on the clean case** — 16 against the earlier 7 — which is
+counterintuitive until you look at what they are. Nine of them affirmatively report an absence the
+record establishes, each citing the span that establishes it. **The count was never the signal;
+the classification mix is.**
+
 **And it surfaced a rule conflict nobody had noticed.** The specialist prompt says an empty
 findings array is a good answer. `EnvelopeAnalysis.findings` has `min_length=1`, so a run with no
 findings produces no envelope at all. On a genuinely clean record those two rules cannot both be
 satisfied — and a model with no way to say "clean" will reach for the only classification it has.
+
+ADR-025 resolves it by keeping both rules and accepting the consequence: **a wholly clean case
+produces no envelope, and the run says why.** "Nothing found" is not a claim this system makes, so
+it emits no artifact asserting it. The alternative — every criterion always emitting a
+`no_issue_identified` finding — would guarantee an envelope by changing what an envelope *is*, from
+a record of findings to a record of coverage. That is a bigger decision than the bug that prompted
+it, and the run payload already reports coverage for anyone who needs it.
 
 ## Contracts and validation
 

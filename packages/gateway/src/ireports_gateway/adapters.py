@@ -297,12 +297,38 @@ class BedrockGateway(_AnthropicAdapterBase):
         return self._config.bedrock_model_for(alias)
 
 
+CHARS_PER_TOKEN = 4
+"""The crude estimate this stub reports usage with. Not accurate, and it does not need to be."""
+
+
+def _estimated_usage(request: ModelRequest, text: str) -> ModelUsage:
+    """Non-zero, deterministic, roughly proportional to the work.
+
+    **This used to report zero, and zero is not a neutral choice.** Anything that makes a decision
+    on token spend — budgets, ceilings, accounting — is untestable against a double that always
+    reports nothing spent, and untestable *silently*: the test passes, having exercised the branch
+    where no budget is ever reached. A stub that reports zero for a quantity the system reasons
+    about cannot stand in for a model that never does.
+
+    A character estimate rather than a tokenizer: this is a test double, the number needs to be
+    deterministic and to scale with the prompt, and importing a tokenizer to be wrong more
+    precisely would be worse.
+    """
+    prompt_chars = len(request.system or "") + sum(len(m.content) for m in request.messages)
+    return ModelUsage(
+        input_tokens=prompt_chars // CHARS_PER_TOKEN,
+        output_tokens=len(text) // CHARS_PER_TOKEN,
+    )
+
+
 class StubGateway:
     """Deterministic, offline, no credentials. For contract tests only.
 
     ADR-009 declines an offline *run profile* for the system; it also says unit and contract
     tests mock at the gateway boundary. This is that boundary. It is not a fixture corpus and
     must never be selectable in a profile that produces findings a reviewer might see.
+
+    Reports **estimated** usage rather than zero — see `_estimated_usage`.
     """
 
     name = "stub"
@@ -315,11 +341,12 @@ class StubGateway:
     def complete(self, request: ModelRequest) -> ModelResponse:
         self.calls.append(request)
         key = request.node_id or request.alias.value
+        text = self._responses.get(key, self._default)
         return ModelResponse(
-            text=self._responses.get(key, self._default),
+            text=text,
             alias=request.alias,
             resolved_model=f"stub:{request.alias.value}",
-            usage=ModelUsage(input_tokens=0, output_tokens=0),
+            usage=_estimated_usage(request, text),
             stop_reason="end_turn",
         )
 

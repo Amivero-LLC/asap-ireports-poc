@@ -133,7 +133,7 @@ deserialization; those need a checkpointer, which is item 7. SPEC-01's tool-allo
 *vacuous* rather than met — a specialist has no tool surface. Both stay unchecked in
 `REQUIREMENTS.md`.
 
-## 4 · Budgets as control flow
+## 4 · Budgets as control flow ✅ done 2026-08-18
 
 Ceilings on model calls, tokens, and wall clock — per node and per run — that **change what the
 graph does** rather than just recording a number.
@@ -151,8 +151,26 @@ item 7 is impossible.
 **Tells us:** whether early termination mid-fan-out is clean in both, or whether one of them fights
 you.
 
-**Next up.** Budgets are the immediate item, and the wall-clock ceiling is the prerequisite for
-item 7's Lambda half.
+**What it told us — a third null result.** Three lines in the mapped function, three lines in the
+node. Neither path can withdraw work it has already dispatched — `pool.map` has queued every
+criterion and `Send` has dispatched every criterion — so both can only make a criterion reached
+after the ceiling cheap rather than un-scheduling it. The one asymmetry runs slightly toward
+LangGraph: declining the second stage costs one boolean on a conditional edge that already existed.
+
+**Built:** `budget.py`, a thread-safe run-level ledger over wall clock and tokens.
+`SpecialistStatus.SKIPPED_BUDGET` is a fourth distinct fact — a criterion nobody got to is not one
+that broke. A run that hits a ceiling still packages and delivers what it has, and says which
+ceiling stopped it. The default wall clock is 780s against Lambda's 900s timeout, which is the only
+number here with a hard reason: **the shell has to stop before the platform does, because that is
+the only moment it will ever get to checkpoint.**
+
+**Not built, and named rather than glossed:** `Budgets` has no per-run model-call ceiling, only a
+per-node one. With runtime fan-out width that does not bound a run. Wall clock and tokens do, so
+the gap is covered in practice rather than by design; closing it is a contract change and wants an
+ADR.
+
+**Next up: item 7** — crash, resume, and idempotency. The wall-clock budget is what makes the
+Lambda half of it possible.
 
 ---
 
@@ -246,6 +264,10 @@ account the subject volunteered unprompted.
 led with the mitigation and deferred the judgment — and every one stamped `potential_issue`,
 because `specialist.py` hard-coded that classification and the schema never asked. Two of the
 contract's five values had never been reachable. See `LESSONS.md`.
+
+**Fixed 2026-08-18, ADR-025.** The schema asks, the model answers from a constrained enum, and an
+empty findings array stays valid — so a wholly clean case produces no envelope and the run says
+why, rather than manufacturing a finding to have something to deliver.
 
 **Two things this run did *not* establish**, and neither should be rounded up:
 

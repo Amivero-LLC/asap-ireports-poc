@@ -1016,3 +1016,67 @@ changes is that it is no longer treated as settled, and no code may assume it.
    the framework was selected for in the first place.
 4. **Packaging stays separate per path.** Each is built with only its own dependencies, so neither
    inflates the other — `spikes/lambda_demo/build.py` already does this.
+
+---
+
+## ADR-025 — The specialist classifies its own findings; an empty findings array stays valid
+
+**Date:** 2026-08-18 · **Status:** Accepted
+
+**Context.** `specialist.py` set `classification=FindingClassification.POTENTIAL_ISSUE` as a
+constant and the response schema never asked the model to classify. Two of the contract's five
+values — `MITIGATING_INFORMATION` and `NO_ISSUE_IDENTIFIED` — were therefore unreachable from the
+specialist path from the day it was written.
+
+Nothing caught it, because every case run against the system had been built alongside it and
+contained real concerns; on those records the constant is right most of the time. The first
+deliberately clean case (`AMI-SYN-CLR-001`, 2026-08-17) produced seven findings whose analysis was
+correct and whose labels were not — including one titled *"Criminal history and financial record
+checks returned no indicators of criminal or dishonest conduct"*, delivered to a reviewer as a
+`potential_issue`.
+
+Fixing it surfaced a rule conflict that had been latent since the envelope contract was written.
+The specialist prompt says an empty findings array is a good answer. `EnvelopeAnalysis.findings`
+has `min_length=1`. On a genuinely clean record those cannot both hold, and a model with no way to
+say "clean" will reach for the only classification it has.
+
+**Decision.**
+
+1. **The model classifies, from a constrained enum.** The schema offers a specialist three of the
+   five values: `potential_issue`, `mitigating_information`, `no_issue_identified`. `contradiction`
+   and `information_gap` remain synthesis's, which is competent to see across criteria and collects
+   the fields those two require.
+2. **An empty findings array stays valid.** A criterion with nothing relevant emits no finding. A
+   wholly clean case therefore produces **no envelope**, and the run reports why.
+3. **`no_issue_identified` is not the same as silence.** It asserts an absence the record
+   *establishes* — a negative record check, a consistency review that found no discrepancy. Having
+   nothing to say is `[]`.
+
+**Why not always emit a `no_issue_identified` finding per criterion**, which would guarantee an
+envelope: it changes what an envelope *is*, from a record of findings to a record of coverage.
+That is a defensible design and it is a bigger decision than this one — it alters what every
+downstream consumer receives, including ASAP. The run payload already reports per-criterion
+coverage for anyone who needs it.
+
+**Why not classify in code from the finding's shape.** A finding citing a span that supports a
+*resolution* is structurally identical to one citing a span that supports a *concern*. The
+difference is meaning, and meaning is what the model is for — deriving it from field occupancy
+would be a heuristic dressed as determinism.
+
+**Consequences.**
+
+- **An empty envelope is still refused, and that is the point.** "Nothing found" is not a claim
+  this system makes; the run says so and produces no artifact asserting it.
+- **A missing or unrecognised classification defaults to `potential_issue` and is recorded as a
+  rejection.** Dropping a good finding over a label would discard real analysis; defaulting
+  silently is how the original bug survived. The finding ships, and the run says the label was not
+  the model's answer.
+- **`no_issue_identified` may cite nothing.** `ProposedFinding._material_claims_are_cited` already
+  exempts assertions of absence, on the reasoning that requiring citations there pushes nodes
+  toward citing irrelevant spans to satisfy a validator. The specialist's own "no resolvable
+  supporting evidence — dropped" rule now carries the same exemption.
+- **`prompt_version` moves to `specialist-v2`.** Two materially different prompts that share a
+  provenance string are indistinguishable in the record.
+- **`evals`' `classification_is_not_a_constant` stops failing** — but only once a corpus contains a
+  record varied enough to warrant more than one value. It was the check that caught this, and it
+  is worth keeping pointed at any enum a node chooses from.

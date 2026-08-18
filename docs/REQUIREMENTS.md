@@ -110,7 +110,7 @@ the untouched hard ones — and ORCH-02 is what closes the framework question in
       *Traces:* `REQ-langsmith-egress-deny` · ADR-012: "any future entry point inherits this
       obligation."
   - *Status:* **Address closed 2026-08-12, one clause open.** `packages/orchestration/port.py` exposes the port; both adapters sit behind it; the no-import test scans every module in the package rather than a hand-written list. **What is left is the checkpoint half** — `durability="sync"` and strict deserialization cannot be set until there is a checkpointer, which is ORCH-02. Unchecked on purpose: the acceptance is a conjunction, and rounding it up is how a requirements file starts lying
-  - *Status:* **Partial.** Fan-out bound, bounded retry and bounded K are enforced in code. No wall-clock or token ceiling yet — and the wall-clock one is what LAMB-01 depends on
+  - *Status:* **Substantially done 2026-08-18.** `budget.py` enforces run-level wall-clock and token ceilings that **stop the run** — a crossed ceiling skips remaining criteria without a model call, the run reports which ceiling, and `SpecialistStatus.SKIPPED_BUDGET` keeps that distinct from a failure. `BudgetConsumption` is recorded. Fan-out width, bounded retry and bounded K were already enforced. **Two clauses remain:** no no-progress detector, and no cancellation — both belong with the multi-step specialist (item 6), which is the first node that can loop. `INCOMPLETE_DUE_TO_BUDGET` routes to packaging, not review: ADR-022 removed the in-run review gate, and the requirement's original wording predates it
   - *Status:* **Proven for the bake-off** (`spikes/langgraph/test_langsmith_egress.py`), never re-proven at the demo's entry points
 
 ### Specialist sub-calls
@@ -325,7 +325,7 @@ originals below. Recorded **unordered and unscoped**.
 | ORCH-01 | Phase 2 | Pending |
 | ORCH-02 | Phase 2 | Pending |
 | LAMB-01 | Phase 2 | Pending |
-| ORCH-03 | Phase 2 | Pending |
+| ORCH-03 | Phase 2 | Substantially done (2026-08-18) |
 | ORCH-04 | Phase 2 | Pending |
 | SPEC-01 | Phase 2 | Pending |
 | VAL-02 | Phase 2 | Pending (reduced to logging, ADR-021) |

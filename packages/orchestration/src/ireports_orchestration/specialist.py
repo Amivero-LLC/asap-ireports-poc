@@ -61,14 +61,37 @@ from ireports_gateway.port import (
 )
 from ireports_retrieval import RetrievalError, RetrievedSpan, Retriever
 
+from .budget import BudgetBreach, BudgetLedger
 from .case import LoadedCase
 from .coercion import cap_rejections, normalize_array
 from .criteria import Criterion
 
 _LOG = logging.getLogger(__name__)
 
-PROMPT_VERSION = "specialist-v1"
+SPECIALIST_CLASSIFICATIONS: dict[str, FindingClassification] = {
+    "potential_issue": FindingClassification.POTENTIAL_ISSUE,
+    "mitigating_information": FindingClassification.MITIGATING_INFORMATION,
+    "no_issue_identified": FindingClassification.NO_ISSUE_IDENTIFIED,
+}
+"""The three of five classifications a *specialist* may emit.
+
+`CONTRADICTION` and `INFORMATION_GAP` belong to `synthesis.py`, which is competent to see across
+criteria and collects the fields those two require — a contradiction needs two conflicting spans,
+and an information gap needs an `InformationGap` object. A specialist's schema collects neither.
+
+**Until 2026-08-18 this was a constant.** `classification=POTENTIAL_ISSUE` was hard-coded and the
+schema never asked, so `MITIGATING_INFORMATION` and `NO_ISSUE_IDENTIFIED` were unreachable from
+this module since it was written. On a record with real concerns the constant is right most of the
+time, which is exactly why nothing contradicted it — the first deliberately clean case shipped
+seven findings labelled `potential_issue`, including one titled "returned no indicators of criminal
+or dishonest conduct". See ADR-025 and `docs/LESSONS.md`.
+"""
+
+PROMPT_VERSION = "specialist-v2"
 """Named once and used for both the per-finding provenance and the result's own.
+
+Bumped to v2 when the prompt began asking the model to classify (ADR-025). Provenance that did not
+move would make two materially different prompts indistinguishable in the record.
 
 Two literals would drift, and provenance that disagrees with itself about which prompt produced a
 finding is worse than none — it reads as authoritative."""
@@ -113,6 +136,22 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                         "items": {"type": "string"},
                         "description": "What the record does not say that a reviewer would need.",
                     },
+                    "classification": {
+                        "enum": [
+                            "potential_issue",
+                            "mitigating_information",
+                            "no_issue_identified",
+                        ],
+                        "description": (
+                            "What KIND of thing this is. A statement about the record, never "
+                            "about the person. potential_issue: the record shows something a "
+                            "reviewer should look at. mitigating_information: the record shows "
+                            "something that cuts against a concern - an explanation, a "
+                            "resolution, a third-party admission of error. no_issue_identified: "
+                            "the record affirmatively establishes an absence, such as a record "
+                            "check that returned nothing."
+                        ),
+                    },
                     "evidence_confidence": {"enum": ["low", "moderate", "high"]},
                     "analysis_confidence": {"enum": ["low", "moderate", "high"]},
                 },
@@ -122,6 +161,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                     "policy_relevance",
                     "recommended_officer_action",
                     "supporting_evidence",
+                    "classification",
                     "evidence_confidence",
                     "analysis_confidence",
                 ],
@@ -150,9 +190,21 @@ Rules, in order of importance:
    OR in mitigating_evidence, never in both. Decide which role that span plays in this finding.
    If a span both establishes a fact and softens it, cite it where it carries the most weight and
    describe the other side in your observation text.
-4. AN EMPTY FINDINGS ARRAY IS A GOOD ANSWER when the record shows nothing relevant. Do not
-   manufacture a finding to appear thorough.
-5. NAME THE GAPS. If the record is missing something a reviewer would need, say so in
+4. AN EMPTY FINDINGS ARRAY IS A GOOD ANSWER when the record shows nothing relevant to this
+   criterion. Do not manufacture a finding to appear thorough, and do not manufacture one just to
+   report that you found nothing - if the record says nothing on this criterion, return [].
+5. CLASSIFY EVERY FINDING, and classify honestly. The classification says what KIND of thing the
+   finding is. It is not a severity and there is no ranking.
+   - potential_issue: the record shows something a reviewer should look at.
+   - mitigating_information: the record shows something that cuts AGAINST a concern - an
+     explanation, a resolution, a documented third-party error, a voluntary disclosure. A record
+     whose concerning-looking item is fully explained is mitigating information, not an issue.
+   - no_issue_identified: the record affirmatively establishes an absence - a criminal history
+     check that returned nothing, a consistency review that found no discrepancy. This is a real
+     finding backed by a real span. It is NOT the same as having nothing to say, which is [].
+   Labelling resolved or exculpatory material as potential_issue misrepresents the record to a
+   reviewer as surely as missing a concern does.
+6. NAME THE GAPS. If the record is missing something a reviewer would need, say so in
    information_gaps rather than reasoning past it."""
 
 
@@ -180,6 +232,14 @@ class SpecialistStatus(StrEnum):
 
     FAILED = "failed"
     """Transport, timeout, or a structured-output fault. The criterion was not analysed."""
+
+    SKIPPED_BUDGET = "skipped_budget"
+    """A run-level ceiling was already crossed when this criterion came up, so no call was made.
+
+    **A fourth distinct fact, and the reason it is not folded into `FAILED`.** A criterion that was
+    never attempted because the run ran out of wall clock is not one that broke, and it is not one
+    that came back clean. Collapsing it into either would misreport a *truncated* analysis as a
+    complete one — the failure `RunStatus.INCOMPLETE_DUE_TO_BUDGET` exists to make visible."""
 
 
 @dataclass(frozen=True)
@@ -316,6 +376,25 @@ def _outcome(
     )
 
 
+def skipped_for_budget(
+    criterion: Criterion, case_id: str, run_id: str, breach: BudgetBreach
+) -> SpecialistOutcome:
+    """A criterion the run never got to, carrying which ceiling stopped it.
+
+    Public because both orchestrators construct it, and a policy decision both paths make must be
+    one implementation — the same reasoning as `should_synthesize`. Two copies would drift, and the
+    drift would show up as two runs of the same case truncating differently for reasons nobody
+    could see.
+    """
+    return _not_analysed(
+        criterion,
+        case_id,
+        run_id,
+        SpecialistStatus.SKIPPED_BUDGET,
+        f"{criterion.criterion_id}: {breach} — criterion NOT analysed",
+    )
+
+
 def _evidence_block(spans: tuple[RetrievedSpan, ...]) -> str:
     """The retrieved record, as the model sees it.
 
@@ -369,6 +448,7 @@ def analyze(
     run_id: str,
     attempts: int = 2,
     k: int = DEFAULT_K,
+    ledger: BudgetLedger | None = None,
 ) -> SpecialistOutcome:
     """One criterion, typed and citation-checked findings out.
 
@@ -425,13 +505,13 @@ def analyze(
             status=SpecialistStatus.COMPLETED,
         )
 
-    outcome = _attempt(criterion, case, spans, gateway, run_id)
+    outcome = _attempt(criterion, case, spans, gateway, run_id, ledger)
     for _ in range(attempts - 1):
         # A refusal or a transport failure is not fixed by asking again, and ADR-015 is explicit
         # that a refusal must not be retried blindly.
         if outcome.findings or not outcome.analysed:
             return outcome
-        retry = _attempt(criterion, case, spans, gateway, run_id)
+        retry = _attempt(criterion, case, spans, gateway, run_id, ledger)
         # Keep the retry's findings, but carry both attempts' rejections so the record shows the
         # first attempt happened and why it produced nothing. The `SpecialistResult` is the
         # retry's, unmodified — it is the answer that stands.
@@ -454,6 +534,7 @@ def _attempt(
     spans: tuple[RetrievedSpan, ...],
     gateway: ModelGateway,
     run_id: str,
+    ledger: BudgetLedger | None = None,
 ) -> SpecialistOutcome:
     """One criterion, one model call, over the spans retrieval surfaced for it."""
     prompt = (
@@ -515,6 +596,12 @@ def _attempt(
             SpecialistStatus.FAILED,
             f"{criterion.criterion_id}: {type(exc).__name__} — criterion NOT analysed",
         )
+
+    # Recorded the moment the call returns, including on a run that is about to stop: money spent
+    # is spent whether or not the finding survives validation, and a ledger that only counted
+    # successful calls would understate the run.
+    if ledger is not None:
+        ledger.record(response.usage.input_tokens, response.usage.output_tokens)
 
     # **What the specialist was shown, not what the case contains.** With retrieval these differ,
     # and validating against the whole case would let a model cite a span it never saw — which is
@@ -587,6 +674,20 @@ def _attempt(
             )
             continue
 
+        raw_classification = raw.get("classification")
+        classification = SPECIALIST_CLASSIFICATIONS.get(str(raw_classification))
+        if classification is None:
+            # **Defaulted, and said out loud.** Dropping an otherwise good finding over a label
+            # would discard real analysis; defaulting silently is how the bug this replaces went
+            # unnoticed for weeks. So the finding survives, the label falls back to the most
+            # conservative value, and the run records that it was not the model's answer.
+            rejected.append(
+                f"{criterion.criterion_id}#{index}: classification {raw_classification!r} is not "
+                f"one of {sorted(SPECIALIST_CLASSIFICATIONS)} — defaulted to potential_issue, "
+                "which may overstate this finding to a reviewer"
+            )
+            classification = FindingClassification.POTENTIAL_ISSUE
+
         support = [e for e in raw.get("supporting_evidence", []) or [] if e in known]
         unknown = [e for e in raw.get("supporting_evidence", []) or [] if e not in known]
         mitigating = [e for e in raw.get("mitigating_evidence", []) or [] if e in known]
@@ -611,7 +712,7 @@ def _attempt(
                 f"{criterion.criterion_id}#{index}: cited unknown evidence {unknown} — dropped"
             )
             continue
-        if not support:
+        if not support and classification is not FindingClassification.NO_ISSUE_IDENTIFIED:
             rejected.append(
                 f"{criterion.criterion_id}#{index}: no resolvable supporting evidence — dropped"
             )
@@ -632,7 +733,7 @@ def _attempt(
                             f"pol_{criterion.criterion_id}".replace("-", "_").lower()
                         ],
                     ),
-                    classification=FindingClassification.POTENTIAL_ISSUE,
+                    classification=classification,
                     title=raw["title"],
                     observation=raw["observation"],
                     policy_relevance=raw["policy_relevance"],

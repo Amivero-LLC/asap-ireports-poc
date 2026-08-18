@@ -42,13 +42,14 @@ import operator
 from datetime import UTC, datetime
 from typing import Annotated, TypedDict
 
+from ireports_domain import Budgets
 from ireports_gateway.port import ModelGateway
 from ireports_retrieval import Retriever
 
 from .case import LoadedCase
 from .criteria import Criterion, criteria_for
-from .port import RunResult, join_and_sort, should_synthesize
-from .specialist import SpecialistOutcome, analyze
+from .port import RunResult, join_and_sort, new_ledger, should_synthesize
+from .specialist import SpecialistOutcome, analyze, skipped_for_budget
 from .synthesis import SynthesisOutcome, synthesize
 
 
@@ -95,13 +96,19 @@ class LangGraphOrchestrator:
     name = "langgraph"
 
     def run(
-        self, case: LoadedCase, gateway: ModelGateway, retriever: Retriever, run_id: str
+        self,
+        case: LoadedCase,
+        gateway: ModelGateway,
+        retriever: Retriever,
+        run_id: str,
+        budgets: Budgets | None = None,
     ) -> RunResult:
         from langgraph.graph import END, START, StateGraph
         from langgraph.types import Send
 
         started = datetime.now(UTC)
         criteria = criteria_for(case.manifest)
+        ledger = new_ledger(budgets)
 
         def fan_out(_state: FanOutState):  # type: ignore[no-untyped-def]  # see below
             """One dispatch per criterion. The list length is the fan-out width.
@@ -121,7 +128,21 @@ class LangGraphOrchestrator:
 
         def specialist_node(criterion: Criterion) -> dict[str, list[SpecialistOutcome]]:
             # Takes a Criterion, not FanOutState — see the class docstring.
-            return {"outcomes": [analyze(criterion, case, gateway, retriever, run_id)]}
+            #
+            # **The budget check is the same three lines as the hand-rolled path**, and that is
+            # the result rather than an implementation detail. `Send` has already dispatched every
+            # criterion by the time any node runs, so neither path can withdraw work; both can
+            # only make it cheap. Early termination mid-fan-out is a second null result.
+            breach = ledger.breach()
+            if breach is not None:
+                return {
+                    "outcomes": [
+                        skipped_for_budget(criterion, case.manifest.case_id, run_id, breach)
+                    ]
+                }
+            return {
+                "outcomes": [analyze(criterion, case, gateway, retriever, run_id, ledger=ledger)]
+            }
 
         def synthesis_node(state: FanOutState) -> dict[str, list[SynthesisOutcome]]:
             """The second stage. Reads every specialist's output from accumulated state.
@@ -162,7 +183,13 @@ class LangGraphOrchestrator:
 
             Safe here, and only here, because `join` has already collapsed the fan-out — this sees
             every specialist's output.
+
+            The budget clause rides along on the existing conditional edge, which is the one place
+            LangGraph is *cheaper* here: the routing point already existed, so declining to pay for
+            a second stage costs one boolean rather than a new edge.
             """
+            if ledger.breach() is not None:
+                return END
             return "synthesis" if should_synthesize(state["outcomes"]) else END
 
         # `type: ignore` on every one of these, and they are not noise — see the module
@@ -187,4 +214,6 @@ class LangGraphOrchestrator:
             wall_seconds=(datetime.now(UTC) - started).total_seconds(),
             criteria=criteria,
             synthesis=synthesis,
+            consumption=ledger.consumption(),
+            breach=ledger.breach(),
         )

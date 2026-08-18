@@ -26,10 +26,11 @@ import os
 from dataclasses import dataclass
 from typing import Protocol
 
-from ireports_domain import ProposedFinding
+from ireports_domain import BudgetConsumption, Budgets, ProposedFinding
 from ireports_gateway.port import ModelGateway
 from ireports_retrieval import Retriever
 
+from .budget import DEFAULT_BUDGETS, BudgetBreach, BudgetLedger
 from .case import LoadedCase
 from .criteria import Criterion
 from .specialist import SpecialistOutcome
@@ -62,6 +63,22 @@ class RunResult:
     """The cross-criterion stage. None when it did not run (fewer than two findings to reason
     across)."""
 
+    consumption: BudgetConsumption | None = None
+    """What the run actually spent, as the published contract.
+
+    Separate from the `total_tokens` property below, which sums what individual outcomes reported.
+    Those two should agree; if they ever disagree, the ledger is right — it counts every model call
+    that returned, including calls whose findings were then dropped by validation. Money spent is
+    spent whether or not the finding survived."""
+
+    breach: BudgetBreach | None = None
+    """Which ceiling stopped the run early, if one did.
+
+    `None` on a run that finished its work. A run that hit a ceiling still packages and delivers
+    what it has — `RunStatus.INCOMPLETE_DUE_TO_BUDGET` routes to `PACKAGING`, not to `FAILED`,
+    because a truncated analysis that silently vanishes is worse than one a reviewer can see is
+    truncated."""
+
     @property
     def rejected(self) -> tuple[str, ...]:
         found = tuple(r for o in self.outcomes for r in o.rejected)
@@ -81,7 +98,12 @@ class Orchestrator(Protocol):
     name: str
 
     def run(
-        self, case: LoadedCase, gateway: ModelGateway, retriever: Retriever, run_id: str
+        self,
+        case: LoadedCase,
+        gateway: ModelGateway,
+        retriever: Retriever,
+        run_id: str,
+        budgets: Budgets | None = None,
     ) -> RunResult: ...
 
 
@@ -119,3 +141,14 @@ def join_and_sort(
     for finding in synthesis.findings if synthesis else ():
         seen.setdefault(finding.finding_id, finding)
     return tuple(sorted(seen.values(), key=lambda f: f.finding_id))
+
+
+def new_ledger(budgets: Budgets | None) -> BudgetLedger:
+    """One ledger per run, shared by every specialist in it.
+
+    Both orchestrators call this rather than each constructing their own, for the reason
+    `should_synthesize` is shared: a policy both paths implement separately is a policy they will
+    eventually disagree about, and the disagreement shows up as two runs of the same case
+    truncating differently.
+    """
+    return BudgetLedger(budgets or DEFAULT_BUDGETS)

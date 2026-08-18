@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 from ireports_domain import (
+    Budgets,
     CaseManifest,
     DecisionDomain,
     FindingClassification,
@@ -127,6 +128,7 @@ def _finding(**overrides: Any) -> dict[str, Any]:
         "supporting_evidence": ["ev_001"],
         "mitigating_evidence": ["ev_002"],
         "information_gaps": [],
+        "classification": "potential_issue",
         "evidence_confidence": "moderate",
         "analysis_confidence": "moderate",
     }
@@ -859,3 +861,244 @@ def test_normalize_array_coerces_only_the_documented_shapes(
     be able to tell "the model found nothing" from "the model said something I could not read."
     """
     assert normalize_array(raw, key) == expected
+
+
+# ---------------------------------------------------------------------------
+# Classification — the model chooses, from a constrained set (ADR-025)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("emitted", "expected"),
+    [
+        ("potential_issue", FindingClassification.POTENTIAL_ISSUE),
+        ("mitigating_information", FindingClassification.MITIGATING_INFORMATION),
+        ("no_issue_identified", FindingClassification.NO_ISSUE_IDENTIFIED),
+    ],
+)
+def test_the_specialist_can_reach_every_classification_offered_to_it(
+    case: LoadedCase, retriever: InMemoryRetriever, emitted: str, expected: Any
+) -> None:
+    """The regression for the bug a clean record found.
+
+    `classification` was a constant, so `MITIGATING_INFORMATION` and `NO_ISSUE_IDENTIFIED` were
+    unreachable from this module for its whole life. Parameterised over all three values because
+    reaching one proves nothing about the others — which is precisely how the original went
+    unnoticed.
+    """
+    outcome = analyze(
+        CATALOG[0], case, _gateway(_finding(classification=emitted)), retriever, RUN_ID
+    )
+    assert len(outcome.findings) == 1, outcome.rejected
+    assert outcome.findings[0].classification is expected
+
+
+def test_a_classification_the_specialist_may_not_emit_is_refused(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """`contradiction` and `information_gap` belong to synthesis, which collects the fields they
+    require. A specialist claiming one is defaulted and the substitution is recorded — never
+    silently honoured.
+    """
+    outcome = analyze(
+        CATALOG[0], case, _gateway(_finding(classification="contradiction")), retriever, RUN_ID
+    )
+    assert outcome.findings[0].classification is FindingClassification.POTENTIAL_ISSUE
+    assert any("is not one of" in reason for reason in outcome.rejected)
+
+
+def test_a_missing_classification_defaults_loudly_rather_than_silently(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """The finding survives; the run says the label was not the model's answer.
+
+    Dropping it would discard real analysis over a label. Defaulting *silently* is how the
+    original bug lasted weeks, so the rejection record carries the substitution and says it may
+    overstate the finding.
+    """
+    raw = _finding()
+    raw.pop("classification", None)
+    outcome = analyze(CATALOG[0], case, _gateway(raw), retriever, RUN_ID)
+
+    assert len(outcome.findings) == 1
+    assert outcome.findings[0].classification is FindingClassification.POTENTIAL_ISSUE
+    assert any("may overstate" in reason for reason in outcome.rejected)
+
+
+def test_an_asserted_absence_may_cite_nothing(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """`no_issue_identified` asserts an absence, which cannot be evidenced like a presence.
+
+    `ProposedFinding` already exempts it, on the reasoning that requiring citations there pushes a
+    node toward citing irrelevant spans to satisfy a validator. The specialist's own
+    drop-if-uncited rule has to carry the same exemption or the contract's allowance is dead.
+    """
+    outcome = analyze(
+        CATALOG[0],
+        case,
+        _gateway(
+            _finding(
+                classification="no_issue_identified",
+                supporting_evidence=[],
+                mitigating_evidence=[],
+            )
+        ),
+        retriever,
+        RUN_ID,
+    )
+    assert len(outcome.findings) == 1, outcome.rejected
+    assert outcome.findings[0].supporting_evidence == ()
+
+
+def test_a_concern_still_has_to_cite_something(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """The exemption above is scoped to absence, and nothing else.
+
+    A `potential_issue` with no resolvable citation is still dropped — widening the exemption
+    would quietly repeal evidence-before-inference for anything willing to mislabel itself.
+    """
+    outcome = analyze(
+        CATALOG[0],
+        case,
+        _gateway(_finding(classification="potential_issue", supporting_evidence=[])),
+        retriever,
+        RUN_ID,
+        attempts=1,
+    )
+    assert outcome.findings == ()
+    assert any("no resolvable supporting evidence" in reason for reason in outcome.rejected)
+
+
+def test_a_clean_criterion_produces_no_findings_and_no_envelope(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """ADR-025: an empty findings array stays valid, and an empty envelope is still refused.
+
+    "Nothing found" is not a claim this system makes. A wholly clean run produces no artifact
+    asserting it — the run reports why instead.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(
+        case, StubGateway(default=json.dumps({"findings": []})), retriever, RUN_ID
+    )
+    assert result.findings == ()
+    assert all(o.analysed for o in result.outcomes), "clean is not the same as not analysed"
+
+
+# ---------------------------------------------------------------------------
+# Budgets as control flow (ORCH-03)
+# ---------------------------------------------------------------------------
+
+
+def _budgets(**overrides: Any) -> Budgets:
+    base: dict[str, Any] = {
+        "max_input_tokens": 400_000,
+        "max_output_tokens": 200_000,
+        "max_wall_clock_seconds": 780,
+    }
+    base.update(overrides)
+    return Budgets(**base)
+
+
+@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+def test_an_exhausted_budget_stops_the_run_and_says_so(
+    case: LoadedCase, retriever: InMemoryRetriever, name: str
+) -> None:
+    """**The point of ORCH-03: a ceiling changes what the run does, not just what it records.**
+
+    A one-token ceiling is crossed by the first specialist, so every criterion after it is skipped
+    without a model call. The run still returns, still packages what it has, and reports which
+    ceiling stopped it.
+    """
+    gateway = StubGateway(default=json.dumps({"findings": [_finding()]}))
+    result = ORCHESTRATORS[name].run(
+        case, gateway, retriever, RUN_ID, budgets=_budgets(max_output_tokens=1)
+    )
+
+    skipped = [o for o in result.outcomes if o.status is SpecialistStatus.SKIPPED_BUDGET]
+    assert skipped, f"{name} spent the whole budget without skipping anything"
+    assert len(result.outcomes) == len(result.criteria), (
+        "a skipped criterion is still accounted for"
+    )
+    assert result.breach is not None
+    assert result.breach.ceiling == "output_tokens"
+    assert any("NOT analysed" in r for r in result.rejected)
+    # Fewer calls than criteria — the saving is real, not just a label on the output.
+    assert len(gateway.calls) < len(result.criteria)
+
+
+@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+def test_a_truncated_run_does_not_pay_for_synthesis(
+    case: LoadedCase, retriever: InMemoryRetriever, name: str
+) -> None:
+    """A run that has already overspent must not buy a second stage.
+
+    Synthesis is a paid call whose whole value is reasoning across a *complete* set of specialist
+    findings. Running it over a truncated set costs money to reason across a run that did not
+    happen.
+    """
+    gateway = StubGateway(
+        responses={"synthesis": json.dumps({"contradictions": [], "information_gaps": []})},
+        default=json.dumps({"findings": [_finding()]}),
+    )
+    result = ORCHESTRATORS[name].run(
+        case, gateway, retriever, RUN_ID, budgets=_budgets(max_output_tokens=1)
+    )
+    assert result.synthesis is None, f"{name} paid for synthesis on a truncated run"
+    assert not any(c.node_id == "synthesis" for c in gateway.calls)
+
+
+@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+def test_a_run_inside_its_budget_is_untouched(
+    case: LoadedCase, retriever: InMemoryRetriever, name: str
+) -> None:
+    """The control. Without it, the tests above pass on a run that never worked at all."""
+    result = ORCHESTRATORS[name].run(case, _gateway(_finding()), retriever, RUN_ID)
+
+    assert result.breach is None
+    assert all(o.status is not SpecialistStatus.SKIPPED_BUDGET for o in result.outcomes)
+    assert result.consumption is not None
+    assert result.consumption.model_calls == len(result.criteria)
+
+
+def test_the_ledger_counts_what_was_spent_not_what_survived(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """Money spent is spent whether or not the finding survived validation.
+
+    Every finding here cites evidence that does not resolve, so all of them are dropped — and the
+    calls that produced them were still paid for. A ledger that counted only successful findings
+    would understate the run, which for a spend figure is the wrong direction to be wrong in.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(
+        case,
+        _gateway(_finding(supporting_evidence=["ev_999"])),
+        retriever,
+        RUN_ID,
+    )
+    assert result.findings == ()
+    assert result.consumption is not None
+    assert result.consumption.model_calls >= len(result.criteria)
+
+
+def test_a_budget_skipped_criterion_is_not_a_failed_one(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """Four distinct facts, and the reason `SKIPPED_BUDGET` is not folded into `FAILED`.
+
+    A criterion nobody got to is not one that broke, is not one the model declined, and is
+    certainly not one that came back clean. Collapsing any pair of those reports a truncated
+    analysis as a complete one.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(
+        case,
+        StubGateway(default=json.dumps({"findings": [_finding()]})),
+        retriever,
+        RUN_ID,
+        budgets=_budgets(max_output_tokens=1),
+    )
+    statuses = {o.status for o in result.outcomes}
+    assert SpecialistStatus.SKIPPED_BUDGET in statuses
+    assert SpecialistStatus.FAILED not in statuses
+    assert len({s.value for s in SpecialistStatus}) == 4, "a fifth status needs its own reasoning"
