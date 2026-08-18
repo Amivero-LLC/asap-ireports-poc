@@ -240,7 +240,92 @@ constant while the work varies, which is what a checkpoint needs.
 **None of the four touches durable checkpointing, which is what LangGraph was chosen for.** The
 decision is not close to made.
 
-**Still to come before it:** multi-step specialists, and crash/resume. [`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls
+**Still to come before it:** multi-step specialists, and crash/resume.
+
+### The same run, drawn twice
+
+Same case, same criteria, same shared specialist, same output. The difference is entirely in how
+control flow is expressed — which is the comparison ADR-024 exists to make, and it is easier to see
+than to describe.
+
+**Custom Python.** A thread pool and a loop.
+
+```mermaid
+flowchart TB
+    A["criteria_for(case.manifest)<br/>width is runtime data, not a constant"]
+    B["ThreadPoolExecutor(max_workers=MAX_PARALLEL)"]
+    S1["analyze(criterion 1)"]
+    S2["analyze(criterion 2)"]
+    SN["analyze(criterion N)"]
+    C["exiting the context manager<br/>IS the barrier — one line, no primitive"]
+    D{"if should_synthesize(outcomes)"}
+    E["synthesize(case, outcomes, criteria)"]
+    F["join_and_sort → RunResult"]
+
+    A --> B
+    B --> S1
+    B --> S2
+    B --> SN
+    S1 --> C
+    S2 --> C
+    SN --> C
+    C --> D
+    D -->|"two or more findings"| E
+    D -->|"fewer — skip, do not pay"| F
+    E --> F
+
+    style B fill:#e6f4ea,stroke:#137333
+    style C fill:#e6f4ea,stroke:#137333
+    style D fill:#e6f4ea,stroke:#137333
+```
+
+Everything green is one line of ordinary Python. `pool.map` never cared how long the criteria list
+was, so moving fan-out width from a constant to runtime data required **no change here at all**.
+
+**LangGraph.** The same run as a graph.
+
+```mermaid
+flowchart TB
+    ST(["START"])
+    FAN{{"fan_out(state)<br/>returns [Send('specialist', c) for c in criteria]<br/>N decided at runtime — the graph shape stays constant"}}
+    SP["specialist node<br/>receives the sent Criterion, NOT the graph state<br/>writes outcomes through an operator.add reducer"]
+    JOIN["join — a node that does nothing, and is required"]
+    ROUTE{"route_after_specialists(state)<br/>safe here, and only here"}
+    SYN["synthesis node<br/>reads every outcome from accumulated state"]
+    EN(["END"])
+
+    ST -->|conditional edge| FAN
+    FAN -->|"Send × N"| SP
+    SP -->|"plain edge — joins, runs once"| JOIN
+    JOIN --> ROUTE
+    ROUTE -->|"two or more findings"| SYN
+    ROUTE -->|"fewer"| EN
+    SYN --> EN
+
+    style FAN fill:#fef7e0,stroke:#f9ab00
+    style JOIN fill:#fce8e6,stroke:#c5221f
+    style ROUTE fill:#fef7e0,stroke:#f9ab00
+```
+
+**The red box is the whole finding.** A conditional edge leaving a `Send`-dispatched node fires
+**once per dispatch, each seeing only its own contribution to state** — measured, five dispatches
+gave five router calls, each reading one outcome, never five. So the router cannot hang off
+`specialist`; it needs a do-nothing node in front of it whose *plain* edge performs the join. The
+hand-rolled equivalent of that entire problem is the word `if`.
+
+That failure is the dangerous kind: no error, no warning, and synthesis silently never runs. You
+find it by counting.
+
+Three more things this drawing makes concrete:
+
+- **`Send` was not a choice.** One node per criterion added at construction only works when the
+  criteria are known before the graph is built, and they are not — `criteria_for` reads the case.
+- **The reducer is invisible and load-bearing.** Every dispatch writes `outcomes` concurrently.
+  Without `operator.add` LangGraph raises; with a plain value the dispatches clobber one another
+  and findings vanish with no error at all.
+- **The graph shape is constant while the work is variable**, which is the property a checkpoint
+  needs — a checkpoint refers to node names that must still exist on resume. That is a genuine
+  point in LangGraph's favour, and it is why item 7 of the roadmap is where this gets decided. [`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls
 out of the work rather than needing a separate exercise, and each result lands in
 [`LESSONS.md`](LESSONS.md) as it happens.
 
@@ -278,7 +363,7 @@ The gateway guarantees four things, each because getting it wrong is silent:
 3. **Raw case text never reaches logs or traces.** Traces carry identifiers, versions, outcomes.
 4. **Budgets are accountable.** Every call returns token counts.
 
-See `docs/AWS.md` for the two adapters and the region constraint.
+See [`AWS.md`](AWS.md) for the two adapters, the region constraint, and **the deployment view** — which AWS services this needs, which are ours, and which of them exist today (none: nothing has been deployed).
 
 ---
 

@@ -133,6 +133,75 @@ behaviour.**
 
 ## Deployment shape
 
+### The whole system, on AWS
+
+**Nothing below has been deployed.** Our code is built and tested and has never run in any AWS
+account, in any partition. The diagram is what a government team is being asked to stand up, with
+every box marked for what it actually is today — read the status labels, not the boxes.
+
+```mermaid
+flowchart TB
+    subgraph GOV["AWS GovCloud US-West — target region, believed, not confirmed against an account"]
+
+        subgraph NOTOURS["Ingestion pipeline — NOT OURS (ADR-007)"]
+            S3[("S3<br/>case documents")]
+            PIPE["extract · chunk · embed"]
+            OSS[("OpenSearch Serverless<br/>vector collection<br/>index schema unconfirmed · Q-02")]
+            S3 --> PIPE
+            PIPE --> OSS
+        end
+
+        subgraph MINE["iReports — our code. Built and tested, never deployed"]
+            LAM["Lambda — one invocation per case<br/>in-process fan-out (ADR-023)<br/>arm64 · 1024 MB · 15-minute ceiling"]
+            RDS[("RDS / Aurora PostgreSQL<br/>run state and checkpoints<br/>NOT BUILT · ORCH-02")]
+        end
+
+        SM["Secrets Manager<br/>proxy key · database credentials"]
+        CW["CloudWatch · X-Ray<br/>identifiers only, never case text"]
+        BR["Bedrock — Claude Sonnet 5<br/>FedRAMP High · DoD IL4/5"]
+        LL["LiteLLM proxy<br/>permitted in the enclave? OPEN"]
+    end
+
+    ASAP["ASAP — NOT OURS<br/>an authorized officer reviews the proposals"]
+
+    OSS -. "case-filtered hybrid query, bounded K" .-> LAM
+    PIPE -. "trigger — NOT BUILT, and not ours" .-> LAM
+    SM --> LAM
+    LAM -->|"tier alias, never a model id"| LL
+    LL --> BR
+    LAM -. "bedrock adapter — never run in any partition" .-> BR
+    LAM --> RDS
+    LAM --> CW
+    LAM ==>|"validated ASAPEnvelope of proposals"| ASAP
+
+    style MINE fill:#e8f0fe,stroke:#1a73e8
+    style NOTOURS fill:#f5f5f5,stroke:#9aa0a6
+    style ASAP fill:#f5f5f5,stroke:#9aa0a6
+    style RDS fill:#fce8e6,stroke:#c5221f
+    style BR fill:#e6f4ea,stroke:#137333
+```
+
+**Four things the picture is carrying that a service list would not.**
+
+*We are a consumer of the collection, never a producer.* The arrow from OpenSearch to Lambda is
+one-way. Upload, extraction, chunking and embedding belong to the ingestion pipeline, and the
+dotted trigger into Lambda is theirs to build.
+
+*Two paths to a model, and only one of them has ever run.* The solid path goes through a LiteLLM
+proxy and is proven against a live commercial-partition proxy. The dotted `bedrock` path is
+verified as correctly constructed and nothing more. Which one you use is a configuration change,
+because application code names a tier alias and never a model id — that rule is the reason the
+open question about proxies is not an architectural risk.
+
+*The database is red because it is not built.* Run state and checkpoints are the durability story,
+and without them a Lambda timeout means an automatic retry that re-pays for every model call.
+
+*There is no arrow from anything we build to a person.* Our boundary ends at the envelope. The
+officer reaches the proposals through ASAP, which is also where their decision is recorded, and
+none of that traffic comes back (ADR-022).
+
+### Inside one invocation
+
 One Lambda invocation runs one case start to finish, fanning out to specialists in-process (ADR-023).
 
 ```
