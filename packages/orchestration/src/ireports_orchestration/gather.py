@@ -74,6 +74,38 @@ measured before it is kept.
 
 SUFFICIENCY_PROMPT_VERSION = "sufficiency-v1"
 
+SUBCALL_SEPARATOR = ":"
+"""What marks a model call as a specialist's *sub-call* rather than its analysis.
+
+**Owned here because this module creates it.** Four files were reverse-engineering `":" in node_id`
+to tell a triage call from an analysis call — a format spread across the code that constructs it,
+the code that reads it, and three test files, none of which agreed in writing that it was a format
+at all. `spikes/langgraph/checkpointer.py` records the same trap from the other side: keying a
+load-bearing check to a string another component happens to produce is how a rename becomes a
+silent behaviour change.
+"""
+
+
+def subcall_node_id(node_id: str, kind: str) -> str:
+    """The node id for a sub-call made on a specialist's behalf.
+
+    Distinct from the specialist's own id so that the two are separable everywhere they are
+    counted — the budget ledger, the idempotency fingerprint, and every test that asks "how many
+    criteria did this run analyse".
+    """
+    return f"{node_id}{SUBCALL_SEPARATOR}{kind}"
+
+
+def is_subcall(node_id: str | None) -> bool:
+    """Whether a model call was a sub-call rather than a node's own work.
+
+    Takes `str | None` because `ModelRequest.node_id` is optional; an unlabelled call is not a
+    sub-call, which is the safe reading — it counts toward the run's analysis rather than being
+    quietly excluded from it.
+    """
+    return SUBCALL_SEPARATOR in (node_id or "")
+
+
 EXCERPT_CHARS = 600
 """How much of a span the sufficiency check sees.
 
@@ -278,7 +310,7 @@ def _assess(
         ),
         system=SUFFICIENCY_SYSTEM,
         response_schema=SUFFICIENCY_SCHEMA,
-        node_id=f"{criterion.node_id}:sufficiency",
+        node_id=subcall_node_id(criterion.node_id, "sufficiency"),
     )
 
     try:
@@ -463,9 +495,12 @@ def gather_evidence(
 
 __all__ = [
     "DEFAULT_MAX_STEPS",
+    "SUBCALL_SEPARATOR",
     "CancellationToken",
     "GatherStep",
     "GatherStop",
     "GatheredEvidence",
     "gather_evidence",
+    "is_subcall",
+    "subcall_node_id",
 ]

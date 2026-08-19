@@ -203,6 +203,20 @@ honest, and it is exactly the one that failed for the files they replaced.
   risky or long-running, and merge it quickly.
 - **Commits:** Conventional Commits — `<type>(scope): <description>`. Write a real body explaining
   *why*; that record is the project's memory.
-- **Quality:** Ruff, mypy --strict, Bandit, pytest. CI runs them on every push — keep it green.
+- **Quality:** run what CI runs, with **its scopes** — `mypy packages/` passes while
+  `mypy --strict packages tests scripts evals` fails, and the tests are where it fails, because a
+  test double that adds an attribute loses it when returned as its base type. That exact mistake
+  broke the build on 2026-08-19.
+
+  ```bash
+  uv run ruff check packages tests scripts spikes evals
+  uv run ruff format --check packages tests scripts spikes evals
+  uv run mypy --strict packages tests scripts evals      # note: tests, and --strict
+  uv run python scripts/generate_schemas.py --check
+  uv run pytest tests -q && uv run pytest spikes -q      # spikes must skip nothing
+  uv run bandit -r packages evals -q --severity-level medium
+  ```
+
+  `.github/workflows/quality.yml` is the authority; if this list drifts from it, it is wrong.
 - **Docs live with the code they describe.** When behaviour changes, update the doc in the same
   commit. A stale doc is worse than a missing one.

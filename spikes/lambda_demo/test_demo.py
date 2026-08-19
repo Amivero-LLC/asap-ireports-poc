@@ -23,7 +23,7 @@ from uuid import uuid4
 import pytest
 from ireports_domain import ASAPEnvelope, FindingClassification
 from ireports_gateway import StubGateway
-from ireports_orchestration import CATALOG, ORCHESTRATORS
+from ireports_orchestration import CATALOG, ORCHESTRATORS, is_subcall, subcall_node_id
 from ireports_retrieval import InMemoryRetriever, RetrievedSpan
 from lambda_demo import handler as handler_module
 from lambda_demo.case_loader import load_case
@@ -85,7 +85,7 @@ def _sufficiency_answers() -> dict[str, str]:
     that as off-schema and stops — correct production behaviour for a broken assessor, and noise
     in a test that is about something else.
     """
-    return {f"{c.node_id}:sufficiency": SUFFICIENT for c in CATALOG}
+    return {subcall_node_id(c.node_id, "sufficiency"): SUFFICIENT for c in CATALOG}
 
 
 def _gateway(*findings: dict[str, Any]) -> StubGateway:
@@ -386,7 +386,7 @@ def test_a_second_invocation_finishes_what_the_first_started(monkeypatch, retrie
     )
     # Analysis calls only; the evidence loop's triage sub-calls carry a suffixed node id.
     specialist_calls = [
-        c for c in second_gateway.calls if c.node_id != "synthesis" and ":" not in c.node_id
+        c for c in second_gateway.calls if c.node_id != "synthesis" and not is_subcall(c.node_id)
     ]
     assert len(specialist_calls) == len(skipped), (
         f"the second invocation ran {len(specialist_calls)} specialists for {len(skipped)} "

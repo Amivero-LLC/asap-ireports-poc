@@ -17,6 +17,7 @@ from .checkpoint import (
 )
 from .coercion import MAX_REJECTIONS, cap_rejections, normalize_array
 from .criteria import CATALOG, Criterion, NoApplicableCriteriaError, criteria_for
+from .gather import CancellationToken, is_subcall, subcall_node_id
 from .port import MAX_PARALLEL, Orchestrator, RunResult, join_and_sort, should_synthesize
 from .registry import ORCHESTRATORS
 from .specialist import SpecialistOutcome, SpecialistStatus, analyze
@@ -28,6 +29,7 @@ __all__ = [
     "MAX_PARALLEL",
     "MAX_REJECTIONS",
     "ORCHESTRATORS",
+    "CancellationToken",
     "CheckpointStore",
     "Checkpointing",
     "Criterion",
@@ -48,11 +50,13 @@ __all__ = [
     "analyze",
     "cap_rejections",
     "criteria_for",
+    "is_subcall",
     "join_and_sort",
     "normalize_array",
     "overlaps",
     "peak_concurrency",
     "should_synthesize",
+    "subcall_node_id",
     "synthesize",
     "timeline",
 ]

@@ -37,6 +37,8 @@ from ireports_orchestration import (
     LoadedCase,
     RunCheckpoint,
     SpecialistStatus,
+    is_subcall,
+    subcall_node_id,
 )
 from ireports_orchestration.budget import BudgetLedger
 from ireports_orchestration.checkpoint import (
@@ -123,7 +125,7 @@ def _sufficiency_answers(answer: str = SUFFICIENT) -> dict[str, str]:
     the *correct* production behaviour for a broken assessor and it is noise here — an unconfigured
     double should not make every unrelated test assert around it.
     """
-    return {f"{c.node_id}:sufficiency": answer for c in CATALOG}
+    return {subcall_node_id(c.node_id, "sufficiency"): answer for c in CATALOG}
 
 
 def _gateway() -> StubGateway:
@@ -154,10 +156,11 @@ class _CrashAfter(StubGateway):
         # Counted on *analysis* calls only. Crashing on the Nth call of any kind would make the
         # crash point depend on how many triage calls the evidence loop happened to make, so the
         # parameterisation would no longer mean "after N completed specialists".
-        if ":" not in request.node_id and self._analysis_calls >= self.crash_after:
+        if is_subcall(request.node_id):
+            return super().complete(request)
+        if self._analysis_calls >= self.crash_after:
             raise RuntimeError("simulated process death mid-fan-out")
-        if ":" not in request.node_id:
-            self._analysis_calls += 1
+        self._analysis_calls += 1
         return super().complete(request)
 
 
@@ -169,7 +172,7 @@ def _specialist_calls(gateway: StubGateway) -> int:
     run analyse" is measured in. `node_id` carries the distinction: an analysis call is the bare
     node id, a sub-call is suffixed.
     """
-    return sum(1 for c in gateway.calls if c.node_id != "synthesis" and ":" not in c.node_id)
+    return sum(1 for c in gateway.calls if c.node_id != "synthesis" and not is_subcall(c.node_id))
 
 
 def _run_id(tag: str) -> str:
@@ -870,7 +873,7 @@ def test_a_resume_across_processes_skips_completed_nodes(
     )
     # Analysis calls only — the evidence loop's triage sub-calls are real and are not the unit
     # "how many criteria did this process analyse" is counted in. See `_specialist_calls`.
-    specialists = [n for n in payload["calls"] if n != "synthesis" and ":" not in n]
+    specialists = [n for n in payload["calls"] if n != "synthesis" and not is_subcall(n)]
     assert len(specialists) == payload["criteria"] - restored
 
 

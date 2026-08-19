@@ -30,7 +30,9 @@ from ireports_orchestration import (
     NodeSpan,
     RunTrace,
     criteria_for,
+    is_subcall,
     peak_concurrency,
+    subcall_node_id,
     timeline,
 )
 from ireports_retrieval import InMemoryRetriever, RetrievedSpan
@@ -104,14 +106,17 @@ def _slow(findings: list[dict[str, Any]], delay: float = 0.08) -> StubGateway:
 
     class _Slow(StubGateway):
         def complete(self, request: ModelRequest) -> Any:
-            if ":" not in request.node_id:  # analysis and synthesis, not the triage sub-call
+            if not is_subcall(request.node_id):  # analysis and synthesis, not the triage sub-call
                 sleep(delay)
             return super().complete(request)
 
     return _Slow(
         responses={
             "synthesis": json.dumps({"contradictions": [], "information_gaps": []}),
-            **{f"{c.node_id}:sufficiency": json.dumps({"sufficient": True}) for c in CATALOG},
+            **{
+                subcall_node_id(c.node_id, "sufficiency"): json.dumps({"sufficient": True})
+                for c in CATALOG
+            },
         },
         default=json.dumps({"findings": findings}),
     )

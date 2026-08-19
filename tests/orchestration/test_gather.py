@@ -28,6 +28,8 @@ from ireports_orchestration import (
     InMemoryCheckpointStore,
     LoadedCase,
     SpecialistStatus,
+    is_subcall,
+    subcall_node_id,
 )
 from ireports_orchestration.budget import BudgetLedger
 from ireports_orchestration.gather import (
@@ -91,7 +93,7 @@ def _assessor(*answers: dict[str, Any]) -> StubGateway:
             self._remaining = list(answers)
 
         def complete(self, request: ModelRequest) -> Any:
-            if request.node_id.endswith(":sufficiency"):
+            if is_subcall(request.node_id):
                 self.calls.append(request)
                 payload = self._remaining.pop(0) if self._remaining else {"sufficient": True}
                 return StubGateway(default=json.dumps(payload)).complete(request)
@@ -211,7 +213,7 @@ def test_cancelling_between_rounds_keeps_what_was_already_retrieved() -> None:
 
     class _CancelsAfterAssessing(StubGateway):
         def complete(self, request: ModelRequest) -> Any:
-            if request.node_id.endswith(":sufficiency"):
+            if is_subcall(request.node_id):
                 self.calls.append(request)
                 token.cancel("cancelled mid-loop")
                 return StubGateway(
@@ -330,7 +332,7 @@ def test_an_unusable_assessment_stops_the_loop_and_keeps_the_criterion(
 
     class _Unusable(StubGateway):
         def complete(self, request: ModelRequest) -> Any:
-            if request.node_id.endswith(":sufficiency"):
+            if is_subcall(request.node_id):
                 self.calls.append(request)
                 return StubGateway(default=answer).complete(request)
             return super().complete(request)
@@ -352,7 +354,7 @@ def test_an_assessor_that_refuses_or_fails_does_not_take_the_criterion_down(
 
     class _Broken(StubGateway):
         def complete(self, request: ModelRequest) -> Any:
-            if request.node_id.endswith(":sufficiency"):
+            if is_subcall(request.node_id):
                 raise failure
             return super().complete(request)
 
@@ -444,7 +446,7 @@ def test_a_cancelled_criterion_is_its_own_status_end_to_end() -> None:
     from ireports_orchestration.checkpoint import RESUMABLE_STATUSES
 
     assert SpecialistStatus.CANCELLED not in RESUMABLE_STATUSES
-    assert SpecialistStatus.CANCELLED is not SpecialistStatus.SKIPPED_BUDGET
+    assert SpecialistStatus.SKIPPED_BUDGET not in RESUMABLE_STATUSES
 
 
 # ---------------------------------------------------------------------------
@@ -514,31 +516,40 @@ _FINDING = {
 }
 
 
-def _run_gateway(token: CancellationToken, cancel_after: int) -> StubGateway:
-    """Cancels the run partway through the fan-out, the way a deadline watchdog would."""
+class _CancellingGateway(StubGateway):
+    """Cancels the run partway through the fan-out, the way a deadline watchdog would.
 
-    class _Cancels(StubGateway):
-        def __init__(self) -> None:
-            super().__init__(
-                responses={
-                    "synthesis": json.dumps({"contradictions": [], "information_gaps": []}),
-                    **{
-                        f"{c.node_id}:sufficiency": json.dumps({"sufficient": True})
-                        for c in CATALOG
-                    },
+    Declared at module scope rather than inside a factory so that `analysed` is a typed attribute
+    a caller can read. A locally-defined subclass returned as its base type loses every attribute
+    it added, which `mypy --strict` catches and a plain test run does not.
+    """
+
+    def __init__(self, token: CancellationToken, cancel_after: int) -> None:
+        super().__init__(
+            responses={
+                "synthesis": json.dumps({"contradictions": [], "information_gaps": []}),
+                **{
+                    subcall_node_id(c.node_id, "sufficiency"): json.dumps({"sufficient": True})
+                    for c in CATALOG
                 },
-                default=json.dumps({"findings": [_FINDING]}),
-            )
-            self.analysed = 0
+            },
+            default=json.dumps({"findings": [_FINDING]}),
+        )
+        self._token = token
+        self._cancel_after = cancel_after
+        self.analysed = 0
+        """Analysis calls served — not triage sub-calls, and not synthesis."""
 
-        def complete(self, request: ModelRequest) -> Any:
-            if ":" not in request.node_id and request.node_id != "synthesis":
-                self.analysed += 1
-                if self.analysed > cancel_after:
-                    token.cancel("lambda deadline approaching")
-            return super().complete(request)
+    def complete(self, request: ModelRequest) -> Any:
+        if not is_subcall(request.node_id) and request.node_id != "synthesis":
+            self.analysed += 1
+            if self.analysed > self._cancel_after:
+                self._token.cancel("lambda deadline approaching")
+        return super().complete(request)
 
-    return _Cancels()
+
+def _run_gateway(token: CancellationToken, cancel_after: int) -> _CancellingGateway:
+    return _CancellingGateway(token, cancel_after)
 
 
 @pytest.mark.parametrize("name", BOTH)
