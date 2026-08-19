@@ -18,8 +18,8 @@ uv sync
 uv run pytest -q          # offline — no model calls, no cost
 ```
 
-The full demo makes **real model calls** (~20s, ~15k tokens) and needs Docker, the SAM CLI, and a
-configured `.env`:
+The full demo makes **real model calls** — roughly 100–145s and 44–47k tokens on the small
+synthetic case — and needs Docker, the SAM CLI, and a configured `.env`:
 
 ```bash
 uv run python spikes/lambda_demo/build.py
@@ -27,9 +27,12 @@ cd spikes/lambda_demo && sam build --use-container --parallel && cd -
 uv run --env-file .env python spikes/lambda_demo/run_case.py
 ```
 
-A synthetic case runs through a Lambda — twice, once per orchestration path — and each run writes a
-validated envelope to `spikes/lambda_demo/out/`. **Open one.** That file is what the architecture
-produces.
+A synthetic case runs through a Lambda and writes a validated envelope to
+`spikes/lambda_demo/out/`. **Open one.** That file is what the architecture produces.
+
+`run_case.py --resume-demo` does something harder: it invokes the *same run id* twice, the first
+with a wall-clock ceiling below the work required, and shows the second invocation finishing what
+the first started without re-buying it.
 
 Here is one finding from a real run, unedited:
 
@@ -85,23 +88,61 @@ iReports runs unattended and has no reviewer-facing surface. Review happens in A
 
 ## Where it stands
 
-**Working today, against real models:** the data contracts, the model gateway, both orchestration
-paths, citation and contract validation, envelope packaging, and Lambda packaging invoked locally
-under SAM.
+**Working today, end to end, against real models.** A case is loaded, routed to criteria derived
+from its manifest, fanned out to concurrent specialists that retrieve their own evidence, validated,
+synthesised across criteria, and packaged into an envelope — inside one Lambda invocation, invoked
+locally under SAM.
 
-**Designed, not built:** retrieval, crash/resume with model-call idempotency, budgets and loop
-limits, and authority routing from policy packs. Document ingestion is not ours at all.
+| | |
+|---|---|
+| Contracts | 12 Pydantic v2 models with generated JSON Schema, checked in CI |
+| Synthetic cases | 5, from 8 to 34 evidence spans, including one **deliberately clean** record |
+| Criteria catalog | 5, across two decision domains; fan-out width comes from the case |
+| Tests | **349 passing, 8 skipped** — skips are live-model, opt-in and never in CI |
+| Quality gates | Ruff, `mypy --strict` over packages *and* tests, Bandit, schema currency |
+
+**Results worth naming**, each measured rather than asserted:
+
+- **Retrieval cut input tokens ~3×** against handing every specialist the whole case. Estimated 7×
+  beforehand and was wrong — retrieval preferentially surfaces the *large* chapters.
+- **A resumed run pays for nothing it already bought.** 0 duplicate paid calls across both former
+  orchestration paths and every crash point in the fan-out, against the original bake-off's 11-of-24
+  and 12-of-24.
+- **A run stopped by its own ceiling finishes in the next invocation.** Live under SAM local: the
+  first invocation completed 3 of 5 criteria, the second restored those 3 and ran only the
+  outstanding 2 — **6 paid calls in total, against ~6 for one uninterrupted run.**
+- **The fan-out is provably concurrent**, not a loop: a run records per-node timings and reports
+  peak concurrency, because width and a ceiling are both satisfied by a `for` loop.
+- **A deliberately clean case produced fewer findings, not manufactured ones** — and exposed a
+  hard-coded classification that had been wrong since the day it was written.
+
+**Built and honest about its value:** multi-step specialists retrieve, ask a cheap model whether
+that was enough, and retrieve again. The machinery is proven — every stop reason fires, every
+ceiling holds. On two cases the loop added **no evidence at all** for ~50% more tokens. Recorded in
+ADR-028 as something to tune or default off, rather than defended.
+
+**Not built:** authority routing from policy packs, ground-truth agreement scoring, ingestion,
+and checkpoint row integrity — the largest known security gap, named rather than hidden. Document
+ingestion is not ours at all.
+
+**Never run on AWS.** Every live run went through a LiteLLM proxy and SAM local. The `bedrock`
+adapter has never executed in any partition. That is the single largest open question (Q-01), and
+it needs account access rather than code.
 
 **The orchestrator is custom Python** — a thread pool and a loop, behind this project's own port.
-A LangGraph adapter was built alongside it and eight capabilities were implemented twice to decide
-between them; ADR-027 chose custom Python and ADR-029 removed the adapter.
+A LangGraph adapter was built alongside it and **eight capabilities were implemented twice** to
+decide between them. Four comparisons were null results; of the rest, the decisive one was the
+capability LangGraph was originally chosen for: a first-party checkpointer saves you the *store* but
+not the *codec*, and 8 of 24 crash trials lost the write for a call already paid for, against 0.
+ADR-027 chose custom Python; ADR-029 removed the adapter.
 [`docs/handoff/orchestration-decision.md`](docs/handoff/orchestration-decision.md) is the report,
-including a section on what it does *not* claim.
+**including a section on what it does not claim** — the graph is trivial, and the evaluation was
+written by the author of both adapters.
 
 **Nothing shipped imports `langgraph`, `langchain`, or `langsmith`**, and a test scans every module
-and every `pyproject.toml` in `packages/` to keep it that way. `langsmith` is a mandatory
-transitive dependency of `langchain-core` and can export run content; absence is a stronger
-guarantee than a configuration pin.
+and every `pyproject.toml` in `packages/` to keep it that way. `langsmith` is a mandatory transitive
+dependency of `langchain-core` and can export run content; absence is a stronger guarantee than a
+configuration pin.
 
 `docs/ARCHITECTURE.md` § What exists has the detail, including the weakest point in the current
 design.
@@ -109,7 +150,12 @@ design.
 ## Stack
 
 Python 3.12+ · Pydantic v2 · PostgreSQL (system of record) · OpenSearch (retrieval) ·
-Claude on Amazon Bedrock, via LiteLLM or direct · AWS Lambda + SAM · OpenTelemetry
+Claude on Amazon Bedrock, via LiteLLM or direct · AWS Lambda + SAM
+
+**No orchestration framework, and no tracing library.** Both were evaluated; the orchestrator is a
+thread pool and a loop, and the run trace is ~100 lines carrying node ids and timings only.
+OpenTelemetry's GenAI semantic conventions are still marked *Development* with nothing stable, so
+the trace is deliberately ours and maps onto them if a deployment wants to export.
 
 Everything runs locally except model calls, which go to a real endpoint. There is no offline model
 fixture — a fixture would let us claim things about model behaviour we have not observed.
