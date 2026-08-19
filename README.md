@@ -56,10 +56,16 @@ decides nothing. That last part is structural, not stylistic — see below.
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | What to build next, in priority order |
 | [`spikes/lambda_demo/`](spikes/lambda_demo/README.md) | The demo — what it proves and what it does not |
 
+**Building this yourself?** [`docs/handoff/build-guide.md`](docs/handoff/build-guide.md) is written
+for a team constructing the production system rather than for someone working in this repository:
+terms and definitions, process diagrams, how to set up the fan-out and the branch, the three system
+prompts verbatim, the conventions, and a build order. It is the one document here that assumes you
+are starting from nothing.
+
 Reference material, kept but no longer growing: `docs/handoff/` (contract details, the orchestration
-scan and scorecard, the checkpoint threat model, the model-gateway write-up) and `blueprint.md`, the
-source architecture paper this project takes as **input**. Where this repo's decisions diverge from
-the blueprint, the repo wins.
+scan and both bake-off reports, the checkpoint threat model, the model-gateway write-up) and
+`blueprint.md`, the source architecture paper this project takes as **input**. Where this repo's
+decisions diverge from the blueprint, the repo wins.
 
 ## The decision-support boundary
 

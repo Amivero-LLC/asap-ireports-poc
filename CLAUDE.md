@@ -185,6 +185,13 @@ worse than none because it reads as current.
 | `docs/LESSONS.md` | What already cost someone a day |
 | `docs/ARCHITECTURE.md` | How it is shaped and why |
 
+Plus one handoff document written for a different reader — a team building the production system,
+not someone working in this repository:
+
+| File | Answers |
+|---|---|
+| `docs/handoff/build-guide.md` | How to build this: terms, process diagrams, the fan-out and branch patterns, the three system prompts, and the conventions. A test asserts its prompts match the source |
+
 **Update them in the commit that does the work.** That convention is the only thing keeping them
 honest, and it is exactly the one that failed for the files they replaced.
 

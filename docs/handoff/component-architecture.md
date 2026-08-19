@@ -97,6 +97,7 @@ here rather than left to context.
 | §2 | The outside view — the boundaries drawn at the level of packages and external systems | You need to know who owns what |
 | §3 | The inside view — the orchestrator box from §2 opened into the steps one run passes through | You need to know how a case actually flows |
 | §4 | Every component marked `BUILT`, `PLANNED`, `NOT OURS`, or `DESIGNED-NOT-BUILT` | You need to know what exists today |
+| [`build-guide.md`](build-guide.md) | Terms, process diagrams, the fan-out and branch patterns, the system prompts, conventions, build order | You are building the production system and want the shape and the reasoning rather than the inventory |
 | §5 | Individual account of everything designed and deliberately not built, with the reason | You are picking up this work |
 | §6 | What is still unresolved, and what it costs if we guessed wrong | You are assessing risk |
 
