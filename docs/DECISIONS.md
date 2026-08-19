@@ -975,7 +975,7 @@ for GovCloud. Treat the *ratio* as the finding, not the absolute.
 
 ## ADR-024 — Both orchestration paths stay live; the framework decision is deferred
 
-**Date:** 2026-08-12 · **Status:** Accepted · **Amends ADR-012**
+**Date:** 2026-08-12 · **Status:** Superseded by ADR-027 (2026-08-19) · **Amends ADR-012**
 
 **Context.** ADR-012 selected LangGraph on 2026-08-11 — correctly, on the evidence it had: all
 three candidates passed all four bake-off legs, and LangGraph cost two lines for durable
@@ -993,9 +993,12 @@ implementation. Two things became visible that the bake-off could not show:
    turns out to be cheap enough to run as the actual arrangement — one shared specialist, two
    orchestrators, identical output shape.
 
-> **Trigger fired 2026-08-18.** Crash/resume works on both paths and across a Lambda invocation
-> boundary. The complete evidence and a recommendation are in **ADR-027**, recorded as *proposed*.
-> This ADR stands until that one is accepted.
+> **Closed 2026-08-19 by ADR-027.** The trigger this ADR named — "the call gets made when
+> idempotent crash/resume works" — fired on 2026-08-18, and the evidence set it asked for was
+> completed by the multi-step specialist on 2026-08-19. Custom Python is the reference
+> implementation; the LangGraph adapter is retained as a conformance arm, so consequence 1 (the
+> no-import rule) and consequence 2 (every feature owed by both paths) **survive this ADR rather
+> than lapsing with it.** Report: `docs/handoff/orchestration-decision.md`.
 
 **Decision.** **Both paths stay live.** Custom Python and LangGraph are developed in parallel
 behind this project's own orchestration port until there is a reason to choose — most likely when
@@ -1140,10 +1143,10 @@ by omission. The comparison is the deliverable, and it needs both.
   one (`docs/handoff/checkpoint-threat-model.md`). Re-validating through the contracts catches a row
   that no longer satisfies them; it catches nothing about a tampered row that still parses.
 
-## ADR-027 — The orchestration evidence is complete; a framework recommendation
+## ADR-027 — Custom Python is the reference implementation; LangGraph becomes the control arm
 
-**Date:** 2026-08-18 · **Status:** *Proposed* — the evidence is gathered, the call is the project
-owner's · **Would supersede ADR-024, amending ADR-012**
+**Date:** 2026-08-18 · **Accepted 2026-08-19** · **Status:** Accepted · **Supersedes ADR-024,
+amends ADR-012** · Full report: [`orchestration-decision.md`](handoff/orchestration-decision.md)
 
 **Context.** ADR-024 deferred the framework choice and named its own trigger: *"The call gets made
 when idempotent crash/resume works, because that is the capability the framework was selected for
@@ -1179,8 +1182,15 @@ deserialization — which ORCH-01 *requires* — silently downgrades our types t
 need the same framework-free codec, and the codec is most of the code. **The first-party
 checkpointer saves the store, not the codec.**
 
-**Proposed decision.** Make **custom Python** the reference implementation, and keep the LangGraph
-adapter as a conformance arm rather than removing it.
+**Decision.** Make **custom Python** the reference implementation, and keep the LangGraph adapter
+as a conformance arm rather than removing it.
+
+**Scoped deliberately.** This decides what *this* proof of concept ships and what a government team
+should be told to build first. It does **not** conclude that LangGraph is the wrong choice for the
+production system, and the report's §5 says why in five specific ways — chiefly that the graph is
+trivial, that ADR-022 removed the in-run review pause which is among LangGraph's strongest
+features, and that **the evaluation was written by the author of both adapters**. A reader taking
+this recommendation should read §5 before quoting §2.
 
 **Why not simply adopt LangGraph**, as ADR-012 leaned: on the one capability it was chosen for, it
 is behind — it loses checkpoint writes a crash should not lose, and the mitigation
@@ -1211,7 +1221,7 @@ steps are separately checkpointable, so a crash mid-loop resumes mid-loop. That 
 design, it costs the one-shared-specialist arrangement that makes these two paths comparable at
 all, and nothing in this project needs it today.
 
-**Consequences if accepted.**
+**Consequences.**
 
 1. `ORCHESTRATORS["hand-rolled"]` becomes the default everywhere the demo and the handoff describe
    a single path.

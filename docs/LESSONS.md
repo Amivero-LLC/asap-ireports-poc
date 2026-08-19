@@ -518,7 +518,14 @@ sibling task raises, the executor shuts down, and a task that finished in that w
 submit its write — `RuntimeError: cannot schedule new futures after shutdown`, visible in the
 captured log of any trial that loses one.
 
-Measured over the bake-off's 24-trial shape, crashing at every point in a five-way fan-out:
+**The crash here is an exception, not a kill, and that bounds the claim.** The mechanism above is
+a sibling *raising* — which is what a bug or a budget stop looks like, and **not what a Lambda
+timeout looks like**. A timeout is a `SIGKILL`; the original bake-off's 11/24 and 12/24 came from
+hard `os._exit` kills. Those are different experiments, and whether this finding survives a hard
+kill is untested (`docs/handoff/orchestration-decision.md` §6).
+
+Measured over the bake-off's 24-trial *shape* — same trial count, different fixture — crashing at
+every point in a five-way fan-out:
 
 | | Trials | Paid calls with no checkpoint |
 |---|---|---|

@@ -409,14 +409,18 @@ Unattended, with no point at which it waits for a person.
 | Agreement scoring against analyst findings | Needs synthetic cases with analyst-identified ground truth. Worth doing once there is something to measure |
 | Bedrock AgentCore | Reached GovCloud US-West 2026-05-05 and is a live alternative to the Lambda adapter. Never evaluated — worth a look before committing to Lambda |
 
-## How we will know the framework answer
+## The framework answer ✅ closed 2026-08-19 — ADR-027
 
-Not from a scorecard. From having built items 1–7 twice and noticing where one path fought us. The
-things to write down as they happen, in `LESSONS.md`:
+Not from a scorecard — from having built items 1–8 twice and noticing where one path fought us.
+That is what happened, and the record is `docs/handoff/orchestration-decision.md`.
 
-- Which path needed more code for the same behaviour, and whether that code was incidental or real
-- Where a bug was silent in one and loud in the other
-- What each made *impossible* to get wrong
+**Custom Python is the reference implementation; the LangGraph adapter is retained as a conformance
+arm.** Eight capabilities, four null results, and the asymmetries all one way except
+`PostgresSaver.setup()` writing its own schema. The thing ADR-012 selected LangGraph for turned out
+to be two properties, not one: it saves you the checkpoint *store*, and strict deserialization —
+which ORCH-01 requires — means it does not save you the *codec*, which is most of the code.
 
-At three fixed parallel calls, neither of those questions has an answer. That is the whole point of
-building this before deciding.
+**The report's §5 is not a formality.** The graph is trivial, ADR-022 removed the in-run review
+pause that is among LangGraph's strongest features, the crash measured is an exception rather than a
+kill, and the evaluation was written by the author of both adapters. Three named open items in §6;
+none blocks implementation.

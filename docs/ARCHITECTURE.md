@@ -180,7 +180,7 @@ flowchart TB
 **What the picture is meant to show.** Read it top to bottom. The `spikes` boxes hold no analysis
 — they load a case, call a port, and package the result. Everything that reasons about a case is in
 `packages/orchestration/`, and the two adapters converge on **one** shared analysis block, which is
-the ADR-024 arrangement drawn rather than described: swapping the orchestrator changes the two boxes
+the ADR-027 arrangement drawn rather than described: swapping the orchestrator changes the two boxes
 above that block and nothing inside it.
 
 Green boxes are ports — the only places anything reaches outside. The yellow box is the only module
@@ -200,10 +200,15 @@ output**, so it costs nothing and can be re-run as the checks improve.
 
 ---
 
-## Two orchestration paths, on purpose
+## Two orchestration paths — one reference, one control
 
-**Custom Python and LangGraph are both live** (ADR-024). Both sit behind one port; both share one
-specialist implementation; both produce the same shape of output.
+**Custom Python is the reference implementation; LangGraph is retained as a conformance arm**
+(ADR-027, closed 2026-08-19, superseding ADR-024). Both still run behind one port, share one
+specialist implementation, and produce the same shape of output — and they must keep doing so,
+because that is what makes the control arm a control.
+
+Full report: [`handoff/orchestration-decision.md`](handoff/orchestration-decision.md). It is scoped
+to this proof of concept and **its §5 says what it does not claim.**
 
 ```python
 class Orchestrator(Protocol):
@@ -253,19 +258,17 @@ three costs beside it are larger, and one of them (`durability="sync"` narrows t
 and cannot close it, because the write happens outside the node) is a property of the design rather
 than a setting. All measured; all in `docs/LESSONS.md`.
 
-**ADR-024's trigger has fired.** It said the framework call gets made when idempotent crash/resume
-works, and it does — on both paths, across a real SAM invocation boundary, where a timeout *is* the
-crash and the resume is a new invocation.
+**Decided 2026-08-19 (ADR-027), and the report is `handoff/orchestration-decision.md`.** ADR-012
+chose LangGraph on the cost of a PostgreSQL checkpointer — two lines against fifty-six. That figure
+was real and incomplete: ORCH-01 requires strict checkpoint deserialization, and under it LangGraph
+silently returns a `dict` rather than refusing an unknown type, so both paths need the same
+framework-free JSON codec. **The first-party checkpointer saves you the store, not the codec.**
 
-The complete scorecard and a recommendation live in **ADR-027**, recorded as *proposed*: make
-custom Python the reference implementation and keep the LangGraph adapter as a conformance arm. The
-evidence is one-sided; the decision is the project owner's.
-
-**The evidence set ADR-024 asked for is complete.** Multi-step specialists were the last
-unmeasured capability and were built 2026-08-19. What a framework would plausibly still win is a
-loop the *orchestrator* has to see — one whose steps are separately checkpointable, so a crash
-mid-loop resumes mid-loop. That is a different design, it costs the one-shared-specialist
-arrangement that makes these two paths comparable at all, and nothing here needs it.
+Three caveats travel with the decision, at length in the report's §5. The shortest version: the
+graph is trivial and ADR-022 removed the in-run review pause that is among LangGraph's strongest
+features; the crash measured is an exception rather than a kill; and the evaluation was written by
+the author of both adapters. What a framework would plausibly still win is a loop the *orchestrator*
+has to see — one whose steps are separately checkpointable — and we deliberately did not build that.
 
 **Still to come:** Part 4 — local AWS parity, and one command end to end.
 
@@ -304,7 +307,7 @@ than two. `synthesis is None` alone is equally consistent with a second stage no
 ### The same run, drawn twice
 
 Same case, same criteria, same shared specialist, same output. The difference is entirely in how
-control flow is expressed — which is the comparison ADR-024 exists to make, and it is easier to see
+control flow is expressed — which is the comparison ADR-027 settled, and it is easier to see
 than to describe.
 
 **Custom Python.** A thread pool and a loop.

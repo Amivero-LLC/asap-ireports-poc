@@ -65,10 +65,17 @@ adapting to it must be a single-file change.
 **Raw case text never goes to logs or traces.** Traces carry identifiers (`case_id`, `run_id`,
 `node_id`), versions, and outcomes.
 
-## Two orchestration paths (ADR-024)
+## The orchestration decision (ADR-027, closed 2026-08-19)
 
-**Custom Python and LangGraph are both live**, behind this project's own port, sharing one
-specialist implementation.
+**Custom Python is the reference implementation. LangGraph is retained as a conformance arm.**
+Both still run, behind this project's own port, sharing one specialist implementation — that has
+not changed and must not, because it is what keeps the control arm honest.
+
+Full report: [`docs/handoff/orchestration-decision.md`](docs/handoff/orchestration-decision.md).
+**Read its §5 before repeating its §2**: the graph is trivial, ADR-022 removed the in-run review
+pause that is among LangGraph's strongest features, the crash measured is an exception rather than
+a kill, and the evaluation was written by the author of both adapters. The decision is scoped to
+this PoC; it does not conclude that LangGraph is wrong for the production system.
 
 The orchestration is now real enough to tell them apart: runtime fan-out width, a synthesis stage,
 conditional routing, a type-checked tree, and budgets. Five results so far, in `docs/LESSONS.md`:
@@ -84,14 +91,10 @@ conditional routing, a type-checked tree, and budgets. Five results so far, in `
 | Resume across a Lambda boundary | 3 + 3 = 6 paid calls | 3 + 3 = 6 paid calls — a third null result |
 | A bounded loop inside a node | No change | No change — a fourth null result, predicted in writing beforehand |
 
-**ADR-024's trigger has fired.** It said the call gets made when idempotent crash/resume works;
-it works, on both paths, across a real SAM invocation boundary. The complete scorecard and a
-recommendation (custom Python as the reference implementation, LangGraph retained as a conformance
-arm) are in **ADR-027, recorded as *proposed*** — the evidence is one-sided but the decision is the
-project owner's. **Read ADR-027 before doing orchestration work.**
-
-**The evidence set is now complete.** ADR-027 named multi-step specialists as the one unmeasured
-capability; they were built 2026-08-19 and discriminated between the paths not at all.
+Eight capabilities built twice; four null results; the asymmetries all run one way except
+`PostgresSaver.setup()` writing its own schema. Three named open items remain in the report's §6 —
+none blocks implementation, and the cheapest (an outside review of `langgraph_adapter.py`) is the
+one that addresses the bias the report cannot correct for itself.
 
 **No module that analyzes a case may import LangGraph.** A test enforces it by scanning every
 module in `packages/orchestration/`, exempting only `langgraph_adapter.py` and `registry.py`

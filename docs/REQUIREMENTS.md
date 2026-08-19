@@ -23,10 +23,10 @@ orchestrator-spine set, retrieval (RETR-01, RETR-02), the refusal path (VAL-02),
 one clause left, and that clause is *vacuous* rather than unmet: a specialist has no tool surface to
 allowlist. ORCH-02 has both of its halves built — no duplicate paid calls, and no re-executed
 completed nodes — and stays unchecked against its own acceptance wording. **LAMB-01 is done as of
-2026-08-18**, live under SAM local on both paths, which means **ADR-024's own stated trigger has
-fired** — it said the framework call gets made when idempotent crash/resume works. The evidence is
-gathered and one-sided; the decision itself is recorded as proposed in ADR-027 and is the project
-owner's to accept.
+2026-08-18**, live under SAM local on both paths, and **the framework question closed on 2026-08-19
+(ADR-027)**: custom Python is the reference implementation, the LangGraph adapter is retained as a
+conformance arm, and the report is `docs/handoff/orchestration-decision.md`. Every orchestration
+requirement is still owed by both paths — that is what keeps the control arm a control.
 
 ---
 
