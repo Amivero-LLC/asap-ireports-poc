@@ -50,9 +50,18 @@ jobs:
         run: uv run python scripts/generate_schemas.py --check
 
       - name: Contract and architecture tests
-        # `tests/` needs no services. The build-state guard here is what keeps
-        # component-architecture.md honest about what exists.
-        run: uv run pytest tests -q
+        # **`-m "not requires_postgres"`, because `tests/` stopped being service-free.** ORCH-02
+        # put a durable call store into `tests/orchestration/`, and node checkpointing added more:
+        # tests whose whole claim is that a *second process* sees what the first wrote, which needs
+        # a real database. They ran green locally, where the compose stack is up, and failed here
+        # from 5548d86 onward.
+        #
+        # They are not skipped away — they run in the `spikes` job below, which has a PostgreSQL
+        # service, under the same no-silent-skips guard the bake-off legs have. Skipping durability
+        # evidence to get a green build is the failure that guard exists to prevent.
+        #
+        # The build-state guard in here is what keeps component-architecture.md honest.
+        run: uv run pytest tests -q -m "not requires_postgres"
 
       - name: Security scan
         # `--severity-level medium` makes this assert the claim the handoff actually makes —
@@ -99,29 +108,49 @@ jobs:
         # resuming processes. This is retained evidence for ADR-012, so it runs on every push.
         run: uv run pytest spikes -q --junitxml=spikes-results.xml
 
-      - name: Fail if the spikes silently skipped
-        # The Postgres-dependent legs are guarded by a skipif on connectivity. Without this
-        # check, a broken service container would turn the bake-off into a green no-op — which
-        # is worse than a red build, because it looks like evidence.
+      - name: Durability tests from tests/ (need PostgreSQL)
+        # The half of `tests/` that `gates` cannot run. ORCH-02's call store and ORCH-01's node
+        # checkpoint both prove themselves by writing in one process and reading in another,
+        # against a real database — the claim an in-memory store cannot make at all. Same guard
+        # below: a skip here is a failure, because a skipped leg looks like a passing one.
+        run: uv run pytest tests -q -m requires_postgres --junitxml=durable-results.xml
+
+      - name: Fail if any Postgres-dependent leg silently skipped
+        # Every Postgres-dependent test is guarded by a skipif on connectivity. Without this
+        # check, a broken service container would turn the bake-off *and* the durability tests
+        # into a green no-op — which is worse than a red build, because it looks like evidence.
+        # An empty selection is checked too: `-m requires_postgres` matching nothing would
+        # otherwise pass silently the day someone renames the marker.
         run: |
           python3 - <<'PY'
           import sys, xml.etree.ElementTree as ET
-          suite = ET.parse("spikes-results.xml").getroot()
-          if suite.tag != "testsuite":
-              suite = suite.find("testsuite")
-          tests = int(suite.get("tests", 0))
-          skipped = int(suite.get("skipped", 0))
-          print(f"spikes: {tests} collected, {skipped} skipped")
-          if skipped:
-              names = [
-                  tc.get("name")
-                  for tc in suite.iter("testcase")
-                  if tc.find("skipped") is not None
-              ]
-              print("skipped:", ", ".join(names), file=sys.stderr)
+          failed = False
+          for label, path in (
+              ("bake-off", "spikes-results.xml"),
+              ("durability", "durable-results.xml"),
+          ):
+              suite = ET.parse(path).getroot()
+              if suite.tag != "testsuite":
+                  suite = suite.find("testsuite")
+              collected = int(suite.get("tests", 0))
+              skipped = int(suite.get("skipped", 0))
+              print(f"{label}: {collected} collected, {skipped} skipped")
+              if not collected:
+                  print(f"{label}: collected nothing at all", file=sys.stderr)
+                  failed = True
+              if skipped:
+                  names = [
+                      tc.get("name")
+                      for tc in suite.iter("testcase")
+                      if tc.find("skipped") is not None
+                  ]
+                  print(f"{label} skipped:", ", ".join(names), file=sys.stderr)
+                  failed = True
+          if failed:
               sys.exit(
-                  "Bake-off legs were skipped. These are ADR-012's evidence and must actually "
-                  "run; a skipped leg is not a passing leg. Check the postgres service."
+                  "Legs were skipped or nothing was collected. These are ADR-012's and ORCH-02's "
+                  "evidence and must actually run; a skipped leg is not a passing leg, and an "
+                  "empty selection is worse because it is silent. Check the postgres service."
               )
           PY
 
