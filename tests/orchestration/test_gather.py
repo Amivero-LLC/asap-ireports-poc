@@ -460,7 +460,9 @@ def test_a_cancelled_criterion_is_its_own_status_end_to_end() -> None:
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CASE_DIR = REPO_ROOT / "spikes" / "lambda_demo" / "cases" / "AMI-SYN-FIN-001"
-BOTH = ["hand-rolled", "langgraph"]
+BOTH = ["hand-rolled"]
+"""One implementation since ADR-029. Kept as a list so a team adding their own behind
+`Orchestrator` inherits this suite by adding one name."""
 
 
 @pytest.fixture
@@ -588,17 +590,13 @@ def test_cancelled_criteria_are_left_for_the_next_run(
     """Cancelled work is work still to do — the same rule a budget skip follows, and the reason
     both are kept out of `RESUMABLE_STATUSES`.
 
-    On the LangGraph path this is the `_StopWork` raise doing its job: a returned value would have
-    marked the task complete, and the resumed run would report a deliberately truncated case as a
-    finished one.
+    Worth knowing if a second implementation is ever added behind `Orchestrator`: a framework where
+    a node's *return value* is what marks a task complete cannot express this by returning, because
+    a returned cancellation tells the checkpoint the criterion is done. The adapter that had that
+    problem is gone (ADR-029); the property it exposed is not framework-specific.
     """
-    if name == "langgraph":
-        from ireports_orchestration.langgraph_adapter import strict_serde
-        from langgraph.checkpoint.memory import InMemorySaver
-
-        checkpointing = Checkpointing(saver=InMemorySaver(serde=strict_serde()))
-    else:
-        checkpointing = Checkpointing(store=InMemoryCheckpointStore())
+    assert name in BOTH
+    checkpointing = Checkpointing(store=InMemoryCheckpointStore())
 
     token = CancellationToken()
     run_id = "run_cancel_0002"

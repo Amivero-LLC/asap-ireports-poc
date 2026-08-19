@@ -232,10 +232,14 @@ def test_handler_rejects_a_run_id_without_the_prefix(monkeypatch) -> None:
 
 
 def test_handler_refuses_a_candidate_it_was_not_packaged_for() -> None:
-    """Each package holds only its own candidate's dependencies, so this cannot be served."""
-    other = "langgraph" if handler_module.CANDIDATE != "langgraph" else "hand-rolled"
+    """Each package holds only its own candidate's dependencies, so this cannot be served.
+
+    There is one orchestrator today, so the event names one that does not exist. The check is worth
+    keeping: it is what makes adding a second implementation safe, and a handler that silently
+    served the wrong one would produce an envelope attributed to an orchestrator that never ran.
+    """
     with pytest.raises(ValueError, match="invoke the other function"):
-        handler_module.handler({"case_id": "AMI-SYN-FIN-001", "candidate": other})
+        handler_module.handler({"case_id": "AMI-SYN-FIN-001", "candidate": "some-other-impl"})
 
 
 def _offline_retrieval(monkeypatch, retriever) -> None:
@@ -550,19 +554,14 @@ def test_the_package_carries_the_driver_its_durability_depends_on() -> None:
 
     `PostgresCallStore` and `PostgresCheckpointStore` both import `psycopg` inside their methods,
     so a package built without it imports fine, passes every offline test, and fails on the first
-    invocation that tried to be durable — which is the invocation that mattered. The LangGraph
-    candidate needs a different package for the same job, which is ADR-026 showing up in a
-    requirements file.
+    invocation that tried to be durable — which is the invocation that mattered.
     """
     module = _build_module()
 
     assert any(r.startswith("psycopg") for r in module.BASE_REQUIREMENTS), module.BASE_REQUIREMENTS
-    assert any(
-        r.startswith("langgraph-checkpoint-postgres") for r in module.CANDIDATES["langgraph"]
-    ), module.CANDIDATES["langgraph"]
     assert not module.CANDIDATES["handrolled"], (
-        "the hand-rolled candidate grew a dependency; it checkpoints through checkpoint.py and "
-        "the psycopg above, and 'adds nothing to the dependency tree' is one of its measurements"
+        "the orchestrator grew a dependency. It checkpoints through checkpoint.py and the psycopg "
+        "above, and 'adds nothing to the dependency tree' is one of its measurements (ADR-027)"
     )
 
 

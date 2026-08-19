@@ -223,7 +223,7 @@ def test_a_retry_is_not_served_its_own_bad_answer() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+@pytest.mark.parametrize("name", ["hand-rolled"])
 @pytest.mark.parametrize("crash_after", [1, 2, 3, 4])
 def test_resuming_a_crashed_run_pays_for_nothing_twice(
     case: LoadedCase, retriever: InMemoryRetriever, name: str, crash_after: int
@@ -259,7 +259,7 @@ def test_resuming_a_crashed_run_pays_for_nothing_twice(
     assert result.findings, "the resumed run produced nothing, so replay proved nothing"
 
 
-@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+@pytest.mark.parametrize("name", ["hand-rolled"])
 def test_a_second_run_of_the_same_case_shares_nothing(
     case: LoadedCase, retriever: InMemoryRetriever, name: str
 ) -> None:

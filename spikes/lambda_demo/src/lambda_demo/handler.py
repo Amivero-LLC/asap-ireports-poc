@@ -5,11 +5,11 @@ orchestrator and every specialist call happen inside this one handler. There is 
 no Lambda per node, and no queue between specialists. `spikes/lambda_fit/` measured whether that
 shape *packages*; this runs a real case through it.
 
-`CANDIDATE` selects the orchestrator, exactly as in `lambda_fit`, and it comes from the function's
-environment rather than from the event. That is not a style choice: each staged package contains
-only its own candidate's dependency set, so a `handrolled` package has no LangGraph to import. An
-event that asks for a candidate this function was not built for is rejected rather than silently
-served by the wrong one.
+`CANDIDATE` selects the orchestrator and comes from the function's environment rather than from the
+event, so an event asking for one this function was not built for is rejected rather than silently
+served by the wrong one. There is one today (ADR-029 removed the LangGraph adapter); the mechanism
+stays because a deployment may add its own implementation behind `Orchestrator`, and each staged
+package carries only its own candidate's dependencies.
 
 **Nothing here waits for a human** (ADR-022). The invocation returns an envelope of *proposals*;
 an authorized officer reviews them in ASAP afterwards, with ASAP's tooling. There is no pause, no
@@ -61,14 +61,10 @@ default is correct inside the container; the override exists for running the han
 
 _INIT_STARTED = time.perf_counter()
 
-# Import the framework at module scope, where a real handler would have it, even though
-# `LangGraphOrchestrator` imports it lazily inside `run()`. The lazy import is what lets a package
-# built without LangGraph still import this module — but leaving it lazy here would move the cost
-# from Lambda's init phase to the first invocation, which is a different billing and latency story
-# and would quietly misrepresent the shape `lambda_fit` measured.
-if CANDIDATE == "langgraph":
-    import langgraph.graph  # noqa: F401  paid at init, deliberately
-
+# **Nothing to import here, and that is the measurement.** This block used to import an
+# orchestration framework at module scope so its cost landed in Lambda's init phase where a real
+# handler would pay it. The orchestrator now adds nothing to the dependency tree, so init is the
+# standard library, `pydantic`, and the SDKs the gateway and retriever need.
 _INIT_SECONDS = time.perf_counter() - _INIT_STARTED
 
 _RUN_ID = re.compile(r"^run_[A-Za-z0-9][A-Za-z0-9_\-]{0,62}$")

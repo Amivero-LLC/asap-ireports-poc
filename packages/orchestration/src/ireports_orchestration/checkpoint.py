@@ -8,10 +8,10 @@ short supply, and re-running four completed specialists to reach the fifth may s
 this module exists for LAMB-01, and it is the half of durable orchestration that is genuinely the
 orchestrator's business rather than the gateway's.
 
-**It is also the point where the two paths finally stop being interchangeable.** The hand-rolled
-path uses what is below. The LangGraph path uses `PostgresSaver`, its own first-party checkpointer,
-and `langgraph_adapter.py` records what that cost. The comparison is the deliverable; see
-`docs/LESSONS.md`.
+**This was the point where the two orchestration paths stopped being interchangeable**, and the
+comparison it produced is recorded in `docs/handoff/orchestration-decision.md` — chiefly that a
+first-party checkpointer saves you the *store* and not the *codec*, and the codec is most of what
+is below. The LangGraph adapter that made the comparison possible was removed by ADR-029.
 
 **What is stored, and what is deliberately not.** One row per *completed* node, holding the node's
 result as JSON re-validated through the ordinary contracts on the way back in. Never a pickle:
@@ -86,11 +86,14 @@ def _check_version(payload: dict[str, Any], node_id: str) -> None:
 # The codec — plain JSON in both directions, and shared by both paths
 # ---------------------------------------------------------------------------
 #
-# **Both orchestrators need this, and the LangGraph path needs it for a reason nobody expects.**
-# ORCH-01 requires strict checkpoint deserialization. Under that setting LangGraph does not refuse
-# to load a dataclass or a Pydantic model — it *silently returns a dict instead*, on the resume
-# path only. So the state channels have to carry plain JSON that our own code re-validates, which
-# is precisely this codec. See `langgraph_adapter.py` and `docs/LESSONS.md`.
+# **JSON in both directions, re-validated through the ordinary contracts on the way back.**
+# A checkpoint blob that deserializes into live objects is a code-execution surface, so nothing here
+# round-trips an object — it round-trips data and re-enters the contract through its constructor.
+#
+# This codec is also the single largest thing the framework comparison produced. A first-party
+# checkpointer appears to save you writing one, and under the strict deserialization that any
+# CUI-carrying system should require, it does not: the framework silently degraded our types to
+# `dict` on the resume path only. See `docs/handoff/orchestration-decision.md` §3.
 
 
 def outcome_to_json(outcome: SpecialistOutcome) -> dict[str, Any]:
@@ -358,41 +361,29 @@ class RunCheckpoint:
 
 @dataclass(frozen=True)
 class Checkpointing:
-    """Where a run's checkpoints live, said once for both paths.
+    """Where a run's checkpoints live.
 
-    **This type is asymmetric on purpose, and the asymmetry is the finding.** The hand-rolled path
-    wants a `CheckpointStore`; the LangGraph path wants a LangGraph `BaseCheckpointSaver`, which
-    this package may not name because no analysis module may import the framework. So the shared
-    vocabulary is not an object — it is a *connection string*, plus an in-memory escape hatch for
-    offline tests. Each adapter builds its own thing from it, and they are not the same thing.
+    Two ways to say it, and they are not interchangeable: a `dsn` for a real run, or an explicit
+    `store` for a test or a single-process run that only needs the mechanism. Neither given is an
+    error rather than a silent fallback — see `_require_dsn`.
 
-    That is as much as a port can share here, and discovering that is part of what ADR-024 asked.
+    **This type used to carry a third field**, an opaque `saver` for the LangGraph adapter's own
+    checkpointer, because that object is not a storage backend: it owns the graph's superstep
+    bookkeeping as well as the results, so the two could share a connection string and nothing
+    richer. ADR-029 removed the adapter and the field with it. Recorded here because the asymmetry
+    is the substance of `docs/handoff/orchestration-decision.md` row 6, and a reader of this file
+    should not have to reconstruct why a port once had two slots for one job.
     """
 
     dsn: str | None = None
-    """PostgreSQL connection string — the only field both paths understand.
-
-    Each builds something different from it: a `PostgresCheckpointStore` here, a `PostgresSaver`
-    there. That they can agree on a *string* and nothing richer is the shape of the asymmetry."""
+    """PostgreSQL connection string. Used to build a `PostgresCheckpointStore` when no explicit
+    `store` is given."""
 
     store: CheckpointStore | None = None
-    """The hand-rolled path's checkpointer. Ignored by the LangGraph path."""
-
-    saver: Any = None
-    """The LangGraph path's checkpointer. Ignored by the hand-rolled path.
-
-    **Typed `Any` because this package may not name a LangGraph type** — the no-import rule is
-    enforced by a source scan over every module here. Nothing in this file reads it; it is carried
-    through to `langgraph_adapter._saver`, which is the only code allowed to know what it is.
-
-    Two fields where one would be nicer is the honest answer, and the reason is worth stating: a
-    checkpointer is not a storage backend. LangGraph's owns the graph's superstep bookkeeping —
-    which tasks are pending, which channel versions a checkpoint refers to — and ours owns a map of
-    node id to result. They are not two implementations of one interface, and pretending otherwise
-    in the port would have hidden exactly the difference ADR-024 is trying to measure."""
+    """An explicit store. Takes precedence over `dsn`, and is how a test inspects the rows."""
 
     def run_checkpoint(self, run_id: str) -> RunCheckpoint:
-        """What the hand-rolled path is handed. The LangGraph path never calls this."""
+        """One run's view of the store, loaded once."""
         store = self.store
         if store is None:
             store = PostgresCheckpointStore(self._require_dsn())

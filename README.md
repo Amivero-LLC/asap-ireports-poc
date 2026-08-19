@@ -92,10 +92,16 @@ under SAM.
 **Designed, not built:** retrieval, crash/resume with model-call idempotency, budgets and loop
 limits, and authority routing from policy packs. Document ingestion is not ours at all.
 
-**Two orchestration paths are live on purpose** — custom Python and LangGraph, behind one port,
-sharing one specialist implementation (ADR-024). The framework decision is deferred until
-crash/resume exists, because that is the seam where the two actually differ. No module that
-analyzes a case may import LangGraph, and a test enforces it.
+**The orchestrator is custom Python** — a thread pool and a loop, behind this project's own port.
+A LangGraph adapter was built alongside it and eight capabilities were implemented twice to decide
+between them; ADR-027 chose custom Python and ADR-029 removed the adapter.
+[`docs/handoff/orchestration-decision.md`](docs/handoff/orchestration-decision.md) is the report,
+including a section on what it does *not* claim.
+
+**Nothing shipped imports `langgraph`, `langchain`, or `langsmith`**, and a test scans every module
+and every `pyproject.toml` in `packages/` to keep it that way. `langsmith` is a mandatory
+transitive dependency of `langchain-core` and can export run content; absence is a stronger
+guarantee than a configuration pin.
 
 `docs/ARCHITECTURE.md` § What exists has the detail, including the weakest point in the current
 design.

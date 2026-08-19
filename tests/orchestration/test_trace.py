@@ -39,7 +39,9 @@ from ireports_retrieval import InMemoryRetriever, RetrievedSpan
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CASE_DIR = REPO_ROOT / "spikes" / "lambda_demo" / "cases" / "AMI-SYN-FIN-001"
-BOTH = ["hand-rolled", "langgraph"]
+BOTH = ["hand-rolled"]
+"""One implementation since ADR-029. Kept as a list so a team adding their own behind
+`Orchestrator` inherits this suite by adding one name."""
 RUN_ID = "run_trace_0001"
 
 _FINDING = {

@@ -89,12 +89,3 @@ Resources:
       Environment:
         Variables:
           CANDIDATE: hand-rolled
-
-  LangGraphFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: .stage/langgraph/
-      Handler: lambda_demo.handler.handler
-      Environment:
-        Variables:
-          CANDIDATE: langgraph

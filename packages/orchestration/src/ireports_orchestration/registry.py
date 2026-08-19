@@ -1,21 +1,28 @@
-"""The two live orchestrators, by name (ADR-024).
+"""The orchestrator, by name.
 
-Separated from `port.py` for one reason: this is the only module besides the adapter itself that
-may name a framework, and keeping that surface to a single import line is what makes the no-import
-test a sharp check rather than a list of exceptions.
+**One entry, and it used to be two.** ADR-027 chose custom Python and retained a LangGraph adapter
+as a conformance arm; ADR-029 removed it, because the retention was a hedge that did not survive
+being questioned — the second implementation never found a defect in shared code, only defects in
+itself, which is a circular justification for carrying a framework, three dependencies, and a
+telemetry client into everything that ships.
 
-Importing this does **not** import LangGraph. `LangGraphOrchestrator` defers the framework import
-into `run()`, so a deployment built without the `langgraph` extra can still construct this mapping
-and use the hand-rolled entry — it only fails if something actually asks for the LangGraph run.
+The mapping stays rather than collapsing into a direct import, for two reasons that outlive the
+comparison: an entry point selects by *name* from configuration, and a team building the production
+system may add their own implementation behind `Orchestrator`. `docs/handoff/build-guide.md` §5
+describes that seam.
 """
 
 from __future__ import annotations
 
 from .handrolled import HandRolledOrchestrator
-from .langgraph_adapter import LangGraphOrchestrator
 from .port import Orchestrator
 
 ORCHESTRATORS: dict[str, Orchestrator] = {
     "hand-rolled": HandRolledOrchestrator(),
-    "langgraph": LangGraphOrchestrator(),
 }
+
+DEFAULT_ORCHESTRATOR = "hand-rolled"
+"""What an entry point uses when configuration does not say.
+
+Named rather than implied by `next(iter(ORCHESTRATORS))`, so adding a second implementation cannot
+silently change which one a deployment gets."""

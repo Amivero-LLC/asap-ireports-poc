@@ -1185,6 +1185,11 @@ checkpointer saves the store, not the codec.**
 **Decision.** Make **custom Python** the reference implementation, and keep the LangGraph adapter
 as a conformance arm rather than removing it.
 
+> **Retention clause superseded by ADR-029 (2026-08-19).** The adapter was removed. The retention
+> argument was circular — the second implementation only ever found defects in itself — and it was
+> carrying `langsmith`, a run-content exporter, into everything that shipped. The choice of custom
+> Python stands; only the "keep the other one" half is withdrawn.
+
 **Scoped deliberately.** This decides what *this* proof of concept ships and what a government team
 should be told to build first. It does **not** conclude that LangGraph is the wrong choice for the
 production system, and the report's §5 says why in five specific ways — chiefly that the graph is
@@ -1295,3 +1300,69 @@ than it needs (`max_tokens` exhausted while thinking, no text returned).
   call and a triage sub-call. `node_id` carries it: an analysis call is the bare node id, a sub-call
   is suffixed.
 - **SPEC-01 stays unchecked**, and its allowlist clause stays vacuous rather than satisfied.
+
+## ADR-029 — Remove the LangGraph adapter; absence replaces the pin
+
+**Date:** 2026-08-19 · **Status:** Accepted · **Supersedes ADR-027's retention clause; closes
+ORCH-04 and withdraws ORCH-01's LangGraph clause**
+
+**Context.** ADR-027 chose custom Python as the reference implementation and **retained** the
+LangGraph adapter as a "conformance arm." That clause was not asked for and did not survive being
+questioned. Its three stated justifications:
+
+1. *"It is what makes the no-import rule mean anything."* Weak — the rule holds trivially once
+   there is no framework to import, and what replaces it is stronger.
+2. *"It costs one file."* **False.** 486 lines against the reference implementation's 138, six
+   `mypy --strict` suppressions, three added dependencies, a second Lambda package built and tested
+   in CI, and ORCH-04 as a standing security obligation.
+3. *"It has earned its keep four times by making a silent failure loud."* **Circular.** The four
+   were the per-dispatch conditional edge, the concurrent-write reducer, the strict-serde type
+   downgrade, and the unbounded `Send` fan-out. Every one is a defect *in the LangGraph path*,
+   which would not exist if that path did not. **It found zero defects in shared code.** Every real
+   bug in this project came from building a feature or running live.
+
+The dependency that matters is not LangGraph. It is `langsmith`, a **mandatory** transitive
+dependency of `langchain-core`, and a client capable of exporting run content. A bake-off negative
+control measured an unpinned run POSTing roughly 90 KB — the whole graph state, including every
+proposed finding's observation text — to a third-party endpoint, **and succeeding anyway**, because
+the client swallows the failure. A misconfigured deployment leaks silently; a blocked one gives the
+operator no signal either.
+
+**Decision.**
+
+1. **Remove `langgraph_adapter.py`** and the orchestration package's framework extra. Nothing
+   shipped depends on LangGraph, LangChain, or `langsmith`.
+2. **ORCH-04 is closed by absence, not by configuration.** It asked for LangSmith egress to be
+   pinned closed and proven closed at every entry point. Removing the client is a better answer:
+   **absence cannot be misconfigured.** `tests/architecture/test_no_orchestration_framework.py`
+   scans every shipped module for imports *and* every shipped `pyproject.toml` for declarations,
+   because a dependency added but not yet used is already in the built artifact.
+3. **ORCH-01's LangGraph clause is withdrawn.** Its checkpoint clauses — `durability="sync"` and
+   strict deserialization — were met on 2026-08-18 and are now moot with the adapter gone. What
+   they *taught* survives in `checkpoint.py`'s codec and in the decision report.
+4. **The port stays.** Not as lock-in insurance — there is nothing left to be locked into — but as
+   the seam an entry point plugs into, and as the home of the routing policy (`should_synthesize`,
+   `stop_reason`, `unstarted`) that having had two implementations forced into shared code.
+
+**Why not move it to `spikes/` alongside the bake-off candidates.** Considered, and unnecessary:
+ADR-001 requires retaining *evidence*, and the evidence is
+`docs/handoff/orchestration-decision.md` plus git history. `spikes/langgraph/` already retains a
+LangGraph implementation from the first bake-off, so the framework remains exercisable there. A
+second copy would be a maintenance obligation dressed as an archive.
+
+**Consequences.**
+
+- **Every orchestration feature is now owed once.** That obligation was justified while a
+  comparison was live and is pure cost afterwards.
+- **`Checkpointing` loses its `saver` field**, and `SpecialistOutcome` keeps everything else. The
+  asymmetry that field represented is documented in the decision report rather than carried in a
+  type.
+- **The conformance tests are gone.** `test_both_orchestrators_produce_the_same_findings` and its
+  sibling asserted agreement between two implementations; with one they assert nothing.
+- **`spikes/langgraph/` still pulls LangGraph and `langsmith` into the *development* tree**, since
+  it is a workspace member and retained bake-off evidence. Nothing there ships, and the new test
+  scans `packages/` only — but a team hardening this should know the dev environment is not clean
+  of it, and can drop that spike once ADR-012's evidence is no longer needed.
+- **The framework question is now genuinely expensive to reopen**, which is the honest cost of this
+  decision. Reopening means rebuilding an adapter rather than re-running one. `orchestration-decision.md`
+  §5 states the conditions under which that would be warranted.

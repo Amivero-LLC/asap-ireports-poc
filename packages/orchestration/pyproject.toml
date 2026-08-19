@@ -10,14 +10,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# LangGraph is an *adapter's* dependency, not the package's (ADR-024). `langgraph_adapter.py`
-# imports it inside `run()` so that a deployment built without this extra can still import the
-# package and run the hand-rolled path — which is what "the framework is one adapter behind a
-# port" has to mean when you try to package it. `spikes/lambda_demo/build.py` builds exactly that
-# split: the `handrolled` Lambda package contains no LangGraph at all.
-langgraph = ["langgraph>=1.2.10,<1.3"]
-# The durable call store (ORCH-02). Optional for the same reason LangGraph is: a deployment that
-# only needs within-run deduplication can use `InMemoryCallStore` and carry no driver.
+# **There is no orchestration-framework extra, and that is the point (ADR-029).** This package
+# depends on the standard library, `pydantic`, and the two sibling ports. No LangChain, no
+# LangGraph, and therefore no `langsmith` — which is a mandatory transitive dependency of
+# `langchain-core` and is a client capable of exporting run content out of a system that will
+# carry CUI. Absence is a stronger guarantee than a configuration pin, and
+# `tests/architecture/test_no_orchestration_framework.py` asserts it.
+#
+# The durable call store and node checkpoint (ORCH-02). Optional because a deployment that only
+# needs within-run deduplication can use the in-memory stores and carry no driver.
 postgres = ["psycopg[binary]>=3.2"]
 
 [build-system]

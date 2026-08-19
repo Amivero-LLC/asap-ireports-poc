@@ -65,44 +65,27 @@ adapting to it must be a single-file change.
 **Raw case text never goes to logs or traces.** Traces carry identifiers (`case_id`, `run_id`,
 `node_id`), versions, and outcomes.
 
-## The orchestration decision (ADR-027, closed 2026-08-19)
+## Orchestration: custom Python, and nothing else (ADR-027, ADR-029)
 
-**Custom Python is the reference implementation. LangGraph is retained as a conformance arm.**
-Both still run, behind this project's own port, sharing one specialist implementation — that has
-not changed and must not, because it is what keeps the control arm honest.
+**There is one orchestrator and it depends on no framework.** A thread pool and a loop, in
+`handrolled.py`, behind this project's own port. ADR-012 selected LangGraph on a one-day bake-off;
+ADR-027 reversed that after building eight capabilities twice; ADR-029 removed the adapter rather
+than carrying a framework, three dependencies, and a run-content exporter for a comparison that had
+finished.
 
 Full report: [`docs/handoff/orchestration-decision.md`](docs/handoff/orchestration-decision.md).
-**Read its §5 before repeating its §2**: the graph is trivial, ADR-022 removed the in-run review
-pause that is among LangGraph's strongest features, the crash measured is an exception rather than
-a kill, and the evaluation was written by the author of both adapters. The decision is scoped to
-this PoC; it does not conclude that LangGraph is wrong for the production system.
+**Read its §5 before repeating its §2** — the graph is trivial, the crash measured is an exception
+rather than a kill, and the evaluation was written by the author of both adapters.
 
-The orchestration is now real enough to tell them apart: runtime fan-out width, a synthesis stage,
-conditional routing, a type-checked tree, and budgets. Five results so far, in `docs/LESSONS.md`:
+**Nothing shipped may import `langgraph`, `langchain`, or `langsmith`**, and a test scans every
+module *and* every `pyproject.toml` in `packages/` to keep that true. This is ORCH-04, closed by
+absence rather than by configuration: `langsmith` is a mandatory transitive dependency of
+`langchain-core` and can export run content, and absence cannot be misconfigured.
+`spikes/langgraph/` still has it — that is retained bake-off evidence and ships nowhere.
 
-| Change | Hand-rolled | LangGraph |
-|---|---|---|
-| Runtime fan-out width | No change | Structural — rebuilt around `Send` |
-| Fan-in barrier | Free | Free (supersteps) — a null result |
-| Conditional routing after fan-out | `if should_synthesize(...)` | Needs a `join` node; the naive version fires per dispatch on partial state **and fails silently** |
-| `mypy --strict` | No change | Four suppressions — the documented `Send` pattern matches no `add_node` overload |
-| Early termination on a budget | 3 lines | 3 lines — a null result, and marginally cheaper for the synthesis skip |
-| Node-level checkpointing | Ask, then tell — 4 lines | `PostgresSaver` writes no SQL, **and** costs a shared JSON codec, a raise-not-return budget stop, and 8 lost writes in 24 crash trials against 0 |
-| Resume across a Lambda boundary | 3 + 3 = 6 paid calls | 3 + 3 = 6 paid calls — a third null result |
-| A bounded loop inside a node | No change | No change — a fourth null result, predicted in writing beforehand |
-
-Eight capabilities built twice; four null results; the asymmetries all run one way except
-`PostgresSaver.setup()` writing its own schema. Three named open items remain in the report's §6 —
-none blocks implementation, and the cheapest (an outside review of `langgraph_adapter.py`) is the
-one that addresses the bias the report cannot correct for itself.
-
-**No module that analyzes a case may import LangGraph.** A test enforces it by scanning every
-module in `packages/orchestration/`, exempting only `langgraph_adapter.py` and `registry.py`
-(`tests/orchestration/test_orchestration.py`). With two implementations genuinely running, this is
-the working arrangement rather than lock-in insurance.
-
-Build shared orchestration logic in framework-free code both paths call. Where a feature is easy in
-one and hard in the other, that is a finding — write it into `docs/LESSONS.md`.
+Build shared orchestration logic in framework-free code. The port stays, not as lock-in insurance
+but as the seam an entry point plugs into and the home of routing policy that must not be
+duplicated.
 
 ## Current state
 

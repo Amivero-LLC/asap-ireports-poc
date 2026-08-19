@@ -3,8 +3,14 @@
 **Scored: 2026-08-19** · **Status: complete — resolves ADR-024** · **Supersedes the
 recommendation in [`orchestration-scorecard.md`](orchestration-scorecard.md) (ADR-012)**
 
-**Decision: custom Python is the reference implementation. The LangGraph adapter is retained as a
-conformance arm, not as a candidate.**
+**Decision: custom Python is the reference implementation.**
+
+> **Amended 2026-08-19 by ADR-029.** This report originally also retained the LangGraph adapter as a
+> "conformance arm." That clause was withdrawn: the retention argument was circular — the second
+> implementation only ever surfaced defects *in itself*, never in shared code — and it carried
+> `langsmith`, a run-content exporter, into everything that shipped. **The adapter is removed.**
+> §2's measurements stand; they were taken while both existed, and the evidence is this report plus
+> git history. `spikes/langgraph/` retains a LangGraph implementation from the first bake-off.
 
 This is the **second** bake-off and it answers a different question from the first. ADR-012 scored
 three candidates on a stubbed four-leg harness in one day, before any analysis code existed, and
@@ -90,9 +96,12 @@ weighting this.**
    It stops being lock-in insurance and becomes the thing that keeps the control arm honest.
 2. **Every orchestration feature is still owed by both paths.** That is what made this comparison
    possible and it is what would make a future reversal cheap.
-3. **The LangGraph adapter is maintained, not frozen.** It has earned its keep four times by making
-   a silent failure loud — the per-dispatch router, the concurrent-write reducer, the strict-serde
-   type downgrade, and the unbounded fan-out. A control arm that stops running stops controlling.
+3. ~~**The LangGraph adapter is maintained, not frozen.**~~ **Withdrawn by ADR-029.** The four
+   "earned its keep" instances — the per-dispatch router, the concurrent-write reducer, the
+   strict-serde type downgrade, the unbounded fan-out — are all defects *in the LangGraph path*,
+   which would not exist without it. It found zero defects in shared code. What two implementations
+   genuinely bought was forcing routing policy and the checkpoint codec into shared code, and that
+   value is banked rather than recurring.
 
 ---
 

@@ -1,23 +1,24 @@
 """This project's own orchestration interface — what an orchestrator is, and what it returns.
 
-ADR-024 keeps custom Python and LangGraph both live until there is evidence to choose between
-them. The protection against either becoming lock-in is that nodes depend on **this** interface
-and never on a framework — easy to assert, and only meaningful because a second implementation
-genuinely runs the same case and produces the same shape of answer.
+**One implementation now, and the interface stays anyway.** ADR-024 kept custom Python and
+LangGraph both live until there was evidence to choose; ADR-027 chose custom Python; ADR-029
+removed the LangGraph adapter rather than carrying a framework, three dependencies, and a telemetry
+client for a comparison that had finished. What survives is not lock-in insurance — there is no
+framework left to be locked into — but the two things the comparison forced into shape:
 
-Everything shared by both paths lives here: the `RunResult` they both return, the routing policy
-they must not disagree about, and the fan-in that makes their outputs comparable. The two
-implementations are `handrolled.py` and `langgraph_adapter.py`, and neither type appears outside
-its own module — `registry.py` is the only place both are named.
+**The seam an entry point plugs into.** A handler selects an orchestrator by name from
+configuration and depends on `RunResult`, not on how the run was produced. A team building the
+production system can put their own implementation here; `docs/handoff/build-guide.md` §5 describes
+that.
 
-**The fan-out width comes from the case** (`criteria_for`), not from a constant. That is what
-makes this a comparison at all: a fixed-width fan-out is one line in any framework, so a fixed one
-measures nothing. With the width decided at runtime the two implementations stop being the same
-program — see `langgraph_adapter.py`, where it forces a different graph construction entirely.
+**The routing policy that must not be duplicated.** `should_synthesize`, `stop_reason`, and
+`unstarted` live here because they are *policy decisions about a run*. Having had two
+implementations is exactly how we learned that a policy decided in two places is a policy those
+places eventually disagree about — and the disagreement surfaces as two runs of one case producing
+different envelopes for a reason nobody can see. The lesson outlived the second implementation.
 
-The no-import rule is enforced rather than described: `test_no_analysis_module_imports_langgraph`
-in `tests/orchestration/test_orchestration.py` fails if any module here except the adapter and the
-registry grows a LangGraph reference.
+**The fan-out width comes from the case** (`criteria_for`), not from a constant. That is what makes
+the routing real: a fixed-width fan-out is one line in any design.
 """
 
 from __future__ import annotations
@@ -174,10 +175,14 @@ def unstarted(
 ) -> list[SpecialistOutcome]:
     """Account for every criterion that produced no outcome, carrying why.
 
-    **A truncated run must be visibly truncated**, and it must be visibly truncated the same way on
-    both paths. The hand-rolled orchestrator returns these as values from its worker; the LangGraph
-    one has to reconstruct them, because there a returned value is what marks a task complete and a
-    stopped criterion has to stay pending. Same list either way.
+    **A truncated run must be visibly truncated.** A criterion with no outcome is not the same as
+    one that came back clean, and a run that quietly returned fewer results than it had criteria
+    would report a partial analysis as a complete one.
+
+    Shared rather than inlined because a second implementation once had to reconstruct this list
+    instead of returning it — a returned value marked a task complete there, so a stopped criterion
+    had to stay pending. That adapter is gone (ADR-029); the helper stays, because "account for
+    every criterion" is a property of the run and not of how the run was produced.
     """
     missing = [c for c in criteria if c.node_id not in analysed]
     if not missing:

@@ -136,11 +136,10 @@ flowchart TB
     HAND["spikes · handler.py<br/>one invocation, one run"]
     PACK["spikes · package.py<br/>findings to ASAPEnvelope"]
 
-    PORT["orchestration · port.py<br/>Orchestrator protocol, RunResult<br/>routing policy both paths share"]
-    HR["orchestration · handrolled.py<br/>a thread pool and a loop"]
-    LG["orchestration · langgraph_adapter.py<br/>the only module that imports a framework"]
+    PORT["orchestration · port.py<br/>Orchestrator protocol, RunResult,<br/>routing policy"]
+    HR["orchestration · handrolled.py<br/>a thread pool and a loop<br/>no framework, no framework dependency"]
 
-    subgraph ANALYSIS["orchestration — shared analysis, framework-free, both paths call it"]
+    subgraph ANALYSIS["orchestration — the analysis, framework-free"]
         direction LR
         CRIT["criteria.py<br/>fan-out width<br/>comes from the case"]
         SPEC["specialist.py<br/>one criterion,<br/>citation-checked"]
@@ -158,9 +157,7 @@ flowchart TB
     LOAD --> HAND
     HAND --> PORT
     PORT --> HR
-    PORT --> LG
     HR --> ANALYSIS
-    LG --> ANALYSIS
     ANALYSIS --> GW
     ANALYSIS --> RETR
     GW --> PROXY
@@ -172,7 +169,6 @@ flowchart TB
     style ANALYSIS fill:#e8f0fe,stroke:#1a73e8
     style GW fill:#e6f4ea,stroke:#137333
     style RETR fill:#e6f4ea,stroke:#137333
-    style LG fill:#fef7e0,stroke:#f9ab00
     style PROXY fill:#f5f5f5,stroke:#9aa0a6
     style OS fill:#f5f5f5,stroke:#9aa0a6
 ```
@@ -200,15 +196,13 @@ output**, so it costs nothing and can be re-run as the checks improve.
 
 ---
 
-## Two orchestration paths — one reference, one control
+## One orchestrator, and no framework
 
-**Custom Python is the reference implementation; LangGraph is retained as a conformance arm**
-(ADR-027, closed 2026-08-19, superseding ADR-024). Both still run behind one port, share one
-specialist implementation, and produce the same shape of output — and they must keep doing so,
-because that is what makes the control arm a control.
-
-Full report: [`handoff/orchestration-decision.md`](handoff/orchestration-decision.md). It is scoped
-to this proof of concept and **its §5 says what it does not claim.**
+**Custom Python, behind this project's own port** (ADR-027 chose it; ADR-029 removed the LangGraph
+adapter that the comparison ran against). A thread pool and a loop — 47 statements — against ~3,400
+lines of shared, framework-free code doing criteria selection, specialists, evidence gathering,
+synthesis, budgets, idempotency, checkpointing, and tracing. **That ratio is the finding**: the
+orchestrator is the small part, and every framework on offer competes for it.
 
 ```python
 class Orchestrator(Protocol):
@@ -221,96 +215,47 @@ class Orchestrator(Protocol):
         run_id: str,
         budgets: Budgets | None = None,
         checkpointing: Checkpointing | None = None,
+        cancel: CancellationToken | None = None,
     ) -> RunResult: ...
 ```
 
-### How far the comparison has actually got
+The port survives the decision. Not as lock-in insurance — there is no framework left to be locked
+into — but as the seam an entry point plugs into, and as the home of the routing policy
+(`should_synthesize`, `stop_reason`, `unstarted`) that having had two implementations forced into
+shared code. That lesson outlived the second implementation.
 
-The orchestration started as a fixed three-node fan-out, at which shape the two paths were
-indistinguishable — a fixed-width fan-out is one line in either. It is now two stages with runtime
-width:
+**Nothing shipped imports `langgraph`, `langchain`, or `langsmith`,** and a test enforces it over
+every module and every `pyproject.toml` in `packages/`. That is ORCH-04, closed by absence rather
+than by a configuration pin.
 
-```
-START ──▶ select criteria (from the case) ──▶ N specialists ──▶ synthesis ──▶ END
-```
+Full report: [`handoff/orchestration-decision.md`](handoff/orchestration-decision.md). It is scoped
+to this proof of concept and **its §5 says what it does not claim.**
 
-Six comparison points so far, two of them null results:
+### What the comparison measured
 
-| Change | Hand-rolled | LangGraph |
-|---|---|---|
-| **Runtime fan-out width** | No change — `pool.map` never cared about list length | **Structural.** Rebuilt around `Send`, because one-node-per-criterion needs the criteria known at construction |
-| **Fan-in barrier for stage two** | Free — exiting the `ThreadPoolExecutor` context | Free — supersteps; a node after a `Send` waits for every dispatch |
-| **Conditional routing after fan-out** | `if should_synthesize(outcomes):` | Needs a do-nothing `join` node. The naive version fires once per dispatch on partial state and **fails silently** |
-| **Passing `mypy --strict`** | No change | Four suppressions, because the documented `Send` pattern matches no `add_node` overload |
-| **Early termination on a budget** | 3 lines | 3 lines — and marginally cheaper for the synthesis skip, because the routing point already existed |
-| **Node-level checkpointing** | Ask the checkpoint, then tell it — 4 lines, plus a store, an upsert and a read | `PostgresSaver.setup()` writes the schema for you. **And** a shared JSON codec is mandatory, the budget stop must raise rather than return, and 8 of 24 crash trials lost the write for a call already paid for, against 0 |
-| **Resume across a Lambda boundary** | 3 + 3 = 6 paid calls, against ~6 for one run | Identical |
-| **A bounded loop inside a node** | No change | No change — the loop is inside `analyze`, which both call |
+Eight capabilities, built twice behind one port over one shared specialist, between 2026-08-12 and
+2026-08-19. **Four were null results** — the fan-in barrier, early termination on a budget, resume
+across a Lambda invocation boundary, and a bounded loop inside a node. Of the four that were not,
+three favoured the hand-rolled path on simplicity, and the fourth — node-level checkpointing — was
+the one LangGraph was originally chosen for and is where it came off worst: a first-party
+checkpointer saves you the *store* and not the *codec*, and 8 of 24 crash trials lost the write for
+a call already paid for, against 0.
 
-Four are null results and count as evidence: joining, early termination, the Lambda invocation
-boundary itself, and the multi-step specialist. All four were expected to favour LangGraph and none
-did — the last one predicted in writing before it was measured, in `gather.py`'s own docstring, so
-the result could not be read backwards.
+The full table, the caveats, and the three named open items are in
+[`handoff/orchestration-decision.md`](handoff/orchestration-decision.md). It is not reproduced here,
+because two copies of a scorecard is how one of them goes stale.
 
-**The last row is the first result that runs against LangGraph on the dimension it was chosen for.**
-Not decisively — `PostgresSaver` genuinely removes the storage layer, which is real work — but the
-three costs beside it are larger, and one of them (`durability="sync"` narrows the lost-write window
-and cannot close it, because the write happens outside the node) is a property of the design rather
-than a setting. All measured; all in `docs/LESSONS.md`.
+**What ADR-012 got wrong, specifically.** It chose LangGraph on the cost of a PostgreSQL
+checkpointer — two lines against fifty-six. That figure was real and incomplete: strict checkpoint
+deserialization, which any CUI-carrying system should require, makes the framework silently return a
+`dict` rather than refuse an unknown type, so the state channels need a framework-free JSON codec
+anyway. **The first-party checkpointer saves you the store, not the codec**, and the codec is most
+of the code.
 
-**Decided 2026-08-19 (ADR-027), and the report is `handoff/orchestration-decision.md`.** ADR-012
-chose LangGraph on the cost of a PostgreSQL checkpointer — two lines against fifty-six. That figure
-was real and incomplete: ORCH-01 requires strict checkpoint deserialization, and under it LangGraph
-silently returns a `dict` rather than refusing an unknown type, so both paths need the same
-framework-free JSON codec. **The first-party checkpointer saves you the store, not the codec.**
+### The run, drawn
 
-Three caveats travel with the decision, at length in the report's §5. The shortest version: the
-graph is trivial and ADR-022 removed the in-run review pause that is among LangGraph's strongest
-features; the crash measured is an exception rather than a kill; and the evaluation was written by
-the author of both adapters. What a framework would plausibly still win is a loop the *orchestrator*
-has to see — one whose steps are separately checkpointable — and we deliberately did not build that.
-
-**Still to come:** Part 4 — local AWS parity, and one command end to end.
-
-### How we know the fan-out is a fan-out
-
-Every orchestration test in this repository passed on a serial implementation until 2026-08-19.
-They asserted *width* — five outcomes for five criteria — and a *ceiling* — never more than three
-at once — and a `for` loop satisfies both. Confirmed by breaking it deliberately: `max_workers=1`
-left the whole suite green.
-
-So a run now records when each node started and stopped, and carries it on `RunResult`. Node ids
-and offsets only — no case text ever reaches a trace. A live run, LangGraph path, five criteria:
-
-```
-timeline — peak 3 node(s) at once:
-  foreign_influence_specialist         |###################             |   0.01-46.65s
-  personal_conduct_specialist          |##################              |   0.01-43.24s
-  financial_considerations_specialist  |################                |   0.01-38.17s
-  candor_specialist                    |                #############   |  38.18-70.61s
-  criminal_conduct_specialist          |                  ########      |  43.24-62.44s
-  synthesis                            |                           #### |  70.62-103.45s
-```
-
-Three claims, all checkable rather than asserted:
-
-- **The fan-out is concurrent.** Three specialists start together; peak concurrency is 3, not 1.
-- **The bound holds and binds.** Peak is `MAX_PARALLEL`, not the fan-out width — the fourth and
-  fifth criteria start as slots free, at 38.18s and 43.24s.
-- **The barrier is real.** Synthesis starts at 70.62s, after the last specialist ends at 70.61s.
-  "Synthesis ran once" would also be true of one that started early on a partial fan-out.
-
-Branching needs the *pair* of runs rather than one: the same orchestrator produces a timeline with
-a synthesis span on a case with findings to reason across, and one without it on a case with fewer
-than two. `synthesis is None` alone is equally consistent with a second stage nobody wired up.
-
-### The same run, drawn twice
-
-Same case, same criteria, same shared specialist, same output. The difference is entirely in how
-control flow is expressed — which is the comparison ADR-027 settled, and it is easier to see
-than to describe.
-
-**Custom Python.** A thread pool and a loop.
+A thread pool and a loop. `docs/handoff/build-guide.md` §6 is the version written for someone
+building this from scratch; this is the shape.
 
 ```mermaid
 flowchart TB
@@ -344,65 +289,6 @@ flowchart TB
 Everything green is one line of ordinary Python. `pool.map` never cared how long the criteria list
 was, so moving fan-out width from a constant to runtime data required **no change here at all**.
 
-**LangGraph.** The same run as a graph.
-
-```mermaid
-flowchart TB
-    ST(["START"])
-    FAN{{"fan_out(state)<br/>returns [Send('specialist', c) for c in criteria]<br/>N decided at runtime — the graph shape stays constant"}}
-    SP["specialist node<br/>receives the sent Criterion, NOT the graph state<br/>writes outcomes through an operator.add reducer"]
-    JOIN["join — a node that does nothing, and is required"]
-    ROUTE{"route_after_specialists(state)<br/>safe here, and only here"}
-    SYN["synthesis node<br/>reads every outcome from accumulated state"]
-    EN(["END"])
-
-    ST -->|conditional edge| FAN
-    FAN -->|"Send × N"| SP
-    SP -->|"plain edge — joins, runs once"| JOIN
-    JOIN --> ROUTE
-    ROUTE -->|"two or more findings"| SYN
-    ROUTE -->|"fewer"| EN
-    SYN --> EN
-
-    style FAN fill:#fef7e0,stroke:#f9ab00
-    style JOIN fill:#fce8e6,stroke:#c5221f
-    style ROUTE fill:#fef7e0,stroke:#f9ab00
-```
-
-**The red box is the whole finding.** A conditional edge leaving a `Send`-dispatched node fires
-**once per dispatch, each seeing only its own contribution to state** — measured, five dispatches
-gave five router calls, each reading one outcome, never five. So the router cannot hang off
-`specialist`; it needs a do-nothing node in front of it whose *plain* edge performs the join. The
-hand-rolled equivalent of that entire problem is the word `if`.
-
-That failure is the dangerous kind: no error, no warning, and synthesis silently never runs. You
-find it by counting.
-
-Three more things this drawing makes concrete:
-
-- **`Send` was not a choice.** One node per criterion added at construction only works when the
-  criteria are known before the graph is built, and they are not — `criteria_for` reads the case.
-- **The reducer is invisible and load-bearing.** Every dispatch writes `outcomes` concurrently.
-  Without `operator.add` LangGraph raises; with a plain value the dispatches clobber one another
-  and findings vanish with no error at all.
-- **The graph shape is constant while the work is variable**, which is the property a checkpoint
-  needs — a checkpoint refers to node names that must still exist on resume. That is a genuine
-  point in LangGraph's favour, and it is why item 7 of the roadmap is where this gets decided. [`ROADMAP.md`](ROADMAP.md) is ordered around exactly that, so the comparison falls
-out of the work rather than needing a separate exercise, and each result lands in
-[`LESSONS.md`](LESSONS.md) as it happens.
-
-**The rule that makes this work: no module that analyzes a case may import LangGraph.** A test
-enforces it. This began as insurance against lock-in; with two implementations actually running, it
-is now the working arrangement.
-
-### What it costs
-
-Every orchestration feature is owed by both paths — budgets, loop limits, fan-out bounds, eventually
-checkpointing. The mitigation is to build shared logic once, in framework-free code both
-orchestrators call. Where a feature is easy in one and hard in the other, **that is the finding**,
-and it belongs in `docs/LESSONS.md`.
-
----
 
 ## The model gateway
 
@@ -480,7 +366,7 @@ state.
 |---|---|
 | Data contracts | 12 Pydantic v2 models + JSON Schema |
 | Model gateway | Port + `litellm` / `bedrock` / `stub` adapters. LiteLLM proven live; **bedrock never run** |
-| Both orchestrators | Custom Python and LangGraph, one shared specialist and one shared synthesis stage |
+| Orchestrator | Custom Python — a thread pool and a loop, behind this project's own port. No orchestration framework, and nothing shipped imports one |
 | Criteria selection | Derived from the case manifest, so fan-out width is runtime data |
 | Cross-criterion synthesis | Computed overlap + a model pass for contradictions and gaps |
 | Citation + contract validation | Enforced, with rejections recorded |

@@ -15,7 +15,6 @@ not decide whether its own output is valid.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -45,8 +44,6 @@ from ireports_orchestration import (
 from ireports_retrieval import InMemoryRetriever, RetrievedSpan
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-PACKAGE = REPO_ROOT / "packages" / "orchestration" / "src" / "ireports_orchestration"
-
 CASE_DIR = REPO_ROOT / "spikes" / "lambda_demo" / "cases" / "AMI-SYN-FIN-001"
 """**The case fixtures live in the spike and are read from there on purpose.**
 
@@ -56,14 +53,6 @@ drift. When ingestion lands (Phase 3) the cases move once, and this constant fol
 """
 
 RUN_ID = "run_test_0001"
-
-FRAMEWORK_AWARE = {"langgraph_adapter.py", "registry.py"}
-"""The only two modules permitted to name a framework.
-
-`langgraph_adapter.py` is the adapter itself. `registry.py` names both adapters and their keys,
-which is one import line and a dict — kept in its own module precisely so this exemption stays two
-files long rather than growing into a list of special cases.
-"""
 
 
 @pytest.fixture
@@ -144,75 +133,6 @@ def _gateway(*findings: dict[str, Any]) -> StubGateway:
 # ---------------------------------------------------------------------------
 # The port holds
 # ---------------------------------------------------------------------------
-
-
-IMPORTS_LANGGRAPH = re.compile(r"^\s*(?:from|import)\s+langgraph\b", re.MULTILINE)
-"""An `import` statement anywhere in the source, at any indentation.
-
-Deliberately a **source** scan rather than an import check on the loaded module: the adapter
-imports LangGraph lazily inside `run()`, so a specialist that did the same would not fail at
-collection time either. The indentation-tolerant pattern is what makes a lazy import inside a
-function as visible as a top-level one.
-
-It matches import statements rather than the bare word, because these modules legitimately *talk*
-about LangGraph — the whole point of ADR-024 is documenting where the two paths diverge, and a
-scan that forbade naming the framework would forbid explaining it.
-"""
-
-
-def test_no_analysis_module_imports_langgraph() -> None:
-    """ADR-012 chose LangGraph; this is what keeps that from becoming lock-in.
-
-    Scans every module in the package rather than a hand-written list. The list is how this test
-    quietly stops covering a new module — the previous version named three files, and any fourth
-    was unchecked from the day it landed.
-    """
-    modules = sorted(p for p in PACKAGE.glob("*.py") if p.name not in FRAMEWORK_AWARE)
-    assert len(modules) >= 5, "the scan found almost nothing; the package layout moved"
-
-    for module in modules:
-        assert not IMPORTS_LANGGRAPH.search(module.read_text()), (
-            f"{module.name} imports LangGraph. Nodes depend on our port, never on the "
-            "framework — that is the whole protection against ADR-012 becoming lock-in."
-        )
-
-
-def test_the_import_scan_catches_a_lazy_import() -> None:
-    """The negative control. A pattern that matches nothing passes every file.
-
-    The lazy form is the one that matters: it is how the adapter imports the framework, and it is
-    what an import check on the loaded module would miss entirely.
-    """
-    assert IMPORTS_LANGGRAPH.search("def run(self):\n    from langgraph.graph import START\n")
-    assert IMPORTS_LANGGRAPH.search("import langgraph\n")
-    assert not IMPORTS_LANGGRAPH.search("# see langgraph_adapter.py for the other path\n")
-
-
-def test_the_framework_aware_modules_still_exist() -> None:
-    """A rename would empty the exemption list and leave the scan above passing vacuously."""
-    for name in FRAMEWORK_AWARE:
-        assert (PACKAGE / name).exists(), f"{name} moved; the exemption above now guards nothing"
-
-
-def test_both_orchestrators_produce_the_same_findings(
-    case: LoadedCase, retriever: InMemoryRetriever
-) -> None:
-    """Same case, same stub, two orchestrators, identical output.
-
-    With a real model the two candidates return different analyses — they are two runs of a
-    probabilistic process, not two evaluations of a function. Pinning the model response is what
-    turns "similar" into "identical" and makes the port's claim checkable at all.
-    """
-    results = {
-        name: orchestrator.run(case, _gateway(_finding()), retriever, RUN_ID)
-        for name, orchestrator in ORCHESTRATORS.items()
-    }
-    shapes = {
-        name: [(f.finding_id, f.title, f.supporting_evidence) for f in result.findings]
-        for name, result in results.items()
-    }
-    assert shapes["hand-rolled"] == shapes["langgraph"]
-    assert len(shapes["hand-rolled"]) == len(criteria_for(case.manifest))
 
 
 # ---------------------------------------------------------------------------
@@ -564,23 +484,6 @@ def test_synthesis_is_validated_like_everything_else(
     assert result.synthesis is not None
     assert not result.synthesis.findings
     assert any(expected in reason for reason in result.synthesis.rejected)
-
-
-def test_both_orchestrators_synthesize_identically(
-    case: LoadedCase, retriever: InMemoryRetriever
-) -> None:
-    """The second stage is a real graph edge in one and a second statement in the other."""
-    shapes = {}
-    for name, orchestrator in ORCHESTRATORS.items():
-        result = orchestrator.run(
-            case, _synth_gateway(contradictions=[_contradiction()]), retriever, RUN_ID
-        )
-        assert result.synthesis is not None, name
-        shapes[name] = (
-            [f.finding_id for f in result.synthesis.findings],
-            [(o.evidence_id, o.criterion_ids) for o in result.synthesis.overlaps],
-        )
-    assert shapes["hand-rolled"] == shapes["langgraph"]
 
 
 # ---------------------------------------------------------------------------
@@ -1001,7 +904,7 @@ def _budgets(**overrides: Any) -> Budgets:
     return Budgets(**base)
 
 
-@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+@pytest.mark.parametrize("name", ["hand-rolled"])
 def test_an_exhausted_budget_stops_the_run_and_says_so(
     case: LoadedCase, retriever: InMemoryRetriever, name: str
 ) -> None:
@@ -1028,7 +931,7 @@ def test_an_exhausted_budget_stops_the_run_and_says_so(
     assert len(gateway.calls) < len(result.criteria)
 
 
-@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+@pytest.mark.parametrize("name", ["hand-rolled"])
 def test_a_truncated_run_does_not_pay_for_synthesis(
     case: LoadedCase, retriever: InMemoryRetriever, name: str
 ) -> None:
@@ -1049,7 +952,7 @@ def test_a_truncated_run_does_not_pay_for_synthesis(
     assert not any(c.node_id == "synthesis" for c in gateway.calls)
 
 
-@pytest.mark.parametrize("name", ["hand-rolled", "langgraph"])
+@pytest.mark.parametrize("name", ["hand-rolled"])
 def test_a_run_inside_its_budget_is_untouched(
     case: LoadedCase, retriever: InMemoryRetriever, name: str
 ) -> None:

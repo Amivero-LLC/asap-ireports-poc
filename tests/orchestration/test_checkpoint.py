@@ -50,12 +50,13 @@ from ireports_orchestration.checkpoint import (
     synthesis_from_json,
     synthesis_to_json,
 )
-from ireports_orchestration.langgraph_adapter import DURABILITY, strict_serde
 from ireports_retrieval import InMemoryRetriever, RetrievedSpan
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CASE_DIR = REPO_ROOT / "spikes" / "lambda_demo" / "cases" / "AMI-SYN-FIN-001"
-BOTH = ["hand-rolled", "langgraph"]
+BOTH = ["hand-rolled"]
+"""One implementation since ADR-029. Kept as a list so a team adding their own behind
+`Orchestrator` inherits this suite by adding one name."""
 
 DSN = os.environ.get(
     "IREPORTS_SPIKE_DSN",
@@ -182,16 +183,13 @@ def _run_id(tag: str) -> str:
 
 
 def _in_memory(name: str) -> Checkpointing:
-    """One checkpointer per path, both ephemeral, both surviving between two `run()` calls.
+    """An ephemeral checkpointer that survives between two `run()` calls.
 
-    **The two arguments are not interchangeable and that is the point.** `store` is a map of node
-    id to result; `saver` is LangGraph's superstep bookkeeping. They are not two implementations
-    of one interface, so `Checkpointing` carries a slot for each — see its docstring.
+    Takes the orchestrator name because this used to return a different object per path — a
+    `CheckpointStore` here, a framework checkpointer there. Kept so the signature does not churn
+    if a second implementation is ever added behind `Orchestrator`.
     """
-    if name == "langgraph":
-        from langgraph.checkpoint.memory import InMemorySaver
-
-        return Checkpointing(saver=InMemorySaver(serde=strict_serde()))
+    assert name in BOTH
     return Checkpointing(store=InMemoryCheckpointStore())
 
 
@@ -704,67 +702,6 @@ def test_checkpointing_without_a_store_or_a_dsn_refuses_to_pretend() -> None:
     resume from, at the moment it is least able to do anything about it."""
     with pytest.raises(ValueError, match="nowhere durable"):
         Checkpointing().run_checkpoint("run_nowhere")
-
-
-# ---------------------------------------------------------------------------
-# ORCH-01's checkpoint clauses, set in code
-# ---------------------------------------------------------------------------
-
-
-def test_durability_is_sync() -> None:
-    """**ORCH-01, and LangGraph's default is wrong for us.**
-
-    `put_writes` is submitted to a background executor, so persistence normally runs concurrently
-    with the next node — a process killed in that window loses a write it appears to have made.
-    Under Lambda the process is killed on a timer, which is exactly that window.
-
-    Asserted on a named constant because a durability setting written once inside a method is a
-    setting nobody can check.
-    """
-    assert DURABILITY == "sync"
-
-
-def test_checkpoint_deserialization_is_strict_and_never_unpickles() -> None:
-    """**ORCH-01's other clause.** The permissive default imports and executes any callable stored
-    in checkpoint data on load — LangGraph says so itself in
-    `langgraph/checkpoint/serde/_msgpack.py`. Selected in code, not by an environment variable,
-    so an environment that forgot to set it cannot lose it.
-    """
-    serde = strict_serde()
-
-    assert serde.pickle_fallback is False
-    # Private, and asserted anyway: this is the setting whose *default* imports and executes
-    # arbitrary callables, so "we set it" is worth more than "we did not reach into the object".
-    assert serde._allowed_msgpack_modules is None
-
-
-def test_strict_deserialization_silently_downgrades_our_types_to_dicts() -> None:
-    """**The measured trap that decides how the LangGraph state channels are shaped.**
-
-    Under strict mode a type outside the allowlist is not *rejected* — it comes back as a plain
-    `dict`, with a warning on stderr and no exception. And it only happens on the resume path,
-    because a run that never crashes never deserializes. A `SpecialistOutcome` in a state channel
-    would therefore work perfectly until the first crash in production and then fail on
-    `.findings`.
-
-    That is why `FanOutState` carries JSON and why `checkpoint.py`'s codec — written for the
-    hand-rolled path — is imported by the LangGraph one too. The first-party checkpointer saves you
-    the store, not the codec.
-    """
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class _Typed:
-        a: str
-
-    serde = strict_serde()
-    restored = serde.loads_typed(serde.dumps_typed(_Typed(a="x")))
-
-    assert restored == {"a": "x"}
-    assert not isinstance(restored, _Typed), (
-        "strict deserialization returned the real type — if LangGraph has started raising or "
-        "preserving instead, the JSON state channels can be reconsidered"
-    )
 
 
 # ---------------------------------------------------------------------------

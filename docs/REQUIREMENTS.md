@@ -72,8 +72,11 @@ requirement is still owed by both paths — that is what keeps the control arm a
 
 ### The orchestrator spine
 
-- [x] **ORCH-01**: The orchestrator runs on LangGraph **behind this project's own orchestration
-      port**, and no analysis node imports LangGraph.
+- [x] **ORCH-01**: ~~The orchestrator runs on LangGraph~~ **behind this project's own orchestration
+      port**, and no analysis node imports an orchestration framework.
+      **The LangGraph clause is withdrawn (ADR-029)** — the framework was evaluated, not selected,
+      and the adapter was removed. The port survives, and the no-import rule became the stronger
+      guarantee in ORCH-04.
       *Acceptance:* `packages/orchestration/` exposes the port; a test asserts no
       `from langgraph import ...` outside the adapter; `durability="sync"` and strict checkpoint
       deserialization are set in code with tests, because both defaults are wrong here and invisible
@@ -132,7 +135,7 @@ requirement is still owed by both paths — that is what keeps the control arm a
       `INCOMPLETE_DUE_TO_BUDGET`, which **routes to human review rather than to failure** — a
       truncated analysis must be visible to a reviewer.
       *Traces:* C-deterministic-shell · blueprint §8.5 · contracts.md `Budgets`.
-- [ ] **ORCH-04**: LangSmith egress is pinned closed and **proven** closed at every production entry
+- [x] **ORCH-04**: LangSmith egress is pinned closed and **proven** closed at every production entry
       point.
       *Acceptance:* `langsmith.configure(enabled=False)` at each entry point, with a fail-closed test
       per entry point of the same shape as `spikes/langgraph/test_langsmith_egress.py`. The negative
@@ -142,7 +145,7 @@ requirement is still owed by both paths — that is what keeps the control arm a
       obligation."
   - *Status:* **Done 2026-08-18.** `packages/orchestration/port.py` exposes the port; both adapters sit behind it; the no-import test scans every module in the package rather than a hand-written list. The checkpoint clauses closed with node-level checkpointing: `DURABILITY = "sync"` and `strict_serde()` are named module-level values in `langgraph_adapter.py`, set **in code** rather than by environment variable, and `tests/orchestration/test_checkpoint.py` asserts both. A third test pins the reason the second one matters — under strict deserialization LangGraph returns a `dict` rather than refusing, silently, on the resume path only
   - *Status:* **Done 2026-08-19.** `budget.py` enforces run-level wall-clock and token ceilings that **stop the run**, and `gather.py` closed the two clauses that had been deferred four times because they are meaningless in a node that cannot loop: a **no-progress detector** (a retrieval round that surfaces nothing new stops the loop) and **cancellation** (a `CancellationToken` checked before and between rounds, driven in Lambda by `context.get_remaining_time_in_millis()` rather than by our guess at a safe wall clock). `max_model_calls_per_node` is now genuinely enforced, with the analysis attempts reserved so gathering cannot spend the budget the analysis needs. Five statuses keep five distinct facts apart, `CANCELLED` being the newest. **Two wording notes rather than gaps:** the *tool-calls* ceiling is vacuous for the same reason SPEC-01's allowlist is — there is no tool surface to bound — and `INCOMPLETE_DUE_TO_BUDGET` routes to packaging rather than to review, because ADR-022 removed the in-run review gate after this requirement was written
-  - *Status:* **Proven for the bake-off** (`spikes/langgraph/test_langsmith_egress.py`), never re-proven at the demo's entry points
+  - *Status:* **Closed by absence 2026-08-19 (ADR-029)**, which is a stronger answer than the one this requirement asked for. It wanted `langsmith.configure(enabled=False)` at each entry point with a fail-closed test per entry point. Removing the LangGraph adapter removed `langchain-core` and with it `langsmith` from everything shipped, so there is no client to misconfigure. `tests/architecture/test_no_orchestration_framework.py` scans every shipped module for imports **and** every shipped `pyproject.toml` for declarations — a dependency added but not yet imported is already in the built artifact. The bake-off's negative control (`spikes/langgraph/test_langsmith_egress.py`) is retained as the evidence for *why*: an unpinned run POSTs ~90 KB including finding text and succeeds anyway. **Honest limit:** `spikes/` still pulls it into the development tree, and the scan covers `packages/` only
 
 ### Specialist sub-calls
 
@@ -357,7 +360,7 @@ originals below. Recorded **unordered and unscoped**.
 | ORCH-02 | Phase 2 | Substantially done (2026-08-18) |
 | LAMB-01 | Phase 2 | Done (2026-08-18) |
 | ORCH-03 | Phase 2 | Done (2026-08-19) |
-| ORCH-04 | Phase 2 | Pending |
+| ORCH-04 | Phase 2 | Done (2026-08-19) |
 | SPEC-01 | Phase 2 | Pending |
 | VAL-02 | Phase 2 | Pending (reduced to logging, ADR-021) |
 | RETR-01 | Phase 2 | Pending (restored, ADR-021) |

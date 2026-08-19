@@ -59,13 +59,17 @@ BASE_REQUIREMENTS = (
 )
 
 CANDIDATES: dict[str, tuple[str, ...]] = {
-    # The control adds nothing to the dependency tree — a thread pool and a loop.
+    # **Empty, and that is the headline (ADR-029).** The orchestrator adds nothing to the
+    # dependency tree — it is a thread pool and a loop. There was a second entry here carrying
+    # `langgraph` and `langgraph-checkpoint-postgres`, which brought `langchain-core` and with it
+    # `langsmith`: a client capable of exporting run content, in a package that will one day carry
+    # CUI. Removing the adapter removed all four from anything that ships, which is a stronger
+    # guarantee than configuring the telemetry client closed (ORCH-04).
+    #
+    # The dict shape stays so a deployment that needs a second orchestrator has somewhere to put
+    # it; `tests/architecture/test_no_orchestration_framework.py` is what stops that being a
+    # framework.
     "handrolled": (),
-    # `langgraph-checkpoint-postgres` is the checkpointer, and it is this candidate's alone: the
-    # hand-rolled package checkpoints through `checkpoint.py` and `psycopg` above. That the two
-    # paths need different packages to do the same job is ADR-026 showing up in a requirements
-    # file.
-    "langgraph": ("langgraph>=1.2.10,<1.3", "langgraph-checkpoint-postgres>=3.1,<4"),
 }
 
 CANDIDATE_ENV: dict[str, str] = {
@@ -73,7 +77,6 @@ CANDIDATE_ENV: dict[str, str] = {
     # name as `ORCHESTRATORS` keys it. Keeping the mapping here means the handler never has to
     # guess which spelling it was given.
     "handrolled": "hand-rolled",
-    "langgraph": "langgraph",
 }
 
 

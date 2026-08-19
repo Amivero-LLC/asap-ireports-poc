@@ -63,8 +63,9 @@ ENV_VARS_FILE = SPIKE_DIR / ".env-vars.json"
 
 FUNCTIONS: dict[str, str] = {
     "hand-rolled": "HandRolledFunction",
-    "langgraph": "LangGraphFunction",
 }
+"""One function since ADR-029 removed the LangGraph adapter. The mapping stays because
+`--candidate` selects by orchestrator name, and a deployment may add its own."""
 
 # Everything the gateway reads, and nothing else. An allowlist rather than "forward the whole
 # environment": a container that inherits the host's variables acquires whatever else happens to

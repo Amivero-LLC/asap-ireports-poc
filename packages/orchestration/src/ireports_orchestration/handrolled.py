@@ -1,7 +1,9 @@
 """No orchestration framework. A thread pool and a loop.
 
-The control arm of ADR-024. Kept honest by running the same case through the same shared
-specialist as `langgraph_adapter.py` and being asserted to produce identical output.
+**The reference implementation** (ADR-027). It was the control arm of a comparison against a
+LangGraph adapter; the comparison closed, the adapter was removed (ADR-029), and what is left is
+this. `docs/handoff/orchestration-decision.md` is the record of why, and
+`docs/handoff/build-guide.md` §6 explains the fan-out and the branch to a team building from it.
 """
 
 from __future__ import annotations
@@ -33,14 +35,16 @@ from .trace import RunTrace
 class HandRolledOrchestrator:
     """A thread pool and a loop.
 
-    Runtime-width fan-out changed **nothing** here: `pool.map` never cared how long the list was.
-    That is the finding, and it is worth stating before reading the LangGraph version, which had
-    to be rebuilt around a different primitive to do the same thing.
+    Two properties are worth naming before reading it, because both were measured against a
+    framework implementation of the same behaviour and both came out in favour of the boring
+    version:
 
-    **Node-level checkpointing is four lines**, and they are visible below: ask the checkpoint
-    before working, tell it after. There is no state machine, no resume mode, and no second code
-    path — a resumed run is the same run, over a store that already has rows in it. Read
-    `langgraph_adapter.py` next; that is where the comparison is.
+    **Runtime-width fan-out changed nothing here** — `pool.map` never cared how long the list was.
+    The framework version had to be rebuilt around a different primitive to do the same thing.
+
+    **Node-level checkpointing is four lines**, visible below: ask the checkpoint before working,
+    tell it after. There is no state machine, no resume mode, and no second code path — a resumed
+    run is the same run over a store that already has rows in it.
     """
 
     name = "hand-rolled"

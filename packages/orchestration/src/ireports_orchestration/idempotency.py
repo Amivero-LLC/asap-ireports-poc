@@ -283,7 +283,7 @@ class PostgresCallStore:
     def __init__(self, dsn: str, *, create_schema: bool = True) -> None:
         # Imported here, not at module scope, so a deployment without the `postgres` extra can
         # still import this module and use `InMemoryCallStore` — the same arrangement the
-        # LangGraph adapter uses, for the same packaging reason.
+        # retrieval and gateway adapters use, for the same packaging reason.
         self._dsn = dsn
         if create_schema:
             with self._conn() as conn:
