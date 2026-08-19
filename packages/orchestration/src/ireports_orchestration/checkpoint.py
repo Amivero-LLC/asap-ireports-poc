@@ -65,6 +65,10 @@ we never did it."
 `FAILED` is left out too, and less obviously. A transport fault or a timeout may not recur, the
 gateway's call store means a re-attempt costs nothing if the call actually completed, and recording
 a failure as a checkpoint would freeze a transient fault into the run forever.
+
+`CANCELLED` is out for the same reason as `SKIPPED_BUDGET`: a criterion the run was told to stop
+before analysing is work still to do, and a resume that treated it as done would deliver a
+deliberately truncated case as a complete one.
 """
 
 

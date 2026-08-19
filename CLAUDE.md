@@ -82,6 +82,7 @@ conditional routing, a type-checked tree, and budgets. Five results so far, in `
 | Early termination on a budget | 3 lines | 3 lines — a null result, and marginally cheaper for the synthesis skip |
 | Node-level checkpointing | Ask, then tell — 4 lines | `PostgresSaver` writes no SQL, **and** costs a shared JSON codec, a raise-not-return budget stop, and 8 lost writes in 24 crash trials against 0 |
 | Resume across a Lambda boundary | 3 + 3 = 6 paid calls | 3 + 3 = 6 paid calls — a third null result |
+| A bounded loop inside a node | No change | No change — a fourth null result, predicted in writing beforehand |
 
 **ADR-024's trigger has fired.** It said the call gets made when idempotent crash/resume works;
 it works, on both paths, across a real SAM invocation boundary. The complete scorecard and a
@@ -89,9 +90,8 @@ recommendation (custom Python as the reference implementation, LangGraph retaine
 arm) are in **ADR-027, recorded as *proposed*** — the evidence is one-sided but the decision is the
 project owner's. **Read ADR-027 before doing orchestration work.**
 
-One thing the evidence does *not* cover, and it is named in ADR-027: **multi-step specialists
-(roadmap item 6) are unbuilt**, and a loop inside a node is where a graph framework was most
-expected to earn its keep.
+**The evidence set is now complete.** ADR-027 named multi-step specialists as the one unmeasured
+capability; they were built 2026-08-19 and discriminated between the paths not at all.
 
 **No module that analyzes a case may import LangGraph.** A test enforces it by scanning every
 module in `packages/orchestration/`, exempting only `langgraph_adapter.py` and `registry.py`
@@ -111,15 +111,15 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema in `schemas/` |
 | `packages/gateway/` | `ModelGateway` port — `litellm` (proven live), `bedrock` (never run), `stub`. Plus an `EmbeddingGateway`, Titan via the proxy |
 | `packages/retrieval/` | OpenSearch hybrid vector + lexical, mandatory case filter, bounded K. **All field names in `mapping.py`** (Q-02) |
-| `packages/orchestration/` | Criteria routing, retrieval-backed specialists, synthesis, budgets, gateway-level idempotency, node-level checkpointing, and both orchestrators behind `port.py` |
+| `packages/orchestration/` | Criteria routing, multi-step retrieval-backed specialists, synthesis, budgets, gateway-level idempotency, node-level checkpointing, and both orchestrators behind `port.py` |
 | `spikes/lambda_demo/` | The runnable wrapper — case loading off disk, envelope packaging, Lambda handler, `run_case.py`, and the synthetic corpus |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
 | `evals/` | Scores **saved run files** offline — nine invariants, each descending from a real incident, plus a corpus check no single run can make about itself. `uv run python -m evals.score_run` |
-| Tests | 324 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 351 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
-**Not built:** multi-step specialists, authority routing from policy packs, ingestion, `apps/`,
-ground-truth agreement scoring (VAL-03/04).
+**Not built:** authority routing from policy packs, ingestion, `apps/`, ground-truth agreement
+scoring (VAL-03/04), a specialist tool surface.
 
 **Classification is the model's answer, not a constant (ADR-025).** The specialist picks from three
 of the contract's five values; `contradiction` and `information_gap` stay synthesis's. An
@@ -143,6 +143,13 @@ and a resume restores it instead of re-executing it — hand-rolled store in `ch
 ORCH-01**, whose last two clauses were `durability="sync"` and strict deserialization; both are now
 named module-level values in `langgraph_adapter.py` with tests. Only work that *happened* is
 recorded — a budget-skipped criterion is deliberately not, because it is the next invocation's job.
+
+**Multi-step specialists landed 2026-08-19 (ADR-028).** `gather.py` retrieves, asks a cheap
+fast-tier model whether that was enough, and retrieves again — bounded by a no-progress detector, a
+cancellation token, and `max_model_calls_per_node`, which **closes ORCH-03**. Read ADR-028's
+consequences before defending it: on two live runs the assessor asked for more once in ten criteria,
+that refinement surfaced nothing new, and the loop cost roughly +50% tokens. The machinery is
+proven; the value is not.
 
 **SPEC-01's tool-allowlist clause is *vacuous* rather than satisfied** — a specialist has no tool
 surface to allowlist — so it stays unchecked in `docs/REQUIREMENTS.md`, deliberately.

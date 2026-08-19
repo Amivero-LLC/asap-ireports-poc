@@ -59,12 +59,19 @@ from ireports_gateway.port import (
     ModelRefusalError,
     ModelRequest,
 )
-from ireports_retrieval import RetrievalError, RetrievedSpan, Retriever
+from ireports_retrieval import RetrievedSpan, Retriever
 
-from .budget import BudgetBreach, BudgetLedger
+from .budget import DEFAULT_BUDGETS, BudgetBreach, BudgetLedger
 from .case import LoadedCase
 from .coercion import cap_rejections, normalize_array
 from .criteria import Criterion
+from .gather import (
+    DEFAULT_MAX_STEPS,
+    CancellationToken,
+    GatheredEvidence,
+    GatherStop,
+    gather_evidence,
+)
 
 _LOG = logging.getLogger(__name__)
 
@@ -233,6 +240,18 @@ class SpecialistStatus(StrEnum):
     FAILED = "failed"
     """Transport, timeout, or a structured-output fault. The criterion was not analysed."""
 
+    CANCELLED = "cancelled"
+    """The run was asked to stop while this criterion was in flight or waiting.
+
+    **A fifth distinct fact, and the fourth time this enum has grown for the same reason.** A
+    criterion nobody analysed because the run was cancelled is not one that broke, not one that
+    came back clean, and not one that ran out of budget — cancellation is a *decision*, and the
+    others are outcomes. Folding it into `SKIPPED_BUDGET` would report a deliberate stop as a
+    ceiling nobody set, and send whoever reads it to tune a number that was never the problem.
+
+    Not recorded in a checkpoint (`RESUMABLE_STATUSES`): cancelled work is work still to do.
+    """
+
     SKIPPED_BUDGET = "skipped_budget"
     """A run-level ceiling was already crossed when this criterion came up, so no call was made.
 
@@ -395,6 +414,21 @@ def skipped_for_budget(
     )
 
 
+def cancelled(criterion: Criterion, case_id: str, run_id: str, reason: str) -> SpecialistOutcome:
+    """A criterion the run was told to stop before analysing. **ORCH-03.**
+
+    Public for the same reason `skipped_for_budget` is: both orchestrators construct it, and a
+    policy decision made separately in two places is one they will eventually disagree about.
+    """
+    return _not_analysed(
+        criterion,
+        case_id,
+        run_id,
+        SpecialistStatus.CANCELLED,
+        f"{criterion.criterion_id}: run cancelled ({reason}) — criterion NOT analysed",
+    )
+
+
 def _evidence_block(spans: tuple[RetrievedSpan, ...]) -> str:
     """The retrieved record, as the model sees it.
 
@@ -408,7 +442,7 @@ def _evidence_block(spans: tuple[RetrievedSpan, ...]) -> str:
 
 
 def _not_analysed(
-    criterion: Criterion, case_id: str, run_id: str, status: SpecialistStatus, reason: str
+    criterion: Criterion, case_id: str, run_id: str, status: SpecialistStatus, *reasons: str
 ) -> SpecialistOutcome:
     """A criterion that was not analysed, carrying why.
 
@@ -424,7 +458,7 @@ def _not_analysed(
         case_id,
         run_id,
         findings=(),
-        rejected=(reason,),
+        rejected=reasons,
         status=status,
     )
 
@@ -449,6 +483,8 @@ def analyze(
     attempts: int = 2,
     k: int = DEFAULT_K,
     ledger: BudgetLedger | None = None,
+    cancel: CancellationToken | None = None,
+    max_steps: int = DEFAULT_MAX_STEPS,
 ) -> SpecialistOutcome:
     """One criterion, typed and citation-checked findings out.
 
@@ -467,19 +503,33 @@ def analyze(
     and already-paid-for work. Under Lambda that is worse still, because the invocation is retried
     automatically and every model call is paid for again — into the same refusal.
     """
-    # Retrieve once, outside the retry loop. A retry exists because the model returned an
-    # unusable *shape*, not because the record changed — re-running the query would cost an
-    # embedding call to get the identical spans back.
-    try:
-        spans = retriever.retrieve(case_id=case.manifest.case_id, query=criterion.question, k=k)
-    except RetrievalError as exc:
+    # **Gathering is a bounded loop, and it is outside the retry loop.** A retry exists because the
+    # model returned an unusable *shape*, not because the record changed — re-running the queries
+    # would cost embedding calls to get the identical spans back.
+    #
+    # `calls_reserved=attempts` is what stops gathering from eating the analysis's budget. A node
+    # that spends its whole allowance deciding what to read and then cannot afford to read it has
+    # failed in a way that looks like success.
+    gathered = gather_evidence(
+        criterion,
+        case.manifest.case_id,
+        retriever,
+        gateway,
+        k=k,
+        budgets=ledger.budgets if ledger is not None else DEFAULT_BUDGETS,
+        max_steps=max_steps,
+        ledger=ledger,
+        cancel=cancel,
+        calls_reserved=attempts,
+    )
+    if gathered.failed is not None:
         _LOG.warning(
             "retrieval failed",
             extra={
                 "run_id": run_id,
                 "case_id": case.manifest.case_id,
                 "criterion_id": criterion.criterion_id,
-                "error": type(exc).__name__,
+                "error": type(gathered.failed).__name__,
             },
         )
         return _not_analysed(
@@ -487,9 +537,23 @@ def analyze(
             case.manifest.case_id,
             run_id,
             SpecialistStatus.FAILED,
-            f"{criterion.criterion_id}: retrieval failed ({exc}) — criterion NOT analysed",
+            f"{criterion.criterion_id}: retrieval failed ({gathered.failed}) — "
+            "criterion NOT analysed",
         )
 
+    if gathered.stopped is GatherStop.CANCELLED:
+        # **Cancelled is not failed, not clean, and not over budget** (ORCH-03). Nobody analysed
+        # this criterion and the reason was a decision rather than a fault, so it gets its own
+        # status rather than riding on the nearest one.
+        return _not_analysed(
+            criterion,
+            case.manifest.case_id,
+            run_id,
+            SpecialistStatus.CANCELLED,
+            *gathered.rejected,
+        )
+
+    spans = gathered.spans
     if not spans:
         # Not an error, and not silence either: the criterion was asked and the record had nothing
         # to say. Recorded as such so it is distinguishable from a criterion that was never run.
@@ -505,7 +569,7 @@ def analyze(
             status=SpecialistStatus.COMPLETED,
         )
 
-    outcome = _attempt(criterion, case, spans, gateway, run_id, ledger)
+    outcome = _with_gathering(_attempt(criterion, case, spans, gateway, run_id, ledger), gathered)
     for _ in range(attempts - 1):
         # A refusal or a transport failure is not fixed by asking again, and ADR-015 is explicit
         # that a refusal must not be retried blindly.
@@ -526,6 +590,30 @@ def analyze(
             retrieved=retry.retrieved,
         )
     return outcome
+
+
+def _with_gathering(outcome: SpecialistOutcome, gathered: GatheredEvidence) -> SpecialistOutcome:
+    """Fold the gathering loop's account into the criterion's outcome.
+
+    **The rejections lead and the tokens add.** A loop that stopped on a ceiling, or because a
+    refinement surfaced nothing, or because the assessor was unreachable, has said something about
+    how complete this criterion's evidence is — and a reviewer reading the findings has no other
+    way to learn it. The sufficiency calls were paid for like any others, so they belong in the
+    node's spend rather than only in the run-level ledger.
+
+    `retrieved` is left alone: it already lists every span the analysis was shown, which is the
+    union across every round.
+    """
+    return SpecialistOutcome(
+        result=outcome.result,
+        criterion=outcome.criterion,
+        rejected=gathered.rejected + outcome.rejected,
+        resolved_model=outcome.resolved_model,
+        input_tokens=outcome.input_tokens + gathered.input_tokens,
+        output_tokens=outcome.output_tokens + gathered.output_tokens,
+        status=outcome.status,
+        retrieved=outcome.retrieved,
+    )
 
 
 def _attempt(

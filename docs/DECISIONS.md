@@ -1191,11 +1191,25 @@ node.
 costs one file, and it has earned its keep four times by making a silent failure loud. It should
 stop being a candidate and start being a control.
 
-**What would reopen this, and it is not hypothetical.** **Multi-step specialists (roadmap item 6)
-are not built**, and ADR-024 named them alongside crash/resume as the strongest signal available.
-A loop inside a node with accumulated state is where a graph framework is most expected to earn its
-keep, and nothing here measures that. A reader taking this recommendation should know that one of
-the two capabilities the deferral was built around is still unmeasured.
+**What would have reopened this — now closed.** ADR-024 named multi-step specialists alongside
+crash/resume as the strongest signal available, and when this entry was first written they were not
+built. **They were built on 2026-08-19 (roadmap item 6) and discriminated between the paths not at
+all.** The loop lives inside `analyze`, which both orchestrators call, so neither can see it; the
+one place it could have crossed the boundary was cancellation, and that needed the same
+`raise`-instead-of-`return` treatment already recorded for budget stops. One asymmetry deepened,
+none added — and `gather.py` recorded that prediction in its docstring *before* the measurement, so
+the result cannot be read backwards.
+
+So the evidence set ADR-024 asked for is complete. **An eighth row for the scorecard:**
+
+| | Hand-rolled | LangGraph |
+|---|---|---|
+| A bounded loop inside a node | No change | No change. **Null result** |
+
+What a framework would plausibly still win is a loop the *orchestrator* has to see — one whose
+steps are separately checkpointable, so a crash mid-loop resumes mid-loop. That is a different
+design, it costs the one-shared-specialist arrangement that makes these two paths comparable at
+all, and nothing in this project needs it today.
 
 **Consequences if accepted.**
 
@@ -1206,3 +1220,68 @@ the two capabilities the deferral was built around is still unmeasured.
    arm honest.
 4. ADR-012 is amended, not erased: its reasoning was sound on the evidence it had, and the specific
    thing that changed is that the checkpointing seam turned out to be wider than two lines.
+
+## ADR-028 — A specialist may search again; it may not do anything else
+
+**Date:** 2026-08-19 · **Status:** Accepted
+
+**Context.** A specialist got one query — the criterion's own text — and whatever it returned. That
+is the right first version and it has a specific blind spot: evidence that answers the criterion in
+different words is invisible. The criterion asks about "contacts with foreign nationals"; the record
+says "my wife's parents live in Ankara". One hop, and one hop is exactly what a single query does
+not make.
+
+Roadmap item 6 closes that, and it is the first node in this system that can loop. That makes it
+also the first place ORCH-03's no-progress detector and cancellation clauses mean anything, and the
+first place `max_model_calls_per_node` can actually be reached.
+
+**Decision.**
+
+1. **The loop is retrieval only.** Retrieve → a cheap fast-tier call asking whether the record is
+   sufficient and what is missing → retrieve again → analyse. The specialist gains no capability
+   beyond re-querying the same `Retriever`.
+2. **Seven named stop reasons**, not a boolean: sufficient, step limit, no progress, call budget,
+   run budget, cancelled, assessor unavailable. Each is a different fact about how complete the
+   criterion's evidence is.
+3. **An unusable assessment stops the loop.** A refusal, a transport failure, unparseable output,
+   off-schema output, or "insufficient" with no query to run — all stop gathering and analyse what
+   round one found.
+4. **`CANCELLED` becomes a fifth `SpecialistStatus`**, and cancellation is driven in Lambda by
+   `context.get_remaining_time_in_millis()`.
+5. **Gathering reserves the analysis's budget.** `calls_reserved` is subtracted from
+   `max_model_calls_per_node` before the loop decides it can afford another round.
+
+**Why retrieval only, and not a tool surface.** A tool-dispatching specialist would make SPEC-01's
+allowlist clause *real* rather than vacuous, which is genuinely attractive — that clause is
+currently unmet-by-absence and this repo says so rather than claiming it. It was declined because it
+changes the threat model (a node choosing between capabilities is a different thing to secure than
+a node that can only search), it is a larger piece of work than the loop it would ride in on, and
+nothing in the analysis needs a second capability yet. When a specialist gains a tool, that wants
+its own ADR and its own threat model.
+
+**Why stopping is the fail-safe direction when the assessor breaks.** The alternative is to keep
+querying when the thing that decides whether to keep querying is broken — paid calls on the strength
+of an answer nobody got. Stopping costs the criterion nothing it would have had before the loop
+existed: it is analysed on what round one retrieved, which is exactly what a single-step specialist
+had.
+
+**Why the triage call is on the fast tier.** Paying thinking-tier rates to decide whether to pay
+thinking-tier rates is how a loop stops being worth having. It also bounds what the call sees —
+600-character excerpts rather than whole chapters, because the question is "is this the right *kind*
+of evidence" and the synthesis stage has already shown once what happens when a stage is handed more
+than it needs (`max_tokens` exhausted while thinking, no text returned).
+
+**Consequences.**
+
+- **The value is unproven and the cost is not.** Two live runs: the assessor asked for more once in
+  ten criteria, that refinement surfaced nothing new, and the loop cost roughly +50% tokens and 2.4×
+  wall clock on the small case. `docs/ROADMAP.md` item 6 has the numbers. **Before this is defended
+  it should be tuned and re-measured, or defaulted to `max_steps=1` and kept for cases that need
+  it.** Recording that here rather than in a commit message, because the next person to look at this
+  will otherwise assume it earns its keep.
+- **`max_model_calls_per_node` changed meaning.** It used to be satisfied by a bounded retry — two
+  calls against a limit of five. It is now a real ceiling on a real loop.
+- **Every offline test that counts model calls had to learn the difference** between an analysis
+  call and a triage sub-call. `node_id` carries it: an analysis call is the bare node id, a sub-call
+  is suffixed.
+- **SPEC-01 stays unchecked**, and its allowlist clause stays vacuous rather than satisfied.

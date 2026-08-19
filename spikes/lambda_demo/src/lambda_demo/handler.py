@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +36,7 @@ from typing import Any
 from ireports_domain import Budgets
 from ireports_orchestration import ORCHESTRATORS, Checkpointing
 from ireports_orchestration.budget import DEFAULT_BUDGETS
+from ireports_orchestration.gather import CancellationToken
 
 from .case_loader import available_cases, load_case
 from .package import build_envelope
@@ -80,7 +82,10 @@ def _budgets() -> Budgets:
     default is 780s against this function's 900s timeout. Lowering it below the work required is
     how LAMB-01 is demonstrated without waiting thirteen minutes for a real ceiling.
     """
-    raw = os.environ.get("IREPORTS_MAX_WALL_CLOCK_SECONDS")
+    # `.strip()`, not just a falsiness check: a variable set to whitespace is as absent as one
+    # set to "" and `float("  ")` raises just as loudly. Found by a test, not by a live run — the
+    # live run only paid for the empty-string half.
+    raw = (os.environ.get("IREPORTS_MAX_WALL_CLOCK_SECONDS") or "").strip()
     if not raw:
         return DEFAULT_BUDGETS
     return Budgets(
@@ -88,6 +93,67 @@ def _budgets() -> Budgets:
         max_output_tokens=DEFAULT_BUDGETS.max_output_tokens,
         max_wall_clock_seconds=float(raw),
     )
+
+
+DEFAULT_DEADLINE_RESERVE_SECONDS = 60.0
+"""How long before Lambda's own deadline the run is asked to stop. **ORCH-03's cancellation
+driver, and the reason that clause is not vacuous.**
+
+`max_wall_clock_seconds` is a *guess* at how long is safe — 780s against a 900s timeout, chosen
+once and wrong for every function configured differently. `context.get_remaining_time_in_millis()`
+is the platform's own answer, it accounts for time already spent in this invocation, and it is
+correct whatever the function's timeout is set to. The budget stays as the backstop for every
+caller that has no Lambda context at all.
+"""
+
+
+def _deadline_reserve() -> float:
+    """Read at call time, and `or` rather than a `get` default. **Both halves cost a live run.**
+
+    Every variable in `template.yaml` is declared with an **empty** default, because
+    `sam local invoke --env-vars` only overrides variables the template already declares. So inside
+    the container the variable is present and empty — and `os.environ.get(name, "60")` returns the
+    default only when a name is *absent*, never when it is blank. `float("")` then raises.
+
+    It raised at **module scope**, which is the second half: the handler's own docstring already
+    says configuration is read inside the function so a bad value surfaces as this invocation's
+    error rather than as an init failure Lambda reports without a message. This constant was
+    written at module scope and did exactly that — `errorType: ValueError`, no case id, no
+    variable name, before a single line of the handler ran.
+    """
+    raw = (os.environ.get("IREPORTS_DEADLINE_RESERVE_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_DEADLINE_RESERVE_SECONDS
+    return float(raw)
+
+
+def _deadline_watchdog(context: object, token: CancellationToken) -> threading.Timer | None:
+    """Cancel the run shortly before Lambda would kill it.
+
+    **A timeout is not a graceful stop.** The platform kills the process, the invocation is
+    retried, and everything the run had in memory is gone — the checkpoint from a node that was
+    mid-flight, most importantly. Stopping *ourselves* first is what turns a kill into a resume,
+    and it is the same argument `max_wall_clock_seconds` makes with a worse clock.
+
+    Returns the timer so the caller can cancel it; a daemon thread would not hold the process open,
+    but leaving a live timer behind in a warm container means a later invocation inherits it.
+    """
+    remaining_ms = getattr(context, "get_remaining_time_in_millis", None)
+    if remaining_ms is None:
+        # No Lambda context — a host run, or a test. The wall-clock budget still applies.
+        return None
+
+    reserve = _deadline_reserve()
+    delay = remaining_ms() / 1000 - reserve
+    if delay <= 0:
+        token.cancel("less than the reserve remained when the invocation started")
+        return None
+
+    reason = f"within {reserve:.0f}s of the Lambda deadline"
+    timer = threading.Timer(delay, lambda: token.cancel(reason))
+    timer.daemon = True
+    timer.start()
+    return timer
 
 
 def _new_run_id(candidate: str) -> str:
@@ -182,9 +248,23 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         gateway = idempotent
         checkpointing = Checkpointing(dsn=STATE_DSN)
 
-    result = ORCHESTRATORS[CANDIDATE].run(
-        case, gateway, retriever, run_id, budgets=_budgets(), checkpointing=checkpointing
-    )
+    # The platform's clock, not ours. Cancels the run with time left to checkpoint and return.
+    cancel = CancellationToken()
+    watchdog = _deadline_watchdog(context, cancel)
+    try:
+        result = ORCHESTRATORS[CANDIDATE].run(
+            case,
+            gateway,
+            retriever,
+            run_id,
+            budgets=_budgets(),
+            checkpointing=checkpointing,
+            cancel=cancel,
+        )
+    finally:
+        # A warm container is reused, and a live timer left behind would cancel someone else's run.
+        if watchdog is not None:
+            watchdog.cancel()
     _log(
         "run_complete",
         run_id=run_id,
@@ -194,6 +274,7 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         tokens=result.total_tokens,
         resumed=len(result.resumed_nodes),
         replayed_calls=idempotent.calls_replayed if idempotent else 0,
+        cancelled=cancel.cancelled,
     )
 
     payload: dict[str, Any] = {
@@ -220,6 +301,10 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         # facts a reader scans for "did this run actually cover the case".
         "incomplete_due_to_budget": result.breach is not None,
         "budget_breach": str(result.breach) if result.breach else None,
+        # Cancelled and over-budget are different facts and the payload keeps them apart, for the
+        # reason `SpecialistStatus.CANCELLED` exists: one is a decision, the other is a ceiling.
+        "cancelled": cancel.cancelled,
+        "cancel_reason": cancel.reason or None,
         # **What a second invocation of this run id would find, and what this one inherited.**
         # `durable` false means neither: the run is correct and a Lambda retry would re-do and
         # re-pay for every call, which is the failure LAMB-01 exists to close.

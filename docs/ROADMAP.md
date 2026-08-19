@@ -210,14 +210,59 @@ And a reporting bug worth naming: the summary said `synthesis skipped — nothin
 when synthesis had **run and failed**. Both states inferred from one null. Same shape as
 refused-versus-clean, one layer up.
 
-## 6 · Multi-step specialists
+## 6 · Multi-step specialists ✅ built 2026-08-19 — machinery proven, value not
 
-Retrieve → assess whether the evidence is sufficient → retrieve again → then analyze. A loop inside a
-node, bounded by item 4.
+Retrieve → assess whether the evidence is sufficient → retrieve again → then analyze. A loop inside
+a node, bounded at every edge: `max_steps`, `max_model_calls_per_node`, `max_evidence_per_node`, the
+run ledger, a no-progress detector, and a cancellation token. Seven distinct stop reasons, because a
+loop that cannot say why it stopped is one that looks like it found everything.
 
-**Tells us:** this is where graph frameworks earn their keep, and where a hand-rolled version starts
-needing real state management rather than a thread pool. Along with item 7, this is the strongest
-signal we will get.
+**This closes ORCH-03.** Its last two clauses — a no-progress detector and cancellation — were
+deferred four times with the same reasoning: they are meaningless in a node that cannot loop. And
+`max_model_calls_per_node` finally means something; it was previously "enforced by the bounded retry
+in `analyze`", which was true and thin at two calls against a limit of five.
+
+**What it told us, and it is not the answer anyone wanted.** Two live runs, hand-rolled path:
+
+| | `AMI-SYN-FIN-001` (8 spans) | `CASE-TEST-001` (34 spans) |
+|---|---|---|
+| Sufficiency calls | 5 | 5 |
+| Criteria that asked for more | **1** | **0** |
+| New evidence a refinement surfaced | **0** | — |
+| Tokens | 46,824 (~32k before) | 159,505 (~95k before) |
+| Wall clock | 143s (~60s before) | 357s |
+
+**The assessor says "sufficient" almost always, and on two cases the loop added no evidence at
+all.** The one refinement it did attempt surfaced nothing new, and the no-progress detector stopped
+it — the machinery working exactly as designed, on a question that did not need asking.
+
+Two readings, and they are not distinguishable yet:
+
+1. **The prompt is too conservative.** It explicitly tells the assessor that asking reflexively
+   costs a paid call and returns the same spans. That guard is there because a loop that always
+   loops is worse than no loop, and it may be over-tuned.
+2. **`k=6` against an 8-span case is already the whole record.** There is nothing a second query
+   *could* find. On the 34-span case that argument is weaker, and the assessor still never asked.
+
+**What is not in doubt is the cost:** roughly +50% tokens and 2.4× wall clock on the small case,
+for five calls that changed nothing. Before this is defended it should be either tuned and
+re-measured, or turned off by default with `max_steps=1` and kept for cases that need it.
+
+**And what it told us about ADR-024 — nothing, which was predicted in writing beforehand.** The
+loop lives *inside* a node, so neither orchestrator can see it. `gather.py` said before it was
+measured that if anything discriminated here it would be cancellation crossing the node boundary,
+and cancellation turned out to be the same `_StopWork`-versus-`return` asymmetry already recorded
+for budgets — deepened, not new. **This was the last capability ADR-027 named as unmeasured.**
+
+**A live run also found a real bug**, in the way live runs keep doing: `IREPORTS_DEADLINE_RESERVE_SECONDS`
+was read with `os.environ.get(name, "60")` at *module scope*. Every variable in `template.yaml` is
+declared with an empty default, so in the container the name is present and blank, the default never
+applies, and `float("")` raised before a line of the handler ran — `ValueError`, no variable name,
+no case id. See `LESSONS.md`.
+
+**Deliberately not built: a tool surface.** The loop re-queries the same `Retriever` and can do
+nothing else, so SPEC-01's allowlist clause stays *vacuous* rather than satisfied. That clause
+becomes real the day a specialist can choose between capabilities.
 
 ---
 

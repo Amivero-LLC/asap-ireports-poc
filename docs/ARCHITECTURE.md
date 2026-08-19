@@ -194,7 +194,7 @@ output**, so it costs nothing and can be re-run as the checks improve.
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema. The vocabulary everything else speaks |
 | `packages/gateway/` | The **only** component permitted to call a model. One port, three adapters |
 | `packages/retrieval/` | Hybrid vector + lexical search, mandatory case filter, every field name in one module |
-| `packages/orchestration/` | Criteria routing, specialists, synthesis, and both orchestrators behind one port. **The reference implementation** |
+| `packages/orchestration/` | Criteria routing, multi-step specialists, synthesis, budgets, idempotency, checkpointing, and both orchestrators behind one port. **The reference implementation** |
 | `spikes/lambda_demo/` | The runnable wrapper: case loading off disk, envelope packaging, Lambda handler, and the synthetic corpus |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 
@@ -240,9 +240,12 @@ Six comparison points so far, two of them null results:
 | **Early termination on a budget** | 3 lines | 3 lines — and marginally cheaper for the synthesis skip, because the routing point already existed |
 | **Node-level checkpointing** | Ask the checkpoint, then tell it — 4 lines, plus a store, an upsert and a read | `PostgresSaver.setup()` writes the schema for you. **And** a shared JSON codec is mandatory, the budget stop must raise rather than return, and 8 of 24 crash trials lost the write for a call already paid for, against 0 |
 | **Resume across a Lambda boundary** | 3 + 3 = 6 paid calls, against ~6 for one run | Identical |
+| **A bounded loop inside a node** | No change | No change — the loop is inside `analyze`, which both call |
 
-Three are null results and count as evidence: joining, early termination, and — most consequentially
-— the Lambda invocation boundary itself. All three were expected to favour LangGraph and none did.
+Four are null results and count as evidence: joining, early termination, the Lambda invocation
+boundary itself, and the multi-step specialist. All four were expected to favour LangGraph and none
+did — the last one predicted in writing before it was measured, in `gather.py`'s own docstring, so
+the result could not be read backwards.
 
 **The last row is the first result that runs against LangGraph on the dimension it was chosen for.**
 Not decisively — `PostgresSaver` genuinely removes the storage layer, which is real work — but the
@@ -258,11 +261,13 @@ The complete scorecard and a recommendation live in **ADR-027**, recorded as *pr
 custom Python the reference implementation and keep the LangGraph adapter as a conformance arm. The
 evidence is one-sided; the decision is the project owner's.
 
-**One capability the deferral was built around is still unmeasured**, and it is named there:
-multi-step specialists — a bounded loop inside a node, with state accumulated across steps — are
-not built, and that is where a graph framework is most expected to earn its keep.
+**The evidence set ADR-024 asked for is complete.** Multi-step specialists were the last
+unmeasured capability and were built 2026-08-19. What a framework would plausibly still win is a
+loop the *orchestrator* has to see — one whose steps are separately checkpointable, so a crash
+mid-loop resumes mid-loop. That is a different design, it costs the one-shared-specialist
+arrangement that makes these two paths comparable at all, and nothing here needs it.
 
-**Still to come:** multi-step specialists.
+**Still to come:** Part 4 — local AWS parity, and one command end to end.
 
 ### The same run, drawn twice
 

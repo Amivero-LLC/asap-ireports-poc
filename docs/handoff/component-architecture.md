@@ -257,13 +257,17 @@ flowchart TD
     subgraph SPECIALIST["3. One specialist sub-call - one instance per criterion, in parallel"]
         direction TB
         STEP3A["Case-filtered, bounded-K<br/>vector + lexical query<br/>through the retrieval port"]
+        STEP3LOOP{"Is this enough to assess the criterion?<br/>one cheap fast-tier call<br/>BUILT"}
         STEP3B["Retrieved spans become<br/>the evidence the model reasons over"]
         STEP3C["One call through the ModelGateway port<br/>on a tier alias. A specialist has no tool<br/>surface at all, so SPEC-01's allowlist<br/>clause is vacuous rather than met"]
         STEP3D["Deserialized into a SpecialistResult:<br/>criterion, provenance, and<br/>proposed findings with citations"]
-        STEP3A --> STEP3B --> STEP3C --> STEP3D
+        STEP3A --> STEP3LOOP
+        STEP3LOOP -- "no, and here is what to search for<br/>bounded by max_steps and a<br/>no-progress detector" --> STEP3A
+        STEP3LOOP -- "yes, or a ceiling stopped it" --> STEP3B
+        STEP3B --> STEP3C --> STEP3D
     end
 
-    SHELL{"4. Deterministic shell checks<br/>wall clock and token ceilings - BUILT<br/>no-progress detector and cancellation<br/>NOT BUILT - ORCH-03"}
+    SHELL{"4. Deterministic shell checks<br/>wall clock and token ceilings, a no-progress<br/>detector, and cancellation<br/>BUILT"}
     BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>still packaged and delivered, not failed<br/>BUILT"]
     AGG["Aggregate the SpecialistResults<br/>no aggregate score, ever (ADR-014)"]
     SYNTH["4b. Cross-criterion synthesis<br/>overlap computed, conflicts and gaps by model<br/>skipped when there is nothing to reason across<br/>BUILT"]
@@ -284,8 +288,10 @@ flowchart TD
     STEP7B -. "handed off" .-> ASAPREVIEW
 ```
 
-**This diagram is the target shape, and one clause of one box does not exist yet** — marked
-`NOT BUILT` with the requirement that owns it. It is drawn whole because the shape is what a
+**Every box in this diagram now resolves to real code.** It was drawn whole while three of them
+did not, because the shape is what a government team is being asked to build; §4's build-state
+table remains the authority, and the two are kept separate on the page rather than in a reader's
+head. It is drawn whole because the shape is what a
 government team is being asked to build; §4's build-state table is the authority on what resolves
 to real code today. A design diagram that quietly reads as a status diagram is the specific way a
 handoff overstates itself, so the two are separated on the page rather than in a reader's head.
@@ -390,6 +396,7 @@ reason to move the code.
 | Hand-rolled adapter behind the port | `BUILT` | `packages/orchestration/src/ireports_orchestration/handrolled.py` | ADR-024. A thread pool and a loop, running the same shared specialist as the LangGraph adapter and asserted to produce identical output. What ORCH-05 called a second adapter and cut |
 | LangGraph adapter behind the port | `BUILT` | `packages/orchestration/src/ireports_orchestration/langgraph_adapter.py` | ORCH-01. `Send`-based runtime fan-out, a `join` node, conditional routing. No analysis module imports LangGraph — enforced by a source scan over every module in the package, exempting this one and `registry.py` |
 | Criteria selection from the case manifest | `BUILT` | `packages/orchestration/src/ireports_orchestration/criteria.py` | Fan-out width is runtime data, derived from `requested_analyses` × `policy_pack_ids`. **A stub for authority routing (ROUT-01), not the router** — it intersects what was asked with what the catalog offers and cannot decline or add a criterion |
+| Multi-step evidence gathering (specialist loop) | `BUILT` | `packages/orchestration/src/ireports_orchestration/gather.py` | Roadmap item 6, ORCH-03. Retrieve → cheap fast-tier sufficiency triage → retrieve again, bounded by `max_steps`, `max_model_calls_per_node`, `max_evidence_per_node`, the run ledger, a **no-progress detector**, and a **cancellation token**. Seven distinct stop reasons, because a loop that cannot say why it stopped is one that looks like it found everything. Not a tool surface — SPEC-01's allowlist clause stays vacuous |
 | Cross-criterion synthesis | `BUILT` | `packages/orchestration/src/ireports_orchestration/synthesis.py` | Evidence overlap computed by set arithmetic; contradictions and information gaps by one model call. Emits `ProposedFinding`s only — no summary, no ranking, no aggregate (ADR-014) |
 | Node-level checkpointing (hand-rolled store) | `BUILT` | `packages/orchestration/src/ireports_orchestration/checkpoint.py` | ORCH-01/ORCH-02. One row per completed node, JSON re-validated through the contracts on read, committed inside the node. A budget-skipped criterion is deliberately not recorded — it is the next invocation's work. Row integrity is a known gap (checkpoint-threat-model.md) |
 | Node-level checkpointing (LangGraph `PostgresSaver`) | `BUILT` | `packages/orchestration/src/ireports_orchestration/langgraph_adapter.py` | ORCH-01. `durability="sync"` and strict deserialization set **in code**, both tested. Shares the row above's codec, because strict deserialization silently downgrades our types to `dict` — the first-party checkpointer saves you the store, not the codec |

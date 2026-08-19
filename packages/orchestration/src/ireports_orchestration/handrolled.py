@@ -16,8 +16,16 @@ from ireports_retrieval import Retriever
 from .case import LoadedCase
 from .checkpoint import Checkpointing, RunCheckpoint
 from .criteria import Criterion, criteria_for
-from .port import MAX_PARALLEL, RunResult, join_and_sort, new_ledger, should_synthesize
-from .specialist import SpecialistOutcome, analyze, skipped_for_budget
+from .gather import CancellationToken
+from .port import (
+    MAX_PARALLEL,
+    RunResult,
+    join_and_sort,
+    new_ledger,
+    should_synthesize,
+    stop_reason,
+)
+from .specialist import SpecialistOutcome, analyze, cancelled, skipped_for_budget
 from .synthesis import synthesize
 
 
@@ -44,6 +52,7 @@ class HandRolledOrchestrator:
         run_id: str,
         budgets: Budgets | None = None,
         checkpointing: Checkpointing | None = None,
+        cancel: CancellationToken | None = None,
     ) -> RunResult:
         started = datetime.now(UTC)
         criteria = criteria_for(case.manifest)
@@ -69,11 +78,18 @@ class HandRolledOrchestrator:
             # to do — so the saving is that a criterion reached after a ceiling costs nothing
             # instead of a model call. With `max_workers` below the fan-out width, later criteria
             # genuinely have not started yet when an earlier one exhausts the budget.
-            breach = ledger.breach()
+            breach, cancel_reason = stop_reason(ledger, cancel)
+            if cancel_reason:
+                return cancelled(criterion, case.manifest.case_id, run_id, cancel_reason)
             if breach is not None:
                 return skipped_for_budget(criterion, case.manifest.case_id, run_id, breach)
 
-            outcome = analyze(criterion, case, gateway, retriever, run_id, ledger=ledger)
+            # The token goes *into* the node too. Stopping only between criteria would leave a
+            # cancelled run waiting on however long the specialist's own loop takes to finish,
+            # which under a Lambda deadline is the time it does not have.
+            outcome = analyze(
+                criterion, case, gateway, retriever, run_id, ledger=ledger, cancel=cancel
+            )
             # Committed here, inside the worker, rather than after the pool joins. That is what
             # lets a crash mid-fan-out keep the specialists that finished; a commit after the
             # barrier would keep none of them.
@@ -88,9 +104,14 @@ class HandRolledOrchestrator:
 
         # The routing decision, as an `if`. That is the whole of it on this path, and the budget
         # adds one clause: a run that has already overspent does not pay for a second stage.
-        breach = ledger.breach()
+        breach, cancel_reason = stop_reason(ledger, cancel)
         synthesis = checkpoint.restore_synthesis() if checkpoint is not None else None
-        if synthesis is None and breach is None and should_synthesize(outcomes):
+        if (
+            synthesis is None
+            and breach is None
+            and not cancel_reason
+            and should_synthesize(outcomes)
+        ):
             synthesis = synthesize(case, tuple(outcomes), criteria, gateway, run_id)
             if checkpoint is not None:
                 checkpoint.record_synthesis(synthesis)
@@ -105,5 +126,5 @@ class HandRolledOrchestrator:
             synthesis=synthesis,
             consumption=ledger.consumption(),
             resumed_nodes=checkpoint.resumed if checkpoint is not None else (),
-            breach=ledger.breach(),
+            breach=breach,
         )

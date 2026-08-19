@@ -75,8 +75,23 @@ def _finding(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+SUFFICIENT = json.dumps({"sufficient": True, "missing": "", "next_query": ""})
+
+
+def _sufficiency_answers() -> dict[str, str]:
+    """A sufficiency reply per criterion, for the specialist's evidence loop.
+
+    Without these the stub answers the loop's triage call with its findings JSON, the loop reads
+    that as off-schema and stops — correct production behaviour for a broken assessor, and noise
+    in a test that is about something else.
+    """
+    return {f"{c.node_id}:sufficiency": SUFFICIENT for c in CATALOG}
+
+
 def _gateway(*findings: dict[str, Any]) -> StubGateway:
-    return StubGateway(default=json.dumps({"findings": list(findings)}))
+    return StubGateway(
+        responses=_sufficiency_answers(), default=json.dumps({"findings": list(findings)})
+    )
 
 
 class _SlowGateway(StubGateway):
@@ -88,7 +103,9 @@ class _SlowGateway(StubGateway):
     """
 
     def __init__(self, delay: float, *findings: dict[str, Any]) -> None:
-        super().__init__(default=json.dumps({"findings": list(findings)}))
+        super().__init__(
+            responses=_sufficiency_answers(), default=json.dumps({"findings": list(findings)})
+        )
         self._delay = delay
 
     def complete(self, request):  # type: ignore[no-untyped-def]
@@ -367,12 +384,120 @@ def test_a_second_invocation_finishes_what_the_first_started(monkeypatch, retrie
         f"the first invocation completed {len(completed)} criteria and the second restored "
         f"{second['resumed_nodes']} — the difference was re-executed"
     )
-    specialist_calls = [c for c in second_gateway.calls if c.node_id != "synthesis"]
+    # Analysis calls only; the evidence loop's triage sub-calls carry a suffixed node id.
+    specialist_calls = [
+        c for c in second_gateway.calls if c.node_id != "synthesis" and ":" not in c.node_id
+    ]
     assert len(specialist_calls) == len(skipped), (
         f"the second invocation ran {len(specialist_calls)} specialists for {len(skipped)} "
         "outstanding criteria — it either redid restored work or skipped outstanding work"
     )
     assert second["envelope"] is not None, "the resumed run produced no envelope"
+
+
+# ---------------------------------------------------------------------------
+# The deadline watchdog (ORCH-03's cancellation driver)
+# ---------------------------------------------------------------------------
+
+
+class _Context:
+    """Just enough of a Lambda context: the one method the watchdog reads."""
+
+    def __init__(self, remaining_seconds: float) -> None:
+        self._remaining = remaining_seconds
+
+    def get_remaining_time_in_millis(self) -> int:
+        return int(self._remaining * 1000)
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_a_blank_environment_variable_is_not_an_absent_one(monkeypatch, value: str) -> None:
+    """**The bug a live run found, and it cost an invocation to find.**
+
+    Every variable in `template.yaml` is declared with an empty default, because `sam local invoke
+    --env-vars` only overrides variables the template already declares. So in the container the
+    name is *present and blank* — and `os.environ.get(name, "60")` applies its default only when
+    the name is absent. `float("")` raised at module scope, before the handler ran, and Lambda
+    reported `ValueError` with no variable name and no case id.
+
+    Every other configuration read in this file already used `or`. This one did not, and nothing
+    tested it because no offline test had ever set the variable to blank.
+    """
+    monkeypatch.setenv("IREPORTS_DEADLINE_RESERVE_SECONDS", value)
+    assert handler_module._deadline_reserve() == handler_module.DEFAULT_DEADLINE_RESERVE_SECONDS
+
+    monkeypatch.setenv("IREPORTS_DEADLINE_RESERVE_SECONDS", "12")
+    assert handler_module._deadline_reserve() == 12
+
+
+@pytest.mark.parametrize("value", ["", "  "])
+def test_a_blank_wall_clock_ceiling_falls_back_to_the_default(monkeypatch, value: str) -> None:
+    """The same check on the other numeric variable, which got it right by accident of style."""
+    monkeypatch.setenv("IREPORTS_MAX_WALL_CLOCK_SECONDS", value)
+    assert handler_module._budgets().max_wall_clock_seconds == 780
+
+
+def test_a_run_with_no_time_left_is_cancelled_before_it_spends_anything(
+    monkeypatch, retriever
+) -> None:
+    """**The clause that would otherwise be vacuous.**
+
+    SPEC-01's tool allowlist is unmet because nothing can exercise it, and this repo says so rather
+    than claiming it. Cancellation would be in the same position if nothing ever cancelled — so it
+    is driven by the platform's own clock, and this is the proof that the wiring runs.
+
+    A context reporting less time than the reserve cancels before the first criterion, so the run
+    returns having spent nothing and having said why.
+    """
+    monkeypatch.setattr(handler_module, "CASES_DIR", CASE_DIR.parent)
+    monkeypatch.setattr(handler_module, "STATE_DSN", None)
+    _offline_retrieval(monkeypatch, retriever)
+    gateway = _gateway(_finding())
+    monkeypatch.setattr("ireports_gateway.build_gateway", lambda *a, **k: gateway)
+
+    payload = handler_module.handler(
+        {"case_id": CASE_DIR.name, "run_id": RUN_ID},
+        _Context(handler_module._deadline_reserve() - 1),
+    )
+
+    assert payload["cancelled"] is True
+    assert "reserve" in (payload["cancel_reason"] or "")
+    assert not gateway.calls, "a run cancelled before it started still paid for calls"
+    # Cancelled is not a budget breach, and the payload keeps them apart.
+    assert payload["incomplete_due_to_budget"] is False
+    assert payload["not_analysed"], "a cancelled run did not say which criteria it skipped"
+
+
+def test_a_run_with_time_to_spare_is_not_cancelled(monkeypatch, retriever) -> None:
+    """The control. Without it the test above passes on a watchdog that cancels everything."""
+    monkeypatch.setattr(handler_module, "CASES_DIR", CASE_DIR.parent)
+    monkeypatch.setattr(handler_module, "STATE_DSN", None)
+    _offline_retrieval(monkeypatch, retriever)
+    monkeypatch.setattr("ireports_gateway.build_gateway", lambda *a, **k: _gateway(_finding()))
+
+    payload = handler_module.handler(
+        {"case_id": CASE_DIR.name, "run_id": RUN_ID},
+        _Context(handler_module._deadline_reserve() + 300),
+    )
+
+    assert payload["cancelled"] is False
+    assert payload["cancel_reason"] is None
+    assert payload["envelope"] is not None
+    assert not payload["not_analysed"]
+
+
+def test_no_lambda_context_leaves_the_wall_clock_budget_in_charge(monkeypatch, retriever) -> None:
+    """A host run, or a test, has no `get_remaining_time_in_millis`. That is not an error — the
+    budget is the backstop, and the watchdog simply does not arm."""
+    monkeypatch.setattr(handler_module, "CASES_DIR", CASE_DIR.parent)
+    monkeypatch.setattr(handler_module, "STATE_DSN", None)
+    _offline_retrieval(monkeypatch, retriever)
+    monkeypatch.setattr("ireports_gateway.build_gateway", lambda *a, **k: _gateway(_finding()))
+
+    payload = handler_module.handler({"case_id": CASE_DIR.name, "run_id": RUN_ID}, object())
+
+    assert payload["cancelled"] is False
+    assert payload["envelope"] is not None
 
 
 # ---------------------------------------------------------------------------

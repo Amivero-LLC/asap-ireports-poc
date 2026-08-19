@@ -34,7 +34,8 @@ from .budget import DEFAULT_BUDGETS, BudgetBreach, BudgetLedger
 from .case import LoadedCase
 from .checkpoint import Checkpointing
 from .criteria import Criterion
-from .specialist import SpecialistOutcome
+from .gather import CancellationToken
+from .specialist import SpecialistOutcome, cancelled, skipped_for_budget
 from .synthesis import SynthesisOutcome
 
 MAX_PARALLEL = int(os.environ.get("IREPORTS_MAX_PARALLEL", "3"))
@@ -114,6 +115,7 @@ class Orchestrator(Protocol):
         run_id: str,
         budgets: Budgets | None = None,
         checkpointing: Checkpointing | None = None,
+        cancel: CancellationToken | None = None,
     ) -> RunResult: ...
 
 
@@ -128,6 +130,48 @@ def should_synthesize(outcomes: list[SpecialistOutcome]) -> bool:
     guaranteed useless.
     """
     return sum(len(o.findings) for o in outcomes) >= 2
+
+
+def stop_reason(
+    ledger: BudgetLedger, cancel: CancellationToken | None
+) -> tuple[BudgetBreach | None, str]:
+    """Whether a criterion should be started at all, and why not. **ORCH-03.**
+
+    Returns `(breach, cancel_reason)`; both empty means carry on. Shared by both orchestrators for
+    the reason `should_synthesize` is: a run stopping for one reason on one path and another reason
+    on the other would be a difference nobody could see and nobody could explain.
+
+    **Cancellation is checked first.** A cancelled run that also happens to be over budget was
+    cancelled — reporting the ceiling would send someone to tune a number that was not the problem.
+    """
+    if cancel is not None and cancel.cancelled:
+        return None, cancel.reason or "no reason given"
+    return ledger.breach(), ""
+
+
+def unstarted(
+    criteria: tuple[Criterion, ...],
+    analysed: set[str],
+    case_id: str,
+    run_id: str,
+    breach: BudgetBreach | None,
+    cancel_reason: str,
+) -> list[SpecialistOutcome]:
+    """Account for every criterion that produced no outcome, carrying why.
+
+    **A truncated run must be visibly truncated**, and it must be visibly truncated the same way on
+    both paths. The hand-rolled orchestrator returns these as values from its worker; the LangGraph
+    one has to reconstruct them, because there a returned value is what marks a task complete and a
+    stopped criterion has to stay pending. Same list either way.
+    """
+    missing = [c for c in criteria if c.node_id not in analysed]
+    if not missing:
+        return []
+    if cancel_reason:
+        return [cancelled(c, case_id, run_id, cancel_reason) for c in missing]
+    if breach is not None:
+        return [skipped_for_budget(c, case_id, run_id, breach) for c in missing]
+    return []
 
 
 def join_and_sort(

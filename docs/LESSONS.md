@@ -644,6 +644,70 @@ own rejection lines — passes whether or not the property holds, because agains
 two measurements are microseconds apart and round to the same decimal. The real test injects a
 clock into the ledger. A test that cannot fail is worse than no test.
 
+### A sufficiency check almost always says "sufficient" `[measured]`
+
+The multi-step specialist retrieves, asks a cheap model whether that was enough, and retrieves again
+if not. Two live runs, five criteria each:
+
+| | `AMI-SYN-FIN-001` (8 spans) | `CASE-TEST-001` (34 spans) |
+|---|---|---|
+| Criteria that asked for more | 1 of 5 | **0 of 5** |
+| New evidence a refinement surfaced | **0** | — |
+| Token cost of asking | +48% | +68% |
+
+The one refinement attempted returned only spans already held, and the no-progress detector stopped
+it. **The machinery is proven and the value is not.**
+
+The prompt is the likeliest cause, and it is a deliberate bias: it tells the assessor that asking
+reflexively costs a paid call and returns the same spans, because a loop that always loops is worse
+than no loop. That guard may be over-tuned. The competing explanation is that `k=6` against an
+8-span case is already the whole record — but that does not explain the 34-span case, where it
+never asked at all.
+
+**The general lesson is about what to measure.** "Does the loop work" and "does the loop help" are
+different questions, and the first one passing is easy to mistake for both. Every stop reason
+fires, every ceiling holds, every test passes — and on two cases the feature retrieved nothing the
+single-step version would not have.
+
+### A blank environment variable is not an absent one `[measured]`
+
+`os.environ.get(name, "60")` applies its default only when the name is **absent**. Every variable in
+`spikes/lambda_demo/template.yaml` is declared with an *empty* default — it has to be, because `sam
+local invoke --env-vars` only overrides variables the template already declares. So inside the
+container the name is present and blank, the default never applies, and `float("")` raises.
+
+It raised at **module scope**, which is the expensive half. The handler already reads its
+configuration inside the function precisely so a bad value surfaces as *that invocation's* error
+with the offending variable named. A module-level constant bypasses all of it:
+
+```json
+{"errorMessage": "could not convert string to float: ''", "errorType": "ValueError",
+ "requestId": "", "stackTrace": ["...handler.py, line 95, in <module>"]}
+```
+
+No case id, no variable name, no run. Every other configuration read in that file already used
+`or`; this one did not, and no offline test had ever set the variable to blank.
+
+Two corrections, and the second was found by the test rather than the run: use `or`, **and**
+`.strip()` — `float("  ")` raises exactly as loudly as `float("")`.
+
+### A loop inside a node is invisible to the orchestrator `[measured]`
+
+Roadmap item 6 was expected to be where a graph framework earns its keep — a bounded loop with
+state accumulated across steps, rather than a thread pool over one-shot calls. Built as designed,
+it discriminated between the two paths **not at all**, and `gather.py` recorded that prediction in
+its own docstring before the measurement so the result could not be read backwards.
+
+The reason is structural: the loop is inside `analyze`, which both orchestrators call, so neither
+can see it. The only place it could have crossed the boundary was cancellation — and cancellation
+turned out to need the *same* `raise`-instead-of-`return` treatment already recorded for budget
+stops, because on the LangGraph path a returned value is what marks a task complete. One asymmetry
+deepened; none added.
+
+**Where a framework would earn its keep is a loop the orchestrator has to see** — one whose steps
+are separately checkpointable, so a crash mid-loop resumes mid-loop. That is a different design,
+and it costs the "one shared specialist" arrangement that makes the two paths comparable at all.
+
 ### Put the attempt counter in the idempotency key `[measured]`
 
 `analyze` retries when a response comes back in an unusable *shape* (ADR-018). The two requests are

@@ -1059,7 +1059,11 @@ def test_a_run_inside_its_budget_is_untouched(
     assert result.breach is None
     assert all(o.status is not SpecialistStatus.SKIPPED_BUDGET for o in result.outcomes)
     assert result.consumption is not None
-    assert result.consumption.model_calls == len(result.criteria)
+    # **Two calls per criterion, and naming why is the point of asserting a number at all.** One
+    # cheap sufficiency triage from the evidence loop, one thinking-tier analysis. A bare
+    # `== len(criteria)` was right until a specialist could take more than one step, and the day
+    # it stopped being right it would have looked like an accounting bug.
+    assert result.consumption.model_calls == len(result.criteria) * 2
 
 
 def test_the_ledger_counts_what_was_spent_not_what_survived(
@@ -1085,11 +1089,16 @@ def test_the_ledger_counts_what_was_spent_not_what_survived(
 def test_a_budget_skipped_criterion_is_not_a_failed_one(
     case: LoadedCase, retriever: InMemoryRetriever
 ) -> None:
-    """Four distinct facts, and the reason `SKIPPED_BUDGET` is not folded into `FAILED`.
+    """Five distinct facts, and the reason none of them is folded into another.
 
     A criterion nobody got to is not one that broke, is not one the model declined, and is
     certainly not one that came back clean. Collapsing any pair of those reports a truncated
     analysis as a complete one.
+
+    **`CANCELLED` is the fifth, added with the multi-step specialist (ORCH-03).** It is the one
+    that is a *decision* rather than an outcome: the run was told to stop. Riding it on
+    `SKIPPED_BUDGET` would report a deliberate stop as a ceiling nobody set, and send whoever reads
+    the run to tune a number that was never the problem.
     """
     result = ORCHESTRATORS["hand-rolled"].run(
         case,
@@ -1101,4 +1110,5 @@ def test_a_budget_skipped_criterion_is_not_a_failed_one(
     statuses = {o.status for o in result.outcomes}
     assert SpecialistStatus.SKIPPED_BUDGET in statuses
     assert SpecialistStatus.FAILED not in statuses
-    assert len({s.value for s in SpecialistStatus}) == 4, "a fifth status needs its own reasoning"
+    assert SpecialistStatus.CANCELLED not in statuses, "a budget stop is not a cancellation"
+    assert len({s.value for s in SpecialistStatus}) == 5, "a sixth status needs its own reasoning"

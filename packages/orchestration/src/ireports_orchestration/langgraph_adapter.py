@@ -64,7 +64,6 @@ from ireports_domain import Budgets
 from ireports_gateway.port import ModelGateway
 from ireports_retrieval import Retriever
 
-from .budget import BudgetBreach
 from .case import LoadedCase
 from .checkpoint import (
     SYNTHESIS_NODE,
@@ -75,8 +74,17 @@ from .checkpoint import (
     synthesis_to_json,
 )
 from .criteria import criteria_for
-from .port import MAX_PARALLEL, RunResult, join_and_sort, new_ledger, should_synthesize
-from .specialist import analyze, skipped_for_budget
+from .gather import CancellationToken
+from .port import (
+    MAX_PARALLEL,
+    RunResult,
+    join_and_sort,
+    new_ledger,
+    should_synthesize,
+    stop_reason,
+    unstarted,
+)
+from .specialist import SpecialistStatus, analyze
 from .synthesis import SynthesisOutcome, synthesize
 
 if TYPE_CHECKING:  # pragma: no cover - import-time typing only
@@ -126,22 +134,24 @@ class FanOutState(TypedDict):
     synthesis: Annotated[list[dict[str, Any]], operator.add]
 
 
-class _BudgetStop(Exception):  # noqa: N818 — a control signal, not an error
-    """Raised by a specialist node when a run-level ceiling is already crossed.
+class _StopWork(Exception):  # noqa: N818 — a control signal, not an error
+    """Raised by a specialist node when the run should stop and this criterion is not done.
 
     **Not an error, and not how the hand-rolled path spells this.** There it is a `return`, because
     a returned value is just a value. Here a returned value is a *completed task*, and LangGraph
-    will never re-run a completed task — so returning a budget skip would tell the checkpoint that
-    the criterion is done, and the second Lambda invocation whose entire job is to finish it would
-    find nothing to do.
+    will never re-run a completed task — so returning a budget skip or a cancellation would tell
+    the checkpoint that the criterion is done, and the next invocation whose entire job is to
+    finish it would find nothing to do.
 
     Raising leaves the task pending. Its completed siblings' writes are already durable under
     `durability="sync"`, so the resume re-runs exactly the criteria nobody got to.
+
+    It carries only a message: `run()` re-derives *why* from the ledger and the token, using the
+    same `stop_reason` both paths share, so the two cannot disagree about which fact stopped a run.
     """
 
-    def __init__(self, breach: BudgetBreach) -> None:
-        super().__init__(str(breach))
-        self.breach = breach
+    def __init__(self, why: str) -> None:
+        super().__init__(why)
 
 
 def strict_serde() -> Any:
@@ -238,6 +248,7 @@ class LangGraphOrchestrator:
         run_id: str,
         budgets: Budgets | None = None,
         checkpointing: Checkpointing | None = None,
+        cancel: CancellationToken | None = None,
     ) -> RunResult:
         from langgraph.graph import END, START, StateGraph
         from langgraph.types import Send
@@ -279,8 +290,8 @@ class LangGraphOrchestrator:
             # clearest thing this file has to say. LangGraph does not dispatch a task whose writes
             # it already holds, so a resumed run never enters this function for a completed
             # criterion. The hand-rolled path has to ask; this one cannot be asked.
-            breach = ledger.breach()
-            if breach is not None:
+            breach, cancel_reason = stop_reason(ledger, cancel)
+            if breach is not None or cancel_reason:
                 # **The same stop, spelled two ways, and the branch is the finding.** A returned
                 # value here is simultaneously "the partial result" and "this task is finished",
                 # and a budget stop needs those separated: it wants to report the skip *and* leave
@@ -296,10 +307,18 @@ class LangGraphOrchestrator:
                 # The hand-rolled path needs one spelling for both cases: a `return` there is only
                 # ever a value.
                 if checkpointing is not None:
-                    raise _BudgetStop(breach)
-                skipped = skipped_for_budget(criterion, case.manifest.case_id, run_id, breach)
-                return {"outcomes": [outcome_to_json(skipped)]}
-            outcome = analyze(criterion, case, gateway, retriever, run_id, ledger=ledger)
+                    raise _StopWork(cancel_reason or str(breach))
+                stopped = unstarted(
+                    (criterion,), set(), case.manifest.case_id, run_id, breach, cancel_reason
+                )
+                return {"outcomes": [outcome_to_json(o) for o in stopped]}
+            outcome = analyze(
+                criterion, case, gateway, retriever, run_id, ledger=ledger, cancel=cancel
+            )
+            if outcome.status is SpecialistStatus.CANCELLED and checkpointing is not None:
+                # Cancelled *inside* the node, after the pre-check passed. Same reasoning: a
+                # returned value would mark it done, and it is not done.
+                raise _StopWork(cancel_reason or "cancelled mid-node")
             # Encoded on the way into state, decoded on the way out — see `FanOutState`. The
             # checkpointer persists whatever this returns, so this *is* the checkpoint write.
             return {"outcomes": [outcome_to_json(outcome)]}
@@ -351,7 +370,7 @@ class LangGraphOrchestrator:
             LangGraph is *cheaper* here: the routing point already existed, so declining to pay for
             a second stage costs one boolean rather than a new edge.
             """
-            if ledger.breach() is not None:
+            if ledger.breach() is not None or (cancel is not None and cancel.cancelled):
                 return END
             if state["synthesis"]:
                 # Restored from a checkpoint by a resumed run. Paying for it again would be the
@@ -410,7 +429,7 @@ class LangGraphOrchestrator:
                 # `DURABILITY` is the ORCH-01 clause; see the constant for why the default loses
                 # writes a crashed process appears to have made.
                 final = compiled.invoke(start, config=config, durability=DURABILITY)
-            except _BudgetStop:
+            except _StopWork:
                 # The graph stopped with work still pending, which is the point. Read back what
                 # did complete; the pending criteria are the next invocation's job.
                 final = dict(compiled.get_state(config).values)
@@ -419,16 +438,15 @@ class LangGraphOrchestrator:
         # Criteria that never produced an outcome were left pending by `_BudgetStop`. The
         # hand-rolled path returns these as values; here they are reconstructed so that both paths
         # report the same run — a truncated analysis must be visibly truncated on either.
+        # Criteria that never produced an outcome were left pending by `_StopWork`. The
+        # hand-rolled path returns these as values; here they are reconstructed through the same
+        # shared helper, so a truncated run is visibly truncated the same way on either path.
+        # Empty on the un-checkpointed path, where the node returned its own stopped outcome.
         analysed = {o.criterion.node_id for o in outcomes}
-        breach = ledger.breach()
-        if breach is not None:
-            # Empty on the un-checkpointed path, where the node returned its own skip. Non-empty
-            # only after a `_BudgetStop` left criteria pending.
-            outcomes.extend(
-                skipped_for_budget(c, case.manifest.case_id, run_id, breach)
-                for c in criteria
-                if c.node_id not in analysed
-            )
+        breach, cancel_reason = stop_reason(ledger, cancel)
+        outcomes.extend(
+            unstarted(criteria, analysed, case.manifest.case_id, run_id, breach, cancel_reason)
+        )
         outcomes.sort(key=lambda o: o.criterion.node_id)
 
         raw_synthesis = final.get("synthesis") or ()

@@ -125,7 +125,7 @@ owner's to accept.
     property is the total paid against one run's cost. **Two honest limits:** the ceiling is set by
     configuration rather than reached naturally, because waiting 780s per demo is not a test; and
     nothing has run on real AWS Lambda, only SAM local (Q-01)
-- [ ] **ORCH-03**: Budgets and loop limits are enforced by the deterministic shell, not requested of
+- [x] **ORCH-03**: Budgets and loop limits are enforced by the deterministic shell, not requested of
       the model.
       *Acceptance:* per-specialist ceilings on model calls, tool calls, retrieved evidence, tokens,
       and wall-clock; a no-progress detector; cancellation support. A node that hits a ceiling emits
@@ -141,7 +141,7 @@ owner's to accept.
       *Traces:* `REQ-langsmith-egress-deny` · ADR-012: "any future entry point inherits this
       obligation."
   - *Status:* **Done 2026-08-18.** `packages/orchestration/port.py` exposes the port; both adapters sit behind it; the no-import test scans every module in the package rather than a hand-written list. The checkpoint clauses closed with node-level checkpointing: `DURABILITY = "sync"` and `strict_serde()` are named module-level values in `langgraph_adapter.py`, set **in code** rather than by environment variable, and `tests/orchestration/test_checkpoint.py` asserts both. A third test pins the reason the second one matters — under strict deserialization LangGraph returns a `dict` rather than refusing, silently, on the resume path only
-  - *Status:* **Substantially done 2026-08-18.** `budget.py` enforces run-level wall-clock and token ceilings that **stop the run** — a crossed ceiling skips remaining criteria without a model call, the run reports which ceiling, and `SpecialistStatus.SKIPPED_BUDGET` keeps that distinct from a failure. `BudgetConsumption` is recorded. Fan-out width, bounded retry and bounded K were already enforced. **Two clauses remain:** no no-progress detector, and no cancellation — both belong with the multi-step specialist (item 6), which is the first node that can loop. `INCOMPLETE_DUE_TO_BUDGET` routes to packaging, not review: ADR-022 removed the in-run review gate, and the requirement's original wording predates it
+  - *Status:* **Done 2026-08-19.** `budget.py` enforces run-level wall-clock and token ceilings that **stop the run**, and `gather.py` closed the two clauses that had been deferred four times because they are meaningless in a node that cannot loop: a **no-progress detector** (a retrieval round that surfaces nothing new stops the loop) and **cancellation** (a `CancellationToken` checked before and between rounds, driven in Lambda by `context.get_remaining_time_in_millis()` rather than by our guess at a safe wall clock). `max_model_calls_per_node` is now genuinely enforced, with the analysis attempts reserved so gathering cannot spend the budget the analysis needs. Five statuses keep five distinct facts apart, `CANCELLED` being the newest. **Two wording notes rather than gaps:** the *tool-calls* ceiling is vacuous for the same reason SPEC-01's allowlist is — there is no tool surface to bound — and `INCOMPLETE_DUE_TO_BUDGET` routes to packaging rather than to review, because ADR-022 removed the in-run review gate after this requirement was written
   - *Status:* **Proven for the bake-off** (`spikes/langgraph/test_langsmith_egress.py`), never re-proven at the demo's entry points
 
 ### Specialist sub-calls
@@ -356,7 +356,7 @@ originals below. Recorded **unordered and unscoped**.
 | ORCH-01 | Phase 2 | Done (2026-08-18) |
 | ORCH-02 | Phase 2 | Substantially done (2026-08-18) |
 | LAMB-01 | Phase 2 | Done (2026-08-18) |
-| ORCH-03 | Phase 2 | Substantially done (2026-08-18) |
+| ORCH-03 | Phase 2 | Done (2026-08-19) |
 | ORCH-04 | Phase 2 | Pending |
 | SPEC-01 | Phase 2 | Pending |
 | VAL-02 | Phase 2 | Pending (reduced to logging, ADR-021) |

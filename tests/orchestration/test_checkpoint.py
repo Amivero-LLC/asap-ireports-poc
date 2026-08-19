@@ -28,6 +28,7 @@ from ireports_domain import Budgets, CaseManifest
 from ireports_gateway import StubGateway
 from ireports_gateway.port import ModelRequest
 from ireports_orchestration import (
+    CATALOG,
     MAX_PARALLEL,
     ORCHESTRATORS,
     Checkpointing,
@@ -111,9 +112,26 @@ def _finding() -> dict[str, Any]:
     }
 
 
+SUFFICIENT = json.dumps({"sufficient": True, "missing": "", "next_query": ""})
+
+
+def _sufficiency_answers(answer: str = SUFFICIENT) -> dict[str, str]:
+    """A sufficiency reply per criterion, keyed the way `StubGateway` keys responses.
+
+    Without these the stub answers the sufficiency call with its findings JSON, the loop reads it
+    as off-schema, and every criterion in every test picks up a rejection line about it. That is
+    the *correct* production behaviour for a broken assessor and it is noise here — an unconfigured
+    double should not make every unrelated test assert around it.
+    """
+    return {f"{c.node_id}:sufficiency": answer for c in CATALOG}
+
+
 def _gateway() -> StubGateway:
     return StubGateway(
-        responses={"synthesis": json.dumps({"contradictions": [], "information_gaps": []})},
+        responses={
+            "synthesis": json.dumps({"contradictions": [], "information_gaps": []}),
+            **_sufficiency_answers(),
+        },
         default=json.dumps({"findings": [_finding()]}),
     )
 
@@ -130,16 +148,28 @@ class _CrashAfter(StubGateway):
     def __init__(self, crash_after: int, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.crash_after = crash_after
+        self._analysis_calls = 0
 
     def complete(self, request: ModelRequest) -> Any:
-        if len(self.calls) >= self.crash_after:
+        # Counted on *analysis* calls only. Crashing on the Nth call of any kind would make the
+        # crash point depend on how many triage calls the evidence loop happened to make, so the
+        # parameterisation would no longer mean "after N completed specialists".
+        if ":" not in request.node_id and self._analysis_calls >= self.crash_after:
             raise RuntimeError("simulated process death mid-fan-out")
+        if ":" not in request.node_id:
+            self._analysis_calls += 1
         return super().complete(request)
 
 
 def _specialist_calls(gateway: StubGateway) -> int:
-    """Model calls that were a specialist analysing a criterion, not the synthesis stage."""
-    return sum(1 for c in gateway.calls if c.node_id != "synthesis")
+    """Calls that were a specialist *analysing* a criterion.
+
+    Excludes synthesis, and excludes the evidence loop's sufficiency triage — those are real paid
+    calls and they are counted by the ledger, but they are not the unit "how many criteria did this
+    run analyse" is measured in. `node_id` carries the distinction: an analysis call is the bare
+    node id, a sub-call is suffixed.
+    """
+    return sum(1 for c in gateway.calls if c.node_id != "synthesis" and ":" not in c.node_id)
 
 
 def _run_id(tag: str) -> str:
@@ -185,7 +215,11 @@ def test_a_resumed_run_does_not_re_execute_a_completed_node(
     run_id = _run_id(f"resume_{crash_after}")
     checkpointing = _in_memory(name)
 
-    crashing = _CrashAfter(crash_after, default=json.dumps({"findings": [_finding()]}))
+    crashing = _CrashAfter(
+        crash_after,
+        responses=_sufficiency_answers(),
+        default=json.dumps({"findings": [_finding()]}),
+    )
     with pytest.raises(RuntimeError):
         ORCHESTRATORS[name].run(case, crashing, retriever, run_id, checkpointing=checkpointing)
 
@@ -248,7 +282,11 @@ def test_a_resumed_run_is_the_same_run(
     with pytest.raises(RuntimeError):
         ORCHESTRATORS[name].run(
             case,
-            _CrashAfter(2, default=json.dumps({"findings": [_finding()]})),
+            _CrashAfter(
+                2,
+                responses=_sufficiency_answers(),
+                default=json.dumps({"findings": [_finding()]}),
+            ),
             retriever,
             run_id,
             checkpointing=checkpointing,
@@ -499,7 +537,9 @@ def test_the_fan_out_never_runs_wider_than_max_parallel(
                 with lock:
                     live -= 1
 
-    gateway = _Counting(default=json.dumps({"findings": [_finding()]}))
+    gateway = _Counting(
+        responses=_sufficiency_answers(), default=json.dumps({"findings": [_finding()]})
+    )
     result = ORCHESTRATORS[name].run(case, gateway, retriever, _run_id("width"))
 
     assert len(result.criteria) > MAX_PARALLEL, "the case cannot exercise the bound"
@@ -780,12 +820,14 @@ def test_a_resume_across_processes_skips_completed_nodes(
     script.write_text(
         "import json, sys\n"
         f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
-        "from test_checkpoint import _CrashAfter, _finding, _gateway, _load_case, _retriever\n"
+        "from test_checkpoint import (_CrashAfter, _finding, _gateway, _load_case,\n"
+        "                             _retriever, _sufficiency_answers)\n"
         "from ireports_orchestration import ORCHESTRATORS, Checkpointing\n"
         "name, run_id, dsn, crash = sys.argv[1:5]\n"
         "case = _load_case()\n"
         "cp = Checkpointing(dsn=dsn)\n"
-        "gw = (_CrashAfter(int(crash), default=json.dumps({'findings': [_finding()]}))\n"
+        "gw = (_CrashAfter(int(crash), responses=_sufficiency_answers(),\n"
+        "                  default=json.dumps({'findings': [_finding()]}))\n"
         "      if int(crash) >= 0 else _gateway())\n"
         "try:\n"
         "    r = ORCHESTRATORS[name].run(case, gw, _retriever(case), run_id, checkpointing=cp)\n"
@@ -826,7 +868,9 @@ def test_a_resume_across_processes_skips_completed_nodes(
         f"{name}: a second process restored nothing — the checkpoint did not survive the first "
         "process at all, which is the whole claim"
     )
-    specialists = [n for n in payload["calls"] if n != "synthesis"]
+    # Analysis calls only — the evidence loop's triage sub-calls are real and are not the unit
+    # "how many criteria did this process analyse" is counted in. See `_specialist_calls`.
+    specialists = [n for n in payload["calls"] if n != "synthesis" and ":" not in n]
     assert len(specialists) == payload["criteria"] - restored
 
 

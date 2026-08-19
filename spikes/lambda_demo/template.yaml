@@ -74,6 +74,11 @@ Globals:
         # it below the work required is how the two-invocation resume is demonstrated without
         # waiting thirteen minutes for a real ceiling.
         IREPORTS_MAX_WALL_CLOCK_SECONDS: ""
+        # ORCH-03's cancellation driver: how long before Lambda's *own* deadline the run is asked
+        # to stop, read from context.get_remaining_time_in_millis(). The platform's clock knows
+        # this function's real timeout and how much of it is already gone; the wall-clock budget
+        # above is a guess that stays as the backstop. Empty means 60s.
+        IREPORTS_DEADLINE_RESERVE_SECONDS: ""
 
 Resources:
   HandRolledFunction:
