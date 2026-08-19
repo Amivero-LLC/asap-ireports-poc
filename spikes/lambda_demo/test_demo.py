@@ -13,8 +13,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import re
 from pathlib import Path
+from time import sleep
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from ireports_domain import ASAPEnvelope, FindingClassification
@@ -73,6 +77,23 @@ def _finding(**overrides: Any) -> dict[str, Any]:
 
 def _gateway(*findings: dict[str, Any]) -> StubGateway:
     return StubGateway(default=json.dumps({"findings": list(findings)}))
+
+
+class _SlowGateway(StubGateway):
+    """A stub that takes long enough for a wall-clock ceiling to be crossed mid-fan-out.
+
+    Not a latency simulation — the only thing it is for is making the budget stop deterministic in
+    an offline test, because `Budgets` refuses a ceiling below one second and a stub answers in
+    microseconds.
+    """
+
+    def __init__(self, delay: float, *findings: dict[str, Any]) -> None:
+        super().__init__(default=json.dumps({"findings": list(findings)}))
+        self._delay = delay
+
+    def complete(self, request):  # type: ignore[no-untyped-def]
+        sleep(self._delay)
+        return super().complete(request)
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +275,124 @@ def test_handler_reports_an_empty_run_rather_than_crashing(monkeypatch, retrieve
 
 
 # ---------------------------------------------------------------------------
+# Durable state across an invocation boundary (LAMB-01)
+# ---------------------------------------------------------------------------
+
+DSN = os.environ.get(
+    "IREPORTS_SPIKE_DSN",
+    "postgresql://ireports:ireports_local_only@localhost:5436/ireports_spike",
+)
+
+
+def test_a_run_without_a_state_dsn_says_so_rather_than_pretending(monkeypatch, retriever) -> None:
+    """`durable: false` is the honest answer, and it has to be *in the payload*.
+
+    A Lambda timeout is retried automatically. A function running without durable state is one
+    whose retry re-does and re-pays for every model call — correct output, doubled cost, and
+    nothing in the response that would let anyone notice.
+    """
+    monkeypatch.setattr(handler_module, "CASES_DIR", CASE_DIR.parent)
+    monkeypatch.setattr(handler_module, "STATE_DSN", None)
+    _offline_retrieval(monkeypatch, retriever)
+    monkeypatch.setattr(
+        "ireports_gateway.build_gateway", lambda *a, **k: _gateway(_finding()), raising=True
+    )
+
+    payload = handler_module.handler({"case_id": CASE_DIR.name, "run_id": RUN_ID})
+
+    assert payload["durable"] is False
+    assert payload["model_calls"] is None
+    assert payload["resumed_nodes"] == []
+
+
+def test_the_wall_clock_ceiling_comes_from_configuration(monkeypatch) -> None:
+    """The one budget this function overrides, and the only one with a hard reason.
+
+    The shell has to stop before the platform does — that is the only moment a run gets to
+    checkpoint. 780s against a 900s Timeout by default; lowering it is how the two-invocation
+    resume is demonstrated without waiting thirteen minutes.
+    """
+    monkeypatch.delenv("IREPORTS_MAX_WALL_CLOCK_SECONDS", raising=False)
+    assert handler_module._budgets().max_wall_clock_seconds == 780
+
+    monkeypatch.setenv("IREPORTS_MAX_WALL_CLOCK_SECONDS", "12")
+    assert handler_module._budgets().max_wall_clock_seconds == 12
+
+
+@pytest.mark.requires_postgres
+def test_a_second_invocation_finishes_what_the_first_started(monkeypatch, retriever) -> None:
+    """**LAMB-01's mechanism, offline and free.**
+
+    Two calls to the handler with one `run_id` and a durable store: the first stopped by a
+    wall-clock ceiling below the work required, the second with the normal one. The second must
+    restore what the first completed and pay only for what is outstanding.
+
+    This is not the full requirement — that needs two SAM containers, which is
+    `run_case.py --resume-demo` and costs money. What it does prove is everything between the
+    handler and the database, on the same code path the container runs.
+    """
+    monkeypatch.setattr(handler_module, "CASES_DIR", CASE_DIR.parent)
+    monkeypatch.setattr(handler_module, "STATE_DSN", DSN)
+    _offline_retrieval(monkeypatch, retriever)
+
+    run_id = f"run_lamb01_{uuid4().hex[:8]}"
+    event = {"case_id": CASE_DIR.name, "run_id": run_id}
+
+    # **A slow stub and a one-second ceiling, which is the only shape that works.** `breach()` is
+    # checked when a criterion *starts*, and at t=0 nothing has been spent — so the first batch
+    # always runs whatever the ceiling is. The criteria queued behind it are reached at
+    # t≈one-call, which has to be over the line. `Budgets` forbids a ceiling below 1s, so the call
+    # is what gets slowed rather than the limit lowered. Always work done, always work left, which
+    # is the shape LAMB-01 needs.
+    monkeypatch.setattr(
+        "ireports_gateway.build_gateway", lambda *a, **k: _SlowGateway(1.1, _finding())
+    )
+    monkeypatch.setenv("IREPORTS_MAX_WALL_CLOCK_SECONDS", "1")
+    first = handler_module.handler(event)
+
+    assert first["durable"] is True
+    assert first["incomplete_due_to_budget"] is True
+    skipped = [c for c in first["criteria"] if c["status"] == "skipped_budget"]
+    assert skipped, "nothing was left for the second invocation to do"
+    completed = [c for c in first["criteria"] if c["status"] == "completed"]
+    assert completed, "nothing was completed, so there is nothing to resume"
+
+    second_gateway = _gateway(_finding())
+    monkeypatch.setattr("ireports_gateway.build_gateway", lambda *a, **k: second_gateway)
+    monkeypatch.delenv("IREPORTS_MAX_WALL_CLOCK_SECONDS", raising=False)
+    second = handler_module.handler(event)
+
+    assert second["incomplete_due_to_budget"] is False
+    assert len(second["resumed_nodes"]) == len(completed), (
+        f"the first invocation completed {len(completed)} criteria and the second restored "
+        f"{second['resumed_nodes']} — the difference was re-executed"
+    )
+    specialist_calls = [c for c in second_gateway.calls if c.node_id != "synthesis"]
+    assert len(specialist_calls) == len(skipped), (
+        f"the second invocation ran {len(specialist_calls)} specialists for {len(skipped)} "
+        "outstanding criteria — it either redid restored work or skipped outstanding work"
+    )
+    assert second["envelope"] is not None, "the resumed run produced no envelope"
+
+
+# ---------------------------------------------------------------------------
 # The Lambda package
 # ---------------------------------------------------------------------------
+
+
+def _build_module() -> Any:
+    """Load `build.py` by explicit path.
+
+    Not `import build`: `spikes/lambda_fit/` has a `build.py` too, and which one a bare import
+    resolves to depends on how pytest happened to order `sys.path`.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "lambda_demo_build", Path(__file__).parent / "build.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_build_stages_every_package_the_handler_imports() -> None:
@@ -269,12 +406,7 @@ def test_build_stages_every_package_the_handler_imports() -> None:
     Loaded by explicit path rather than `import build`: `spikes/lambda_fit/` has a `build.py` too,
     and which one a bare import resolves to depends on how pytest happened to order sys.path.
     """
-    spec = importlib.util.spec_from_file_location(
-        "lambda_demo_build", Path(__file__).parent / "build.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _build_module()
 
     staged = {name for _src, name in module.SHARED_SOURCE}
     assert staged >= {
@@ -286,3 +418,61 @@ def test_build_stages_every_package_the_handler_imports() -> None:
     }
     for src, _name in module.SHARED_SOURCE:
         assert src.is_dir(), f"{src} is staged by build.py and does not exist"
+
+
+def test_the_package_carries_the_driver_its_durability_depends_on() -> None:
+    """A lazily-imported driver is a driver the build will forget.
+
+    `PostgresCallStore` and `PostgresCheckpointStore` both import `psycopg` inside their methods,
+    so a package built without it imports fine, passes every offline test, and fails on the first
+    invocation that tried to be durable — which is the invocation that mattered. The LangGraph
+    candidate needs a different package for the same job, which is ADR-026 showing up in a
+    requirements file.
+    """
+    module = _build_module()
+
+    assert any(r.startswith("psycopg") for r in module.BASE_REQUIREMENTS), module.BASE_REQUIREMENTS
+    assert any(
+        r.startswith("langgraph-checkpoint-postgres") for r in module.CANDIDATES["langgraph"]
+    ), module.CANDIDATES["langgraph"]
+    assert not module.CANDIDATES["handrolled"], (
+        "the hand-rolled candidate grew a dependency; it checkpoints through checkpoint.py and "
+        "the psycopg above, and 'adds nothing to the dependency tree' is one of its measurements"
+    )
+
+
+HOST_ONLY = frozenset({"IREPORTS_DEMO_CASES_DIR"})
+"""Variables the handler reads that a *deployed* function must never need.
+
+`build.py` stages `cases/` beside the module, so the packaged default is always correct inside the
+container; this override exists only for running the handler on a host. Declaring it in the
+template would say the opposite — that a Lambda might be pointed at some other directory — and the
+cases are baked into the package, so it could not be.
+
+An allowlist rather than a loosened check: a *new* undeclared variable is still a failure.
+"""
+
+
+def test_the_template_declares_every_variable_the_handler_reads() -> None:
+    """**`sam local invoke --env-vars` only overrides variables the template already declares.**
+
+    An undeclared one is dropped without a word, and the function then fails inside the container
+    reporting a missing variable that is plainly set in your shell — which reads as a credentials
+    problem and is not one. That cost an hour once (`docs/LESSONS.md`); this makes it cost a test
+    run.
+
+    Derived from the handler's source rather than a list here, so adding a variable to the handler
+    and forgetting the template is a failure rather than a surprise.
+    """
+    handler_source = (Path(__file__).parent / "src" / "lambda_demo" / "handler.py").read_text()
+    pattern = r'os\.environ\.get\(\s*"(IREPORTS_[A-Z0-9_]+)"'
+    read_by_handler = set(re.findall(pattern, handler_source))
+    template = (Path(__file__).parent / "template.yaml").read_text()
+    declared = set(re.findall(r"^\s*(IREPORTS_[A-Z0-9_]+)\s*:", template, re.MULTILINE))
+
+    assert read_by_handler, "the scan found nothing, so it is not checking anything"
+    assert read_by_handler - HOST_ONLY <= declared, sorted(read_by_handler - HOST_ONLY - declared)
+    assert HOST_ONLY.isdisjoint(declared), (
+        f"{sorted(HOST_ONLY & declared)} is declared in the template, which says a deployed "
+        "function might set it. If that is now true, take it out of HOST_ONLY."
+    )

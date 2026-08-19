@@ -51,12 +51,21 @@ BASE_REQUIREMENTS = (
     "anthropic[bedrock]>=0.121.0",
     "httpx>=0.27",
     "opensearch-py>=3.0,<4",
+    # LAMB-01. Both the call store and the hand-rolled checkpoint store are PostgreSQL-backed, and
+    # both import `psycopg` lazily so the package still builds without it — which is exactly why it
+    # has to be listed here rather than relied upon: a missing driver would not fail the build, it
+    # would fail the first invocation that tried to be durable.
+    "psycopg[binary]>=3.2",
 )
 
 CANDIDATES: dict[str, tuple[str, ...]] = {
     # The control adds nothing to the dependency tree — a thread pool and a loop.
     "handrolled": (),
-    "langgraph": ("langgraph>=1.2.10,<1.3",),
+    # `langgraph-checkpoint-postgres` is the checkpointer, and it is this candidate's alone: the
+    # hand-rolled package checkpoints through `checkpoint.py` and `psycopg` above. That the two
+    # paths need different packages to do the same job is ADR-026 showing up in a requirements
+    # file.
+    "langgraph": ("langgraph>=1.2.10,<1.3", "langgraph-checkpoint-postgres>=3.1,<4"),
 }
 
 CANDIDATE_ENV: dict[str, str] = {

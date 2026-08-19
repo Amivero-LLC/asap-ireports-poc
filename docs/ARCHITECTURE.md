@@ -239,9 +239,10 @@ Six comparison points so far, two of them null results:
 | **Passing `mypy --strict`** | No change | Four suppressions, because the documented `Send` pattern matches no `add_node` overload |
 | **Early termination on a budget** | 3 lines | 3 lines — and marginally cheaper for the synthesis skip, because the routing point already existed |
 | **Node-level checkpointing** | Ask the checkpoint, then tell it — 4 lines, plus a store, an upsert and a read | `PostgresSaver.setup()` writes the schema for you. **And** a shared JSON codec is mandatory, the budget stop must raise rather than return, and 8 of 24 crash trials lost the write for a call already paid for, against 0 |
+| **Resume across a Lambda boundary** | 3 + 3 = 6 paid calls, against ~6 for one run | Identical |
 
-Two are null results and count as evidence: joining and early termination were both expected to
-favour LangGraph and neither did.
+Three are null results and count as evidence: joining, early termination, and — most consequentially
+— the Lambda invocation boundary itself. All three were expected to favour LangGraph and none did.
 
 **The last row is the first result that runs against LangGraph on the dimension it was chosen for.**
 Not decisively — `PostgresSaver` genuinely removes the storage layer, which is real work — but the
@@ -249,11 +250,19 @@ three costs beside it are larger, and one of them (`durability="sync"` narrows t
 and cannot close it, because the write happens outside the node) is a property of the design rather
 than a setting. All measured; all in `docs/LESSONS.md`.
 
-**The decision is still not made, and the reason is specific.** Everything above happens inside one
-process. What motivated the framework question is Lambda's 15-minute ceiling, where a timeout *is*
-the crash and the resume is a *new invocation* — LAMB-01. That is what closes ADR-024.
+**ADR-024's trigger has fired.** It said the framework call gets made when idempotent crash/resume
+works, and it does — on both paths, across a real SAM invocation boundary, where a timeout *is* the
+crash and the resume is a new invocation.
 
-**Still to come:** LAMB-01, then multi-step specialists.
+The complete scorecard and a recommendation live in **ADR-027**, recorded as *proposed*: make
+custom Python the reference implementation and keep the LangGraph adapter as a conformance arm. The
+evidence is one-sided; the decision is the project owner's.
+
+**One capability the deferral was built around is still unmeasured**, and it is named there:
+multi-step specialists — a bounded loop inside a node, with state accumulated across steps — are
+not built, and that is where a graph framework is most expected to earn its keep.
+
+**Still to come:** multi-step specialists.
 
 ### The same run, drawn twice
 

@@ -75,7 +75,7 @@ from .checkpoint import (
     synthesis_to_json,
 )
 from .criteria import criteria_for
-from .port import RunResult, join_and_sort, new_ledger, should_synthesize
+from .port import MAX_PARALLEL, RunResult, join_and_sort, new_ledger, should_synthesize
 from .specialist import analyze, skipped_for_budget
 from .synthesis import SynthesisOutcome, synthesize
 
@@ -371,13 +371,28 @@ class LangGraphOrchestrator:
         graph.add_conditional_edges("join", route_after_specialists, ["synthesis", END])
         graph.add_edge("synthesis", END)
 
+        # **`max_concurrency` is how the fan-out bound reaches this path, and its absence was a
+        # real bug.** `MAX_PARALLEL` bounds the hand-rolled path by being the `ThreadPoolExecutor`'s
+        # `max_workers`; a `Send` fan-out has no such argument, and without this LangGraph runs
+        # every dispatch at once — measured at 8 of 8. Unbounded fan-out over paid model calls is
+        # the failure budgets exist to prevent, and it is worse under Lambda, where a timed-out
+        # invocation is retried automatically and pays for the whole width again.
+        #
+        # It is also what makes a wall-clock stop possible at all: if every criterion starts at
+        # t=0, none of them ever sees a crossed ceiling, and the run has nothing to leave for the
+        # next invocation.
         if checkpointing is None:
             compiled = graph.compile()
-            final: dict[str, Any] = compiled.invoke({"outcomes": [], "synthesis": []})
+            final: dict[str, Any] = compiled.invoke(
+                {"outcomes": [], "synthesis": []}, config={"max_concurrency": MAX_PARALLEL}
+            )
             resumed: tuple[str, ...] = ()
         else:
             saver = _saver(checkpointing)
-            config: RunnableConfig = {"configurable": {"thread_id": run_id}}
+            config: RunnableConfig = {
+                "configurable": {"thread_id": run_id},
+                "max_concurrency": MAX_PARALLEL,
+            }
             compiled = graph.compile(checkpointer=saver)
 
             existing = saver.get_tuple(config) is not None

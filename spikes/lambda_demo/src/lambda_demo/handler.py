@@ -32,12 +32,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ireports_orchestration import ORCHESTRATORS
+from ireports_domain import Budgets
+from ireports_orchestration import ORCHESTRATORS, Checkpointing
+from ireports_orchestration.budget import DEFAULT_BUDGETS
 
 from .case_loader import available_cases, load_case
 from .package import build_envelope
 
 CANDIDATE = os.environ.get("CANDIDATE", "hand-rolled")
+
+STATE_DSN = os.environ.get("IREPORTS_STATE_DSN") or None
+"""Where paid calls and completed nodes are recorded, so a *second invocation* can use them.
+
+**This is the whole of LAMB-01's mechanism.** A Lambda timeout kills the process, and the platform
+retries the invocation — so everything the first attempt learned has to be somewhere that outlived
+it. Unset means no durable state: the run works, and a retry redoes and re-pays for all of it.
+
+Read from the environment rather than the event because it is deployment configuration, not a
+property of the case (ADR-016). Inside a SAM container `localhost` is the container, so a local
+database is reached at `host.docker.internal` — the same footgun as `IREPORTS_OPENSEARCH_URL`.
+"""
 
 CASES_DIR = Path(os.environ.get("IREPORTS_DEMO_CASES_DIR") or Path(__file__).parent / "cases")
 """Where the staged cases live. `build.py` copies `cases/` in beside this module, so the packaged
@@ -56,6 +70,24 @@ if CANDIDATE == "langgraph":
 _INIT_SECONDS = time.perf_counter() - _INIT_STARTED
 
 _RUN_ID = re.compile(r"^run_[A-Za-z0-9][A-Za-z0-9_\-]{0,62}$")
+
+
+def _budgets() -> Budgets:
+    """The run's ceilings, from configuration.
+
+    Only the wall clock is overridable here, and it is the one that matters: **the shell has to
+    stop before the platform does, because that is the only moment it gets to checkpoint.** The
+    default is 780s against this function's 900s timeout. Lowering it below the work required is
+    how LAMB-01 is demonstrated without waiting thirteen minutes for a real ceiling.
+    """
+    raw = os.environ.get("IREPORTS_MAX_WALL_CLOCK_SECONDS")
+    if not raw:
+        return DEFAULT_BUDGETS
+    return Budgets(
+        max_input_tokens=DEFAULT_BUDGETS.max_input_tokens,
+        max_output_tokens=DEFAULT_BUDGETS.max_output_tokens,
+        max_wall_clock_seconds=float(raw),
+    )
 
 
 def _new_run_id(candidate: str) -> str:
@@ -127,6 +159,7 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
     # as this invocation's error, with the offending variable named, rather than as an init
     # failure that Lambda reports without the message.
     from ireports_gateway import build_embedding_gateway, build_gateway
+    from ireports_orchestration.idempotency import IdempotentGateway, PostgresCallStore
     from ireports_retrieval import OpenSearchRetriever, connect
 
     gateway = build_gateway()
@@ -135,7 +168,23 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
     # rather than detected, because the same code has to point at an AWS collection unchanged.
     retriever = OpenSearchRetriever(connect(), build_embedding_gateway())
 
-    result = ORCHESTRATORS[CANDIDATE].run(case, gateway, retriever, run_id)
+    # **The two halves of surviving a timeout, and they are separate on purpose.** The call store
+    # wraps the *gateway*, so a second invocation replays what the first paid for and neither
+    # orchestrator knows it happened. The checkpoint is the *orchestrator's*, so a second
+    # invocation skips nodes the first completed. The first saves money; the second saves wall
+    # clock, and under a 15-minute ceiling wall clock is the resource actually in short supply.
+    idempotent: IdempotentGateway | None = None
+    checkpointing: Checkpointing | None = None
+    if STATE_DSN:
+        # `CREATE TABLE IF NOT EXISTS` on every invocation. Cheap, and the alternative is a
+        # migration step this spike does not have.
+        idempotent = IdempotentGateway(gateway, PostgresCallStore(STATE_DSN), run_id)
+        gateway = idempotent
+        checkpointing = Checkpointing(dsn=STATE_DSN)
+
+    result = ORCHESTRATORS[CANDIDATE].run(
+        case, gateway, retriever, run_id, budgets=_budgets(), checkpointing=checkpointing
+    )
     _log(
         "run_complete",
         run_id=run_id,
@@ -143,6 +192,8 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         findings=len(result.findings),
         rejected=len(result.rejected),
         tokens=result.total_tokens,
+        resumed=len(result.resumed_nodes),
+        replayed_calls=idempotent.calls_replayed if idempotent else 0,
     )
 
     payload: dict[str, Any] = {
@@ -169,6 +220,21 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         # facts a reader scans for "did this run actually cover the case".
         "incomplete_due_to_budget": result.breach is not None,
         "budget_breach": str(result.breach) if result.breach else None,
+        # **What a second invocation of this run id would find, and what this one inherited.**
+        # `durable` false means neither: the run is correct and a Lambda retry would re-do and
+        # re-pay for every call, which is the failure LAMB-01 exists to close.
+        "durable": STATE_DSN is not None,
+        "resumed_nodes": list(result.resumed_nodes),
+        "model_calls": (
+            {
+                # The LAMB-01 number: on a resumed invocation `paid` must cover only outstanding
+                # work, and every call the first invocation completed must appear under `replayed`.
+                "paid": idempotent.calls_made,
+                "replayed": idempotent.calls_replayed,
+            }
+            if idempotent
+            else None
+        ),
         "consumption": (result.consumption.model_dump(mode="json") if result.consumption else None),
         "rejected": list(result.rejected),
         "resolved_models": sorted({o.resolved_model for o in result.outcomes}),

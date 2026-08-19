@@ -22,10 +22,11 @@ orchestrator-spine set, retrieval (RETR-01, RETR-02), the refusal path (VAL-02),
 `durability="sync"` and strict deserialization somewhere to be set. SPEC-01 is still unchecked with
 one clause left, and that clause is *vacuous* rather than unmet: a specialist has no tool surface to
 allowlist. ORCH-02 has both of its halves built — no duplicate paid calls, and no re-executed
-completed nodes — and stays unchecked against its own acceptance wording. **LAMB-01 is the
-untouched hard one**, and it, not ORCH-02, is now what closes the framework question in ADR-024:
-everything measured so far happens inside one process, and the constraint that motivated the whole
-question is an invocation boundary.
+completed nodes — and stays unchecked against its own acceptance wording. **LAMB-01 is done as of
+2026-08-18**, live under SAM local on both paths, which means **ADR-024's own stated trigger has
+fired** — it said the framework call gets made when idempotent crash/resume works. The evidence is
+gathered and one-sided; the decision itself is recorded as proposed in ADR-027 and is the project
+owner's to accept.
 
 ---
 
@@ -96,7 +97,7 @@ question is an invocation boundary.
     bake-off's original 24 — the shape of the measurement is reproduced, not the fixture. And a
     resumed run still *re-executes* completed nodes; it pays for nothing, but it spends wall clock,
     which is the resource LAMB-01 is short of. **Node-level checkpointing closed that half on 2026-08-18** (`checkpoint.py`, ADR-026): a resumed run restores completed nodes instead of re-executing them, proven across a real process boundary on both paths. The checkbox stays open for the acceptance's own reason — the harness is 8 trials, not the bake-off's 24 — and because LAMB-01 is where "resume" stops meaning "a second call to `run()`". One measured caveat, in `docs/LESSONS.md`: on the LangGraph path a crash can lose the checkpoint write for a call that already returned (8 of 24 trials, against 0 hand-rolled), which costs wall clock and not money
-- [ ] **LAMB-01**: A run that exhausts its wall-clock budget inside Lambda checkpoints, returns,
+- [x] **LAMB-01**: A run that exhausts its wall-clock budget inside Lambda checkpoints, returns,
       and resumes in a *new invocation* without re-paying for an in-flight model call.
       *Acceptance:* under SAM local with a wall-clock budget set below the work required, the first
       invocation returns having checkpointed; a second invocation resumes from that checkpoint and
@@ -106,6 +107,24 @@ question is an invocation boundary.
       **Why it matters more here than on a laptop:** Lambda retries automatically, so a timeout
       without idempotency re-pays for every model call on every retry. `spikes/lambda_fit/` proves
       the packaging half; this proves the half that costs money.
+  - *Status:* **Done 2026-08-18, live under SAM local, both paths.**
+    `run_case.py --resume-demo` invokes one `run_id` twice against `AMI-SYN-FIN-001` (five
+    criteria), the first with a 10s wall-clock ceiling:
+
+    | | hand-rolled | langgraph |
+    |---|---|---|
+    | Invocation 1: completed / skipped on budget | 3 / 2 | 3 / 2 |
+    | Invocation 2: nodes restored | 3 | 3 |
+    | Paid model calls, inv 1 + inv 2 | 3 + 3 = **6** | 3 + 3 = **6** |
+    | One uninterrupted run costs | ~6 | ~6 |
+    | Calls replayed by the gateway store | 0 | 0 |
+
+    Both invocations are separate SAM containers, so the only thing connecting them is PostgreSQL —
+    which is exactly the shape of a Lambda timeout. **Replay is 0 and that is the good outcome**: a
+    restored node is never re-executed, so it never asks the gateway. The number that shows the
+    property is the total paid against one run's cost. **Two honest limits:** the ceiling is set by
+    configuration rather than reached naturally, because waiting 780s per demo is not a test; and
+    nothing has run on real AWS Lambda, only SAM local (Q-01)
 - [ ] **ORCH-03**: Budgets and loop limits are enforced by the deterministic shell, not requested of
       the model.
       *Acceptance:* per-specialist ceilings on model calls, tool calls, retrieved evidence, tokens,
@@ -336,7 +355,7 @@ originals below. Recorded **unordered and unscoped**.
 | QUAL-01 | — | Done (2026-08-11) |
 | ORCH-01 | Phase 2 | Done (2026-08-18) |
 | ORCH-02 | Phase 2 | Substantially done (2026-08-18) |
-| LAMB-01 | Phase 2 | Pending |
+| LAMB-01 | Phase 2 | Done (2026-08-18) |
 | ORCH-03 | Phase 2 | Substantially done (2026-08-18) |
 | ORCH-04 | Phase 2 | Pending |
 | SPEC-01 | Phase 2 | Pending |

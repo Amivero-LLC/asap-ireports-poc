@@ -64,6 +64,16 @@ Globals:
         # reached at host.docker.internal. Configuration rather than detection, because the same
         # code has to point at an AWS collection unchanged.
         IREPORTS_OPENSEARCH_URL: ""
+        # LAMB-01: where paid calls and completed nodes are recorded, so a *second* invocation can
+        # use them. A Lambda timeout kills the process and the platform retries the invocation, so
+        # anything the first attempt learned has to outlive it. Same host.docker.internal caveat.
+        # Empty means no durable state — the run still works, and a retry re-pays for everything.
+        IREPORTS_STATE_DSN: ""
+        # The shell's own ceiling, which must fire before the 900s Timeout above does, because
+        # that is the only moment a run gets to checkpoint. Empty means the 780s default. Setting
+        # it below the work required is how the two-invocation resume is demonstrated without
+        # waiting thirteen minutes for a real ceiling.
+        IREPORTS_MAX_WALL_CLOCK_SECONDS: ""
 
 Resources:
   HandRolledFunction:

@@ -239,8 +239,11 @@ The hard one, the highest technical risk, and **the thing that decides the frame
 - ~~On the LangGraph path set `durability="sync"` and strict checkpoint deserialization~~
   ✅ **done 2026-08-18**, in code with tests. **This closes ORCH-01**, whose last two clauses these
   were
-- Then prove it across a Lambda invocation boundary, where a timeout *is* the crash — **LAMB-01,
-  the one thing left in this item**
+- ~~Then prove it across a Lambda invocation boundary, where a timeout *is* the crash~~
+  ✅ **done 2026-08-18, live under SAM local, both paths.** One `run_id`, two containers, a 10s
+  ceiling on the first: 3 criteria completed and 2 skipped, then 3 nodes restored and only the 2
+  outstanding run. **3 + 3 = 6 paid calls against ~6 for one uninterrupted run**, identically on
+  both paths. `run_case.py --resume-demo`
 
 **What it told us — the first result that runs against LangGraph, on the dimension it was chosen
 for.** Three findings, all measured, all in `LESSONS.md`:
@@ -266,8 +269,24 @@ for.** Three findings, all measured, all in `LESSONS.md`:
 creates and migrates its own tables, and nothing in the adapter writes SQL. `checkpoint.py` had to
 write a schema, an upsert, and a read. That is real, and it is smaller than the three costs above.
 
-**ADR-024 is not closed here** — LAMB-01 is the last piece, and a framework decision made without
-the Lambda boundary would be made without the constraint that motivated it.
+**LAMB-01 was a null result for the framework question, and that is itself the answer.** Both paths
+resumed across the invocation boundary and both paid exactly once for everything. The boundary that
+motivated the whole framework decision does not discriminate between them.
+
+**So ADR-024's trigger has fired.** It said the call gets made when idempotent crash/resume works.
+The complete scorecard is in ADR-027, recorded as **proposed** rather than accepted: the evidence is
+one-sided, and the decision is the project owner's to make rather than a side effect of the commit
+that gathered it.
+
+Two things that fell out of building it, both real bugs rather than findings about frameworks:
+
+- **The LangGraph fan-out was unbounded.** `MAX_PARALLEL` only ever reached the thread pool;
+  `Send` ran 8 of 8 dispatches at once until `max_concurrency` was set on the config. It also
+  silently disabled the wall-clock stop, because a criterion that starts at t=0 never sees a
+  crossed ceiling.
+- **A breach was measured on every read**, so one payload reported `18.5 of 10` on its skipped
+  criteria and `34.4 of 10` in its summary. The ledger now remembers the first breach. Same shape
+  as `completed with no findings` versus `refused`, one layer down.
 
 ---
 

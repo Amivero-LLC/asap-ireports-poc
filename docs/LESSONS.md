@@ -587,6 +587,63 @@ folded into any checkpoint's `channel_values`. Reading the stored row directly r
 completed, so a resume redoes everything — silently, correctly-looking, and only after a crash.
 `compiled.get_state(config)` applies pending writes, which is what the resume itself does.
 
+### A `Send` fan-out is unbounded unless you say otherwise `[measured]`
+
+`MAX_PARALLEL` bounds the hand-rolled path for free — it is the `ThreadPoolExecutor`'s
+`max_workers`. A `Send` fan-out has no such argument, and LangGraph ran **8 of 8** dispatches at
+once on an 8-way probe. The bound lives in the *config*, not the graph:
+
+```python
+compiled.invoke(payload, config={"max_concurrency": MAX_PARALLEL})
+```
+
+Unbounded fan-out over paid model calls is the failure budgets exist to prevent, and it is worse
+under Lambda, where a timed-out invocation is retried automatically and re-pays for the whole
+width.
+
+It also silently disables the wall-clock stop. The ceiling is checked when a criterion *starts*, so
+if every criterion starts at t=0 none of them ever sees a crossed ceiling, the run cannot truncate,
+and there is nothing left for a second invocation to do. The bug presents as "checkpoint/resume
+does not work" and is not about checkpointing at all.
+
+### Checkpointing makes the idempotency store go quiet, and that is the good outcome `[measured]`
+
+The two mechanisms target the same waste at different layers, and the checkpoint gets there first.
+A restored node is never re-executed, so it never asks the gateway, so there is nothing to replay.
+Across the live LAMB-01 run: **calls replayed = 0** on both paths, and that is the system working.
+
+Read the wrong way that number says the call store did nothing. What it actually says is that the
+cheaper mechanism ran first. The call store is the *backstop* — it covers the node that was
+re-executed because its checkpoint write was lost (see above), and it covers every path that has no
+checkpoint at all.
+
+The number that shows the property is **total paid calls across both invocations against what one
+uninterrupted run costs**: 3 + 3 = 6, against 6.
+
+### Measure a breach once and quote it everywhere `[measured]`
+
+`breach()` was recomputed on every call — once per criterion, again before synthesis, again when
+the result was assembled — and the wall clock kept moving in between. One live payload therefore
+reported the same event twice:
+
+```
+rejected: 731-202-B-3: wall_clock ceiling reached: 18.5 of 10 ...
+invocation 1 stopped on ....... wall_clock ceiling reached: 34.4 of 10 ...
+```
+
+Same run, same ceiling, two numbers, and nothing tells a reader which one stopped the work. The
+ledger now remembers the first breach and returns it forever after. Elapsed time genuinely keeps
+running, and `consumption().wall_clock_seconds` is where that belongs — there it means what it says.
+
+The general form is this repo's oldest lesson wearing new clothes: **a fact and a measurement of a
+fact are different things**, and a value recomputed on read is a measurement. The same shape
+produced `completed with no findings` versus `refused`, and `skipped` versus `ran and failed`.
+
+**And note what nearly hid it.** The obvious test — assert the run's breach string appears in its
+own rejection lines — passes whether or not the property holds, because against a stub gateway the
+two measurements are microseconds apart and round to the same decimal. The real test injects a
+clock into the ledger. A test that cannot fail is worse than no test.
+
 ### Put the attempt counter in the idempotency key `[measured]`
 
 `analyze` retries when a response comes back in an unusable *shape* (ADR-018). The two requests are

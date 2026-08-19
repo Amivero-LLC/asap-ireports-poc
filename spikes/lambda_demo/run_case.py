@@ -20,9 +20,17 @@ a stopped Docker daemon, rather than letting either surface a minute later as so
 `START` / `END` / `REPORT` records and the handler's own structured log lines. The default output
 is a reading of the response; `--verbose` is a record of the invocation.
 
+`--resume-demo` is LAMB-01: it invokes the *same run id* twice, the first with a wall-clock
+ceiling below the work required, and reports whether the second invocation finished what the first
+started without re-buying it. It needs the compose PostgreSQL as well as OpenSearch — that is
+where paid calls and completed nodes are recorded, and a SAM container is a genuine process
+boundary, so nothing else connects the two invocations.
+
 **Real model calls, real money.** A full run is roughly 22k tokens across six thinking-tier calls
-(three specialists x two candidates, plus any bounded retry). Nothing in CI runs this, and nothing
-should: `--candidate` narrows it to one orchestrator when you only need to see it work.
+(three specialists x two candidates, plus any bounded retry); `--resume-demo` costs about one
+uninterrupted run per candidate, which is the point — the second invocation pays only for what the
+first did not reach. Nothing in CI runs this, and nothing should: `--candidate` narrows it to one
+orchestrator when you only need to see it work.
 
 **Credentials.** `GatewayConfig` reads `IREPORTS_*` from the environment (ADR-016), and a SAM
 container inherits nothing from this shell, so the variables are written to a `--env-vars` file
@@ -43,6 +51,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -68,10 +77,20 @@ DEFAULT_CONTAINER_OPENSEARCH = "http://host.docker.internal:9201"
 HOST_OPENSEARCH = "http://localhost:9201"
 """The same cluster, from this shell. `preflight` checks it here rather than guessing whether the
 container can see it — a host-side failure is the one a developer can actually act on."""
+DEFAULT_CONTAINER_DSN = (
+    "postgresql://ireports:ireports_local_only@host.docker.internal:5436/ireports_spike"
+)
+"""The compose stack's PostgreSQL *from inside a SAM container* — where a run's paid calls and
+completed nodes are recorded so a second invocation can use them (LAMB-01)."""
+
+HOST_DSN = "postgresql://ireports:ireports_local_only@localhost:5436/ireports_spike"
+"""The same database from this shell, for the preflight check."""
+
 ENV_EXCLUDE = frozenset(
     {
-        # Postgres for the bake-off's crash/resume legs. This demo has no checkpointer, and a DSN
-        # pointing at localhost would not resolve from inside the container anyway.
+        # The host-side name for the same database `IREPORTS_STATE_DSN` names container-side.
+        # Forwarded under its own name after a host rewrite (see `_env_vars_payload`) rather than
+        # verbatim, because `localhost` inside a container is the container.
         "IREPORTS_SPIKE_DSN",
         # A host-side pytest switch. Forwarding it would suggest the function reads it.
         "IREPORTS_LIVE_SMOKE",
@@ -97,12 +116,15 @@ def _declared_variables() -> set[str]:
     return set(re.findall(r"^\s*(IREPORTS_[A-Z0-9_]+)\s*:", template.read_text(), re.MULTILINE))
 
 
-def _env_vars_payload() -> dict[str, dict[str, str]]:
+def _env_vars_payload(overrides: dict[str, str] | None = None) -> dict[str, dict[str, str]]:
     """The `--env-vars` document: every declared gateway variable, per function.
 
     Empty values are dropped rather than forwarded as `""`. `GatewayConfig.validate()` treats an
     empty string as absent and names the missing variable, which is the error you want; an empty
     string forwarded into the container produces the same failure one layer further away.
+
+    `overrides` is applied last and is how the two invocations of `--resume-demo` differ: the first
+    carries a wall-clock ceiling below the work required, the second does not.
     """
     declared = _declared_variables()
     candidates = {
@@ -110,6 +132,7 @@ def _env_vars_payload() -> dict[str, dict[str, str]]:
         for key, value in os.environ.items()
         if key.startswith(ENV_PREFIXES) and key not in ENV_EXCLUDE and value.strip()
     }
+    candidates.update({k: v for k, v in (overrides or {}).items() if v.strip()})
     if not candidates:
         raise SystemExit(
             "no IREPORTS_* variables are set, so the gateway has nothing to authenticate with.\n"
@@ -122,6 +145,16 @@ def _env_vars_payload() -> dict[str, dict[str, str]]:
         candidates.setdefault("IREPORTS_OPENSEARCH_URL", DEFAULT_CONTAINER_OPENSEARCH)
         candidates["IREPORTS_OPENSEARCH_URL"] = (
             candidates["IREPORTS_OPENSEARCH_URL"]
+            .replace("localhost", "host.docker.internal")
+            .replace("127.0.0.1", "host.docker.internal")
+        )
+
+    # Same rewrite, same reason, one variable later: a DSN naming `localhost` resolves to the
+    # container itself, so the run would report a connection failure rather than a missing
+    # checkpoint. Left as configuration because the deployed function points at RDS unchanged.
+    if "IREPORTS_STATE_DSN" in candidates:
+        candidates["IREPORTS_STATE_DSN"] = (
+            candidates["IREPORTS_STATE_DSN"]
             .replace("localhost", "host.docker.internal")
             .replace("127.0.0.1", "host.docker.internal")
         )
@@ -143,8 +176,8 @@ def _env_vars_payload() -> dict[str, dict[str, str]]:
     return dict.fromkeys(FUNCTIONS.values(), forwarded)
 
 
-def write_env_vars() -> Path:
-    ENV_VARS_FILE.write_text(json.dumps(_env_vars_payload(), indent=2) + "\n")
+def write_env_vars(overrides: dict[str, str] | None = None) -> Path:
+    ENV_VARS_FILE.write_text(json.dumps(_env_vars_payload(overrides), indent=2) + "\n")
     ENV_VARS_FILE.chmod(0o600)
     return ENV_VARS_FILE
 
@@ -175,7 +208,7 @@ def _payload_from(stdout: str) -> dict[str, Any]:
     return max(found, key=lambda v: ("findings" in v, len(v)))
 
 
-def preflight() -> None:
+def preflight(require_postgres: bool = False) -> None:
     """Fail at the door, naming the service, rather than sixty seconds in.
 
     Both of these were paid for by hand before they were checked here, and they fail differently:
@@ -216,6 +249,28 @@ def preflight() -> None:
             "missing service that reads like a clean record.\n"
             "  docker compose -f infrastructure/docker/compose.yaml up -d\n"
             "  uv run --env-file .env python spikes/lambda_demo/index_cases.py"
+        ) from None
+
+    if not require_postgres:
+        return
+
+    # Checked from the host for the same reason OpenSearch is: a container-side failure surfaces
+    # sixty seconds later as a connection error inside a Lambda log, and a developer cannot tell
+    # it from a bad DSN.
+    dsn = os.environ.get("IREPORTS_STATE_DSN") or os.environ.get("IREPORTS_SPIKE_DSN") or HOST_DSN
+    host_dsn = dsn.replace("host.docker.internal", "localhost")
+    try:
+        import psycopg
+
+        with psycopg.connect(host_dsn, connect_timeout=5) as conn:
+            conn.execute("SELECT 1")
+    except Exception as exc:  # any failure to reach it earns the same instruction
+        raise SystemExit(
+            f"PostgreSQL is not reachable at {host_dsn.rsplit('@', 1)[-1]}: "
+            f"{type(exc).__name__}. "
+            "The resume demo records paid calls and completed nodes there, so a second invocation "
+            "has something to resume from — without it the two invocations are simply two runs.\n"
+            "  docker compose -f infrastructure/docker/compose.yaml up -d"
         ) from None
 
 
@@ -306,6 +361,115 @@ def _report(payload: dict[str, Any], out_file: Path | None) -> None:
         print(f"  envelope -> {out_file.relative_to(REPO_ROOT)}")
 
 
+def _resume_demo(candidate: str, case_id: str, stop_after: float, verbose: bool) -> bool:
+    """**LAMB-01: a run that runs out of wall clock finishes in a second invocation.**
+
+    Two invocations of the same `run_id`, against one durable store:
+
+    1. The first carries a wall-clock ceiling below the work required. It stops, packages what it
+       has, and reports which ceiling stopped it. **The criteria it skipped are deliberately not
+       checkpointed** — they are the next invocation's work, and recording them as done would make
+       the first invocation's ceiling permanent.
+    2. The second carries the normal ceiling. It restores the nodes the first completed and runs
+       only what is outstanding.
+
+    A SAM container is a real process boundary — a different process, a different container — so
+    the only thing connecting the two is what was written to PostgreSQL. That is exactly the shape
+    of a Lambda timeout, where the platform retries the invocation and everything in memory is gone.
+
+    **What "0 duplicate paid calls" means here, and it is subtler than it looks.** The gateway's
+    call store would *replay* a re-executed call rather than re-buying it. But a checkpointed node
+    is never re-executed at all, so the second invocation never asks — the replay count is
+    typically **zero and that is the good outcome**, not a broken store. The number that shows the
+    property is the total paid across both invocations against what one uninterrupted run costs.
+    """
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_id = f"run_lamb01_{candidate.replace('-', '')}_{stamp}"
+    function = FUNCTIONS[candidate]
+    event = {"case_id": case_id, "candidate": candidate, "run_id": run_id}
+    dsn = os.environ.get("IREPORTS_STATE_DSN") or DEFAULT_CONTAINER_DSN
+
+    print(f"\n=== LAMB-01 · {candidate} · {run_id} ===")
+
+    print(f"\ninvocation 1 — wall-clock ceiling {stop_after}s, below the work required")
+    first = invoke(
+        function,
+        event,
+        write_env_vars(
+            {"IREPORTS_STATE_DSN": dsn, "IREPORTS_MAX_WALL_CLOCK_SECONDS": str(stop_after)}
+        ),
+        verbose=verbose,
+    )
+    _report(first, None)
+
+    print("\ninvocation 2 — same run id, normal ceiling, new container")
+    second = invoke(
+        function,
+        event,
+        # No ceiling override: this invocation is meant to finish.
+        write_env_vars({"IREPORTS_STATE_DSN": dsn}),
+        verbose=verbose,
+    )
+    out_file = None
+    if second.get("envelope") is not None:
+        out_file = OUT_DIR / f"{candidate}-{run_id}.json"
+        out_file.write_text(json.dumps(second, indent=2) + "\n")
+    _report(second, out_file)
+
+    return _report_lamb01(candidate, first, second)
+
+
+def _report_lamb01(candidate: str, first: dict[str, Any], second: dict[str, Any]) -> bool:
+    """Read the two payloads as the LAMB-01 acceptance, and say plainly whether it holds."""
+    if not (first.get("durable") and second.get("durable")):
+        print("\n  FAIL — the function ran without a durable store, so there was nothing to resume")
+        return False
+
+    skipped = [c for c in first.get("criteria", []) if c.get("status") == "skipped_budget"]
+    resumed = second.get("resumed_nodes", [])
+    paid_1 = (first.get("model_calls") or {}).get("paid", 0)
+    paid_2 = (second.get("model_calls") or {}).get("paid", 0)
+    replayed_2 = (second.get("model_calls") or {}).get("replayed", 0)
+    # One uninterrupted run pays for each criterion once, plus synthesis. Bounded retries make
+    # this a floor rather than an equality, which is why it is printed rather than asserted.
+    baseline = len(first.get("criteria", [])) + 1
+
+    print(f"\n  {candidate} · LAMB-01")
+    stopped_on = first.get("budget_breach") or "nothing — see below"
+    print(f"    invocation 1 stopped on ...... {stopped_on}")
+    print(f"    criteria it did not attempt .. {len(skipped)}")
+    print(f"    invocation 2 restored ........ {len(resumed)} node(s): {resumed}")
+    print(f"    paid model calls ............. {paid_1} + {paid_2} = {paid_1 + paid_2}")
+    print(f"    one uninterrupted run costs .. ~{baseline} (criteria + synthesis)")
+    print(f"    calls replayed by the store .. {replayed_2}  (0 is expected — see the docstring)")
+
+    problems = []
+    if not first.get("incomplete_due_to_budget"):
+        problems.append(
+            f"invocation 1 was not truncated — raise --stop-after above 0 or lower it below the "
+            f"{first.get('wall_seconds')}s this run took"
+        )
+    if not skipped:
+        problems.append("invocation 1 skipped no criteria, so there was nothing to leave behind")
+    if not resumed:
+        problems.append("invocation 2 restored nothing — the checkpoint did not cross the boundary")
+    if second.get("incomplete_due_to_budget"):
+        problems.append("invocation 2 was itself truncated, so the run never finished")
+    if second.get("envelope") is None:
+        problems.append("invocation 2 produced no envelope")
+    if paid_1 + paid_2 > baseline + len(first.get("criteria", [])):
+        problems.append(
+            f"{paid_1 + paid_2} paid calls against ~{baseline} for one run — work was re-bought"
+        )
+
+    if problems:
+        for problem in problems:
+            print(f"    FAIL: {problem}")
+        return False
+    print("    PASS — the second invocation finished what the first started, and paid only for it")
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case-id", default="AMI-SYN-FIN-001")
@@ -320,6 +484,26 @@ def main() -> int:
         action="append",
         help="run one orchestrator instead of both; repeatable",
     )
+    parser.add_argument(
+        "--resume-demo",
+        action="store_true",
+        help=(
+            "LAMB-01: invoke twice with one run id, the first with a wall-clock ceiling below "
+            "the work required. Needs the compose PostgreSQL. Costs roughly one full run."
+        ),
+    )
+    parser.add_argument(
+        "--stop-after",
+        type=float,
+        default=10.0,
+        help=(
+            "wall-clock ceiling for the first --resume-demo invocation, in seconds. It must be "
+            "BELOW one specialist's duration (~15-25s on a thinking tier), not above: the first "
+            "MAX_PARALLEL criteria start at t=0 and always run, and the ones queued behind them "
+            "are reached at t of about one call. Set it above that and nothing is left for "
+            "invocation 2."
+        ),
+    )
     args = parser.parse_args()
 
     if not BUILD_DIR.exists():
@@ -329,10 +513,21 @@ def main() -> int:
             "  cd spikes/lambda_demo && sam build --use-container --parallel"
         )
 
-    preflight()
+    preflight(require_postgres=args.resume_demo)
     candidates = args.candidate or sorted(FUNCTIONS)
-    env_vars = write_env_vars()
     OUT_DIR.mkdir(exist_ok=True)
+
+    if args.resume_demo:
+        results = [
+            _resume_demo(candidate, args.case_id, args.stop_after, args.verbose)
+            for candidate in candidates
+        ]
+        print("\n" + "-" * 72)
+        for candidate, ok in zip(candidates, results, strict=True):
+            print(f"{candidate:<14}{'PASS' if ok else 'FAIL'}")
+        return 0 if all(results) else 1
+
+    env_vars = write_env_vars()
 
     payloads: list[dict[str, Any]] = []
     for candidate in candidates:

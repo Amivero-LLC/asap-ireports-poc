@@ -18,6 +18,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from threading import Lock
+from time import sleep
 from typing import Any
 from uuid import uuid4
 
@@ -26,6 +28,7 @@ from ireports_domain import Budgets, CaseManifest
 from ireports_gateway import StubGateway
 from ireports_gateway.port import ModelRequest
 from ireports_orchestration import (
+    MAX_PARALLEL,
     ORCHESTRATORS,
     Checkpointing,
     EvidenceSpan,
@@ -34,6 +37,7 @@ from ireports_orchestration import (
     RunCheckpoint,
     SpecialistStatus,
 )
+from ireports_orchestration.budget import BudgetLedger
 from ireports_orchestration.checkpoint import (
     CHECKPOINT_VERSION,
     RESUMABLE_STATUSES,
@@ -395,6 +399,62 @@ def test_a_budget_skip_is_never_written_to_the_checkpoint(
     )
 
 
+def test_a_ledger_remembers_the_moment_work_stopped() -> None:
+    """**One fact, one pair of numbers, wherever it is quoted.**
+
+    `breach()` is asked once per criterion, again before synthesis, and again when the result is
+    assembled. Measuring the wall clock afresh each time answers a different question each time,
+    and a live run duly reported `18.5 of 10` on its skipped criteria and `34.4 of 10` in its
+    summary — same payload, same event. A reader has no way to tell which one stopped the work.
+
+    Tested on the ledger with an injected clock rather than through a run: through a run the two
+    measurements are microseconds apart against a stub gateway, so an assertion there passes
+    whether or not the property holds. A test that cannot fail is worse than no test.
+    """
+    now = [0.0]
+    ledger = BudgetLedger(_budgets(max_wall_clock_seconds=10), clock=lambda: now[0])
+
+    assert ledger.breach() is None
+
+    now[0] = 12.0
+    first = ledger.breach()
+    assert first is not None
+    assert first.reached == 12.0
+
+    now[0] = 40.0
+    assert ledger.breach() == first, "the breach moved; a later reader would quote a different stop"
+    # Elapsed time genuinely keeps running, and this is where that belongs — here it means what it
+    # says, rather than standing in for when the work stopped.
+    assert ledger.consumption().wall_clock_seconds == 40.0
+
+
+def test_every_skipped_criterion_quotes_the_run_s_breach(
+    case: LoadedCase, retriever: InMemoryRetriever
+) -> None:
+    """The same property seen from the payload a reader actually gets.
+
+    Not the regression guard — see above for why it cannot be — but it is what would fail if a
+    rejection line were ever built from a *different* ceiling than the one the run reports.
+    """
+    result = ORCHESTRATORS["hand-rolled"].run(
+        case,
+        _gateway(),
+        retriever,
+        _run_id("onebreach"),
+        budgets=_budgets(max_output_tokens=1),
+    )
+
+    assert result.breach is not None
+    quoted = str(result.breach)
+    skipped = [o for o in result.outcomes if o.status is SpecialistStatus.SKIPPED_BUDGET]
+    assert skipped
+    for outcome in skipped:
+        assert any(quoted in reason for reason in outcome.rejected), (
+            f"a skipped criterion quotes a different breach than the run does:\n"
+            f"  run:       {quoted}\n  criterion: {outcome.rejected}"
+        )
+
+
 def test_only_work_that_happened_is_resumable() -> None:
     """`RESUMABLE_STATUSES` spelled out, so the reasoning survives a refactor of the enum.
 
@@ -405,6 +465,47 @@ def test_only_work_that_happened_is_resumable() -> None:
     assert {SpecialistStatus.COMPLETED, SpecialistStatus.REFUSED} == RESUMABLE_STATUSES
     assert SpecialistStatus.SKIPPED_BUDGET not in RESUMABLE_STATUSES
     assert SpecialistStatus.FAILED not in RESUMABLE_STATUSES
+
+
+@pytest.mark.parametrize("name", BOTH)
+def test_the_fan_out_never_runs_wider_than_max_parallel(
+    case: LoadedCase, retriever: InMemoryRetriever, name: str
+) -> None:
+    """**Unbounded fan-out over paid model calls is the failure budgets exist to prevent.**
+
+    `MAX_PARALLEL` bounds the hand-rolled path for free — it is the `ThreadPoolExecutor`'s
+    `max_workers`. A `Send` fan-out has no such argument, and until `max_concurrency` was set on
+    the config LangGraph ran every dispatch at once: measured 8 of 8 on an 8-way probe. It is worse
+    under Lambda, where a timed-out invocation is retried automatically and re-pays for the whole
+    width.
+
+    It is also what makes a wall-clock stop possible: a run where every criterion starts at t=0 has
+    nothing left to leave for the next invocation.
+    """
+    live = 0
+    peak = 0
+    lock = Lock()
+
+    class _Counting(StubGateway):
+        def complete(self, request: ModelRequest) -> Any:
+            nonlocal live, peak
+            with lock:
+                live += 1
+                peak = max(peak, live)
+            try:
+                sleep(0.05)
+                return super().complete(request)
+            finally:
+                with lock:
+                    live -= 1
+
+    gateway = _Counting(default=json.dumps({"findings": [_finding()]}))
+    result = ORCHESTRATORS[name].run(case, gateway, retriever, _run_id("width"))
+
+    assert len(result.criteria) > MAX_PARALLEL, "the case cannot exercise the bound"
+    assert peak <= MAX_PARALLEL, (
+        f"{name} ran {peak} specialists at once against a bound of {MAX_PARALLEL}"
+    )
 
 
 # ---------------------------------------------------------------------------

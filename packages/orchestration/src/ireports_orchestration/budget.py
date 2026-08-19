@@ -78,6 +78,7 @@ class BudgetLedger:
         self._model_calls = 0
         self._input_tokens = 0
         self._output_tokens = 0
+        self._first_breach: BudgetBreach | None = None
 
     @property
     def budgets(self) -> Budgets:
@@ -118,20 +119,42 @@ class BudgetLedger:
         Wall clock is checked first deliberately: it is the ceiling that has to fire before
         Lambda's does, and reporting a token breach when the real problem is elapsed time would
         send someone to tune the wrong number.
+
+        **The first breach is remembered and returned forever after, and that is not a cache.**
+        This is asked many times during a run — once per criterion, again before synthesis, again
+        when the result is assembled — and a freshly measured wall clock answers a different
+        question each time. A run once reported `18.5 of 10` on its skipped criteria and
+        `34.4 of 10` in its summary, in the same payload, for the same event. One fact, two
+        numbers, and a reader has no way to tell which is the one that stopped the work. The
+        remembered breach is the moment work stopped; elapsed time keeps running afterwards and is
+        available from `consumption()`, where it means what it says.
         """
+        with self._lock:
+            if self._first_breach is not None:
+                return self._first_breach
+
+        found: BudgetBreach | None = None
         elapsed = self.elapsed_seconds()
         if elapsed >= self._budgets.max_wall_clock_seconds:
-            return BudgetBreach("wall_clock", self._budgets.max_wall_clock_seconds, elapsed)
+            found = BudgetBreach("wall_clock", self._budgets.max_wall_clock_seconds, elapsed)
+        else:
+            with self._lock:
+                if self._input_tokens >= self._budgets.max_input_tokens:
+                    found = BudgetBreach(
+                        "input_tokens", self._budgets.max_input_tokens, self._input_tokens
+                    )
+                elif self._output_tokens >= self._budgets.max_output_tokens:
+                    found = BudgetBreach(
+                        "output_tokens", self._budgets.max_output_tokens, self._output_tokens
+                    )
+        if found is None:
+            return None
         with self._lock:
-            if self._input_tokens >= self._budgets.max_input_tokens:
-                return BudgetBreach(
-                    "input_tokens", self._budgets.max_input_tokens, self._input_tokens
-                )
-            if self._output_tokens >= self._budgets.max_output_tokens:
-                return BudgetBreach(
-                    "output_tokens", self._budgets.max_output_tokens, self._output_tokens
-                )
-        return None
+            # Two threads can cross the line together; whichever records first wins, so every
+            # subsequent reader — and every rejection line — quotes the same numbers.
+            if self._first_breach is None:
+                self._first_breach = found
+            return self._first_breach
 
 
 DEFAULT_BUDGETS = Budgets(

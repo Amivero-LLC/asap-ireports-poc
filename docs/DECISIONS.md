@@ -993,6 +993,10 @@ implementation. Two things became visible that the bake-off could not show:
    turns out to be cheap enough to run as the actual arrangement — one shared specialist, two
    orchestrators, identical output shape.
 
+> **Trigger fired 2026-08-18.** Crash/resume works on both paths and across a Lambda invocation
+> boundary. The complete evidence and a recommendation are in **ADR-027**, recorded as *proposed*.
+> This ADR stands until that one is accepted.
+
 **Decision.** **Both paths stay live.** Custom Python and LangGraph are developed in parallel
 behind this project's own orchestration port until there is a reason to choose — most likely when
 crash/resume and model-call idempotency (ORCH-02) are built, since that is the seam where the
@@ -1135,3 +1139,70 @@ by omission. The comparison is the deliverable, and it needs both.
 - **Row integrity is still unaddressed**, and is now the largest known gap on two tables rather than
   one (`docs/handoff/checkpoint-threat-model.md`). Re-validating through the contracts catches a row
   that no longer satisfies them; it catches nothing about a tampered row that still parses.
+
+## ADR-027 — The orchestration evidence is complete; a framework recommendation
+
+**Date:** 2026-08-18 · **Status:** *Proposed* — the evidence is gathered, the call is the project
+owner's · **Would supersede ADR-024, amending ADR-012**
+
+**Context.** ADR-024 deferred the framework choice and named its own trigger: *"The call gets made
+when idempotent crash/resume works, because that is the capability the framework was selected for
+in the first place."* That works now. Model-call idempotency landed 2026-08-18 at the gateway;
+node-level checkpointing landed the same day on both paths (ADR-026); and LAMB-01 proved both
+across a real SAM invocation boundary.
+
+This entry records what building items 1–7 twice actually measured. It is written as *proposed*
+because the evidence being one-sided does not make the decision automatic, and a choice this size
+should not be a side effect of the commit that gathered the evidence.
+
+**The complete scorecard.** Seven comparison points, all measured, none argued.
+
+| | Hand-rolled | LangGraph |
+|---|---|---|
+| Runtime fan-out width | No change — `pool.map` never cared | **Structural.** Rebuilt around `Send` |
+| Fan-in barrier | Free — exiting the pool context | Free — supersteps. **Null result** |
+| Conditional routing after fan-out | `if should_synthesize(...)` | A do-nothing `join` node; the naive version fires per dispatch on partial state and **fails silently** |
+| `mypy --strict` | No change | Four suppressions; the documented `Send` pattern matches no `add_node` overload |
+| Early termination on a budget | 3 lines | 3 lines, marginally cheaper. **Null result** |
+| Node-level checkpointing | Ask, then tell — 4 lines, plus a store, an upsert and a read | `setup()` writes the schema **and**: a shared JSON codec is forced, the budget stop must raise rather than return, and **8 of 24 crash trials lost the write for a call already paid for**, against 0 |
+| Resume across a Lambda boundary | 3 + 3 = 6 paid calls | 3 + 3 = 6 paid calls. **Null result** |
+
+Plus one defect found only by looking: the `Send` fan-out was **unbounded** — 8 of 8 dispatches at
+once — because `MAX_PARALLEL` only ever reached the `ThreadPoolExecutor`. Unbounded fan-out over
+paid model calls is the failure budgets exist to prevent, and under Lambda a timed-out invocation
+re-pays for the whole width.
+
+**What ADR-012 expected, and what happened.** ADR-012 chose LangGraph because a PostgreSQL
+checkpointer was two lines against 56 hand-rolled. That number was real and it did not survive
+contact with a typed contract: `PostgresSaver.setup()` genuinely writes the schema, but strict
+deserialization — which ORCH-01 *requires* — silently downgrades our types to `dict`, so both paths
+need the same framework-free codec, and the codec is most of the code. **The first-party
+checkpointer saves the store, not the codec.**
+
+**Proposed decision.** Make **custom Python** the reference implementation, and keep the LangGraph
+adapter as a conformance arm rather than removing it.
+
+**Why not simply adopt LangGraph**, as ADR-012 leaned: on the one capability it was chosen for, it
+is behind — it loses checkpoint writes a crash should not lose, and the mitigation
+(`durability="sync"`) narrows the window without closing it, because the write happens outside the
+node.
+
+**Why not delete the LangGraph adapter.** It is what makes the no-import rule mean anything, it
+costs one file, and it has earned its keep four times by making a silent failure loud. It should
+stop being a candidate and start being a control.
+
+**What would reopen this, and it is not hypothetical.** **Multi-step specialists (roadmap item 6)
+are not built**, and ADR-024 named them alongside crash/resume as the strongest signal available.
+A loop inside a node with accumulated state is where a graph framework is most expected to earn its
+keep, and nothing here measures that. A reader taking this recommendation should know that one of
+the two capabilities the deferral was built around is still unmeasured.
+
+**Consequences if accepted.**
+
+1. `ORCHESTRATORS["hand-rolled"]` becomes the default everywhere the demo and the handoff describe
+   a single path.
+2. The no-import rule stays, and stops being provisional.
+3. Every orchestration feature is still owed by both paths, because that is what keeps the control
+   arm honest.
+4. ADR-012 is amended, not erased: its reasoning was sound on the evidence it had, and the specific
+   thing that changed is that the checkpointing seam turned out to be wider than two lines.

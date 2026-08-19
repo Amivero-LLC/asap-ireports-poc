@@ -81,11 +81,17 @@ conditional routing, a type-checked tree, and budgets. Five results so far, in `
 | `mypy --strict` | No change | Four suppressions — the documented `Send` pattern matches no `add_node` overload |
 | Early termination on a budget | 3 lines | 3 lines — a null result, and marginally cheaper for the synthesis skip |
 | Node-level checkpointing | Ask, then tell — 4 lines | `PostgresSaver` writes no SQL, **and** costs a shared JSON codec, a raise-not-return budget stop, and 8 lost writes in 24 crash trials against 0 |
+| Resume across a Lambda boundary | 3 + 3 = 6 paid calls | 3 + 3 = 6 paid calls — a third null result |
 
-The last row is the first result that runs **against** LangGraph, on the dimension it was chosen
-for, and it is measured rather than argued (`docs/LESSONS.md`). It still does not decide ADR-024:
-everything above happens inside one process, and **LAMB-01 — the invocation boundary — is what
-closes it.**
+**ADR-024's trigger has fired.** It said the call gets made when idempotent crash/resume works;
+it works, on both paths, across a real SAM invocation boundary. The complete scorecard and a
+recommendation (custom Python as the reference implementation, LangGraph retained as a conformance
+arm) are in **ADR-027, recorded as *proposed*** — the evidence is one-sided but the decision is the
+project owner's. **Read ADR-027 before doing orchestration work.**
+
+One thing the evidence does *not* cover, and it is named in ADR-027: **multi-step specialists
+(roadmap item 6) are unbuilt**, and a loop inside a node is where a graph framework was most
+expected to earn its keep.
 
 **No module that analyzes a case may import LangGraph.** A test enforces it by scanning every
 module in `packages/orchestration/`, exempting only `langgraph_adapter.py` and `registry.py`
@@ -110,10 +116,10 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
 | `evals/` | Scores **saved run files** offline — nine invariants, each descending from a real incident, plus a corpus check no single run can make about itself. `uv run python -m evals.score_run` |
-| Tests | 315 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 324 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
-**Not built:** the Lambda invocation boundary (LAMB-01), authority routing from policy packs,
-ingestion, `apps/`, ground-truth agreement scoring (VAL-03/04).
+**Not built:** multi-step specialists, authority routing from policy packs, ingestion, `apps/`,
+ground-truth agreement scoring (VAL-03/04).
 
 **Classification is the model's answer, not a constant (ADR-025).** The specialist picks from three
 of the contract's five values; `contradiction` and `information_gap` stay synthesis's. An
@@ -125,6 +131,11 @@ valid, so a wholly clean case produces **no envelope** and the run reports why.
 `packages/orchestration/` and specialists return the published `SpecialistResult`. `SpecialistStatus`
 stays on the local `SpecialistOutcome` wrapper — ADR-021 §2 keeps completion status off the contract
 on purpose, and a test now asserts that rather than trusting prose.
+
+**LAMB-01 closed 2026-08-18, live under SAM local, both paths.** One `run_id`, two containers,
+a 10s wall-clock ceiling on the first: 3 criteria completed and 2 skipped, then 3 nodes restored and
+only the 2 outstanding ones run — **6 paid calls total against ~6 for one uninterrupted run**.
+`uv run --env-file .env python spikes/lambda_demo/run_case.py --resume-demo` (costs real money).
 
 **Checkpointing landed 2026-08-18 (ADR-026).** A completed node is checkpointed inside the node,
 and a resume restores it instead of re-executing it — hand-rolled store in `checkpoint.py`,
