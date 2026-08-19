@@ -695,6 +695,9 @@ dependencies = [
 langgraph = [
     { name = "langgraph" },
 ]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+]
 
 [package.metadata]
 requires-dist = [
@@ -702,8 +705,9 @@ requires-dist = [
     { name = "ireports-gateway", editable = "packages/gateway" },
     { name = "ireports-retrieval", editable = "packages/retrieval" },
     { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=1.2.10,<1.3" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
 ]
-provides-extras = ["langgraph"]
+provides-extras = ["langgraph", "postgres"]
 
 [[package]]
 name = "ireports-retrieval"

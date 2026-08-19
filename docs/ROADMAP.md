@@ -228,8 +228,12 @@ The hard one, the highest technical risk, and **the thing that decides the frame
 By this point there is a real graph to checkpoint rather than three parallel calls.
 
 - Checkpoint after each node; resume in a *separate process* without re-running completed work
-- **A crash mid-fan-out must not re-run an in-flight model call.** Today it does — the bake-off
-  measured 11 of 24 duplicate paid calls for LangGraph, 12 of 24 hand-rolled
+- ~~**A crash mid-fan-out must not re-run an in-flight model call.**~~ ✅ **done 2026-08-18.**
+  0 duplicate paid calls, both paths, every crash point — against the bake-off's 11 of 24 and 12 of
+  24. It landed at the *gateway*, not the orchestrator, so both paths got it in identical
+  framework-free code and it discriminates between them not at all. **That reframes the rest of
+  this item:** a resumed run now re-executes everything and pays for nothing, so checkpointing buys
+  back wall clock rather than money. See `LESSONS.md`
 - On the LangGraph path set `durability="sync"` and strict checkpoint deserialization. Both defaults
   are wrong here and invisible when reading the graph
 - Then prove it across a Lambda invocation boundary, where a timeout *is* the crash

@@ -84,6 +84,14 @@ the untouched hard ones — and ORCH-02 is what closes the framework question in
       *Traces:* `REQ-model-call-idempotency` · scorecard §4 · blueprint §8.5. **Owed by all three
       bake-off candidates and built by none. The most expensive item ADR-020 retained, retained
       because durable orchestration of paid sub-calls is not proven if resuming double-pays.**
+  - *Status:* **Done for the paid-call half, 2026-08-18.** `idempotency.py` wraps the gateway, so
+    both paths get it framework-free. A crash harness crashes each orchestrator at every point in
+    the fan-out, resumes over the same store, and measures **0 duplicate paid calls**;
+    `PostgresCallStore` is proven across a genuine process boundary by reading in a subprocess what
+    this process wrote. **Two honest limits.** The harness is 8 trials of a new harness, not the
+    bake-off's original 24 — the shape of the measurement is reproduced, not the fixture. And a
+    resumed run still *re-executes* completed nodes; it pays for nothing, but it spends wall clock,
+    which is the resource LAMB-01 is short of. Node-level checkpointing is what closes that
 - [ ] **LAMB-01**: A run that exhausts its wall-clock budget inside Lambda checkpoints, returns,
       and resumes in a *new invocation* without re-paying for an in-flight model call.
       *Acceptance:* under SAM local with a wall-clock budget set below the work required, the first

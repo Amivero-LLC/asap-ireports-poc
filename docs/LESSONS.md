@@ -481,6 +481,43 @@ and right in the only way that matters: it is non-zero and it scales with the pr
 The general form is worth carrying to any double: ask what decisions depend on the field you are
 defaulting, and whether the default silently selects one branch forever.
 
+### Idempotency is a gateway concern, and that shrinks what checkpointing buys `[measured]`
+
+The most consequential thing found so far for ADR-024, and it arrived sideways.
+
+**Where it belongs.** The gateway is the only component permitted to call a model (ADR-015), so
+wrapping it makes both orchestration paths idempotent in *identical, framework-free* code. Neither
+orchestrator knows it happened. Idempotency is therefore **not** a comparison point between them.
+
+**What that does to the framework question.** "Durable orchestration of paid sub-calls" sounds like
+one property and is two:
+
+| | Where it lives | What it costs to lose |
+|---|---|---|
+| Not re-paying for a completed call | The gateway, framework-free | **Money** |
+| Not re-executing a completed node | The orchestrator, framework's business | **Wall clock** |
+
+With a gateway-level call store, a resumed run re-executes everything and **pays for nothing it
+already bought** — measured at 0 duplicate paid calls across both paths and every crash point in
+the fan-out, against the bake-off's 11-of-24 and 12-of-24. LangGraph was chosen largely for
+checkpointing, and checkpointing turns out to buy back *time*, not *spend*.
+
+**This does not settle it, and the reason is Lambda.** Under a 15-minute ceiling, wall clock is
+precisely what a resumed run is short of — re-executing four completed specialists to reach the
+fifth may not fit. So checkpointing still matters here; it matters for a different resource than
+the one the decision was framed around. That reframing is the finding.
+
+### Put the attempt counter in the idempotency key `[measured]`
+
+`analyze` retries when a response comes back in an unusable *shape* (ADR-018). The two requests are
+byte-identical, so a fingerprint over request content alone serves the first attempt's bad response
+to the retry — **forever**. A bounded retry becomes a guaranteed failure, and it presents as a model
+defect rather than a caching one.
+
+The general form: a deduplication key must distinguish "I am resuming and want the old answer" from
+"I am retrying and want a new one." Those are the same request and opposite intentions, and nothing
+in the request itself tells them apart. The caller has to say.
+
 ### The concurrent-write reducer is the whole trick
 
 When several branches write the same state key, you need `Annotated[list[X], operator.add]`.
