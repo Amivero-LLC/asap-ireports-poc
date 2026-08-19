@@ -269,6 +269,38 @@ arrangement that makes these two paths comparable at all, and nothing here needs
 
 **Still to come:** Part 4 — local AWS parity, and one command end to end.
 
+### How we know the fan-out is a fan-out
+
+Every orchestration test in this repository passed on a serial implementation until 2026-08-19.
+They asserted *width* — five outcomes for five criteria — and a *ceiling* — never more than three
+at once — and a `for` loop satisfies both. Confirmed by breaking it deliberately: `max_workers=1`
+left the whole suite green.
+
+So a run now records when each node started and stopped, and carries it on `RunResult`. Node ids
+and offsets only — no case text ever reaches a trace. A live run, LangGraph path, five criteria:
+
+```
+timeline — peak 3 node(s) at once:
+  foreign_influence_specialist         |###################             |   0.01-46.65s
+  personal_conduct_specialist          |##################              |   0.01-43.24s
+  financial_considerations_specialist  |################                |   0.01-38.17s
+  candor_specialist                    |                #############   |  38.18-70.61s
+  criminal_conduct_specialist          |                  ########      |  43.24-62.44s
+  synthesis                            |                           #### |  70.62-103.45s
+```
+
+Three claims, all checkable rather than asserted:
+
+- **The fan-out is concurrent.** Three specialists start together; peak concurrency is 3, not 1.
+- **The bound holds and binds.** Peak is `MAX_PARALLEL`, not the fan-out width — the fourth and
+  fifth criteria start as slots free, at 38.18s and 43.24s.
+- **The barrier is real.** Synthesis starts at 70.62s, after the last specialist ends at 70.61s.
+  "Synthesis ran once" would also be true of one that started early on a partial fan-out.
+
+Branching needs the *pair* of runs rather than one: the same orchestrator produces a timeline with
+a synthesis span on a case with findings to reason across, and one without it on a case with fewer
+than two. `synthesis is None` alone is equally consistent with a second stage nobody wired up.
+
 ### The same run, drawn twice
 
 Same case, same criteria, same shared specialist, same output. The difference is entirely in how

@@ -116,7 +116,7 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
 | `evals/` | Scores **saved run files** offline — nine invariants, each descending from a real incident, plus a corpus check no single run can make about itself. `uv run python -m evals.score_run` |
-| Tests | 351 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 371 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
 **Not built:** authority routing from policy packs, ingestion, `apps/`, ground-truth agreement
 scoring (VAL-03/04), a specialist tool surface.
@@ -143,6 +143,12 @@ and a resume restores it instead of re-executing it — hand-rolled store in `ch
 ORCH-01**, whose last two clauses were `durability="sync"` and strict deserialization; both are now
 named module-level values in `langgraph_adapter.py` with tests. Only work that *happened* is
 recorded — a budget-skipped criterion is deliberately not, because it is the next invocation's job.
+
+**A run evidences its own fan-out (2026-08-19).** `trace.py` records per-node start/end offsets,
+`RunResult.peak_concurrency` is 3 on a five-criterion run, and `run_case.py` draws the timeline.
+This exists because every fan-out test in the suite passed on a serial implementation — they
+asserted width and a ceiling, and a `for` loop satisfies both. **Assert the mechanism, not the
+outcome.**
 
 **Multi-step specialists landed 2026-08-19 (ADR-028).** `gather.py` retrieves, asks a cheap
 fast-tier model whether that was enough, and retrieves again — bounded by a no-progress detector, a

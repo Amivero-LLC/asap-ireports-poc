@@ -86,6 +86,7 @@ from .port import (
 )
 from .specialist import SpecialistStatus, analyze
 from .synthesis import SynthesisOutcome, synthesize
+from .trace import RunTrace
 
 if TYPE_CHECKING:  # pragma: no cover - import-time typing only
     from langchain_core.runnables import RunnableConfig
@@ -256,6 +257,7 @@ class LangGraphOrchestrator:
         started = datetime.now(UTC)
         criteria = criteria_for(case.manifest)
         ledger = new_ledger(budgets)
+        trace = RunTrace()
         by_node = {c.node_id: c for c in criteria}
 
         def fan_out(_state: FanOutState):  # type: ignore[no-untyped-def]  # see below
@@ -312,9 +314,10 @@ class LangGraphOrchestrator:
                     (criterion,), set(), case.manifest.case_id, run_id, breach, cancel_reason
                 )
                 return {"outcomes": [outcome_to_json(o) for o in stopped]}
-            outcome = analyze(
-                criterion, case, gateway, retriever, run_id, ledger=ledger, cancel=cancel
-            )
+            with trace.span(node_id):
+                outcome = analyze(
+                    criterion, case, gateway, retriever, run_id, ledger=ledger, cancel=cancel
+                )
             if outcome.status is SpecialistStatus.CANCELLED and checkpointing is not None:
                 # Cancelled *inside* the node, after the pre-check passed. Same reasoning: a
                 # returned value would mark it done, and it is not done.
@@ -333,11 +336,9 @@ class LangGraphOrchestrator:
             differently.
             """
             outcomes = tuple(outcome_from_json(p, by_node[p["node_id"]]) for p in state["outcomes"])
-            return {
-                "synthesis": [
-                    synthesis_to_json(synthesize(case, outcomes, criteria, gateway, run_id))
-                ]
-            }
+            with trace.span("synthesis"):
+                produced = synthesize(case, outcomes, criteria, gateway, run_id)
+            return {"synthesis": [synthesis_to_json(produced)]}
 
         def join(_state: FanOutState) -> dict[str, list[dict[str, Any]]]:
             """A node that does nothing, and is required.
@@ -462,6 +463,7 @@ class LangGraphOrchestrator:
             criteria=criteria,
             synthesis=synthesis,
             consumption=ledger.consumption(),
+            trace=trace.spans(),
             resumed_nodes=resumed,
             breach=breach,
         )

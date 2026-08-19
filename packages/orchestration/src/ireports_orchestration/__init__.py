@@ -21,6 +21,7 @@ from .port import MAX_PARALLEL, Orchestrator, RunResult, join_and_sort, should_s
 from .registry import ORCHESTRATORS
 from .specialist import SpecialistOutcome, SpecialistStatus, analyze
 from .synthesis import Overlap, SynthesisOutcome, overlaps, synthesize
+from .trace import NodeSpan, RunTrace, peak_concurrency, timeline
 
 __all__ = [
     "CATALOG",
@@ -34,11 +35,13 @@ __all__ = [
     "InMemoryCheckpointStore",
     "LoadedCase",
     "NoApplicableCriteriaError",
+    "NodeSpan",
     "Orchestrator",
     "Overlap",
     "PostgresCheckpointStore",
     "RunCheckpoint",
     "RunResult",
+    "RunTrace",
     "SpecialistOutcome",
     "SpecialistStatus",
     "SynthesisOutcome",
@@ -48,6 +51,8 @@ __all__ = [
     "join_and_sort",
     "normalize_array",
     "overlaps",
+    "peak_concurrency",
     "should_synthesize",
     "synthesize",
+    "timeline",
 ]

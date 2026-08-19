@@ -273,6 +273,7 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         rejected=len(result.rejected),
         tokens=result.total_tokens,
         resumed=len(result.resumed_nodes),
+        peak_concurrency=result.peak_concurrency,
         replayed_calls=idempotent.calls_replayed if idempotent else 0,
         cancelled=cancel.cancelled,
     )
@@ -310,6 +311,15 @@ def handler(event: dict[str, Any] | None, context: object = None) -> dict[str, A
         # re-pay for every call, which is the failure LAMB-01 exists to close.
         "durable": STATE_DSN is not None,
         "resumed_nodes": list(result.resumed_nodes),
+        # **The run's own evidence that it fanned out and branched.** Node ids and offsets in
+        # seconds, nothing else — no case text ever reaches a trace (`CLAUDE.md`). A reader can
+        # check that three specialists overlapped and that synthesis waited for all five, rather
+        # than take a test name's word for it.
+        "peak_concurrency": result.peak_concurrency,
+        "trace": [
+            {"node_id": s.node_id, "started": round(s.started, 3), "ended": round(s.ended, 3)}
+            for s in result.trace
+        ],
         "model_calls": (
             {
                 # The LAMB-01 number: on a resumed invocation `paid` must cover only outstanding

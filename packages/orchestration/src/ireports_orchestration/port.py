@@ -37,6 +37,7 @@ from .criteria import Criterion
 from .gather import CancellationToken
 from .specialist import SpecialistOutcome, cancelled, skipped_for_budget
 from .synthesis import SynthesisOutcome
+from .trace import NodeSpan, peak_concurrency
 
 MAX_PARALLEL = int(os.environ.get("IREPORTS_MAX_PARALLEL", "3"))
 """Bounded fan-out. `Budgets.max_parallel_specialists` defaults to 4 and caps at 16; this mirrors
@@ -73,6 +74,15 @@ class RunResult:
     that returned, including calls whose findings were then dropped by validation. Money spent is
     spent whether or not the finding survived."""
 
+    trace: tuple[NodeSpan, ...] = ()
+    """When each node ran — **the run's own evidence that it fanned out and branched.**
+
+    Every other claim about the orchestration is a test assertion a reader has to trust, and a
+    fully serial implementation passes every fan-out test in the suite. This is the thing they can
+    check: `peak_concurrency` over a five-criterion run is 3, not 1.
+
+    Identifiers and timings only, never case text."""
+
     resumed_nodes: tuple[str, ...] = ()
     """Which nodes this run restored from a checkpoint instead of executing.
 
@@ -88,6 +98,11 @@ class RunResult:
     what it has — `RunStatus.INCOMPLETE_DUE_TO_BUDGET` routes to `PACKAGING`, not to `FAILED`,
     because a truncated analysis that silently vanishes is worse than one a reviewer can see is
     truncated."""
+
+    @property
+    def peak_concurrency(self) -> int:
+        """The most nodes that ran at once. **1 means the fan-out did not fan out.**"""
+        return peak_concurrency(self.trace)
 
     @property
     def rejected(self) -> tuple[str, ...]:

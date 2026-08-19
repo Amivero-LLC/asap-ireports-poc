@@ -708,6 +708,43 @@ deepened; none added.
 are separately checkpointable, so a crash mid-loop resumes mid-loop. That is a different design,
 and it costs the "one shared specialist" arrangement that makes the two paths comparable at all.
 
+### Width and a ceiling do not prove a fan-out `[measured]`
+
+Two tests claimed to prove the orchestration fans out. One asserted five outcomes came back for
+five criteria; the other asserted no more than three ran at once. **A `for` loop satisfies both.**
+Every orchestration test in the suite passed on a serial implementation, and nothing anywhere
+asserted that two specialists overlapped in time.
+
+Confirmed by breaking it deliberately: setting `max_workers=1` and `max_concurrency=1` left the
+entire suite green except the six assertions written after noticing.
+
+The measurement that distinguishes them is **peak concurrency** — a sweep over start and end
+events, with ends processed first so two nodes running back to back count as one. `>1` is a
+fan-out; `1` is a loop. It needs work slow enough to overlap: against an instant stub every span is
+a point, nothing overlaps anything, and a genuinely parallel run measures 1.
+
+The same trace settles two more claims that were previously inferred rather than shown:
+
+* **The fan-in barrier.** "Synthesis was called once" is also true of a synthesis that started
+  alongside the third specialist and reasoned over two findings. `synthesis.started >= max(end of
+  every specialist)` is the property actually wanted.
+* **The branch.** `result.synthesis is None` is equally consistent with a router that chose `END`
+  and with a second stage never wired up. Only running the *same* orchestrator twice and seeing it
+  take each route distinguishes them.
+
+**The general form: assert the mechanism, not the outcome.** A count is what a correct
+implementation produces; it is also what several incorrect ones produce. And prefer evidence a
+reader can inspect over a test they must trust — a run now carries its own timeline:
+
+```
+foreign_influence_specialist         |###################             |   0.01-46.65s
+personal_conduct_specialist          |##################              |   0.01-43.24s
+financial_considerations_specialist  |################                |   0.01-38.17s
+candor_specialist                    |                #############   |  38.18-70.61s
+criminal_conduct_specialist          |                  ########      |  43.24-62.44s
+synthesis                            |                           #### |  70.62-103.45s
+```
+
 ### Put the attempt counter in the idempotency key `[measured]`
 
 `analyze` retries when a response comes back in an unusable *shape* (ADR-018). The two requests are

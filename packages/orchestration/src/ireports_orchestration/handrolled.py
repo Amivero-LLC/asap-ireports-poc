@@ -27,6 +27,7 @@ from .port import (
 )
 from .specialist import SpecialistOutcome, analyze, cancelled, skipped_for_budget
 from .synthesis import synthesize
+from .trace import RunTrace
 
 
 class HandRolledOrchestrator:
@@ -57,6 +58,7 @@ class HandRolledOrchestrator:
         started = datetime.now(UTC)
         criteria = criteria_for(case.manifest)
         ledger = new_ledger(budgets)
+        trace = RunTrace()
         # Loaded once, before any work: the set of already-completed nodes cannot change under a
         # run that is the only writer for its own id.
         checkpoint: RunCheckpoint | None = (
@@ -87,9 +89,13 @@ class HandRolledOrchestrator:
             # The token goes *into* the node too. Stopping only between criteria would leave a
             # cancelled run waiting on however long the specialist's own loop takes to finish,
             # which under a Lambda deadline is the time it does not have.
-            outcome = analyze(
-                criterion, case, gateway, retriever, run_id, ledger=ledger, cancel=cancel
-            )
+            # Timed here rather than around the whole worker: a restored or budget-skipped
+            # criterion did no work, and recording a span for it would inflate the concurrency
+            # figure with nodes that never ran.
+            with trace.span(criterion.node_id):
+                outcome = analyze(
+                    criterion, case, gateway, retriever, run_id, ledger=ledger, cancel=cancel
+                )
             # Committed here, inside the worker, rather than after the pool joins. That is what
             # lets a crash mid-fan-out keep the specialists that finished; a commit after the
             # barrier would keep none of them.
@@ -112,7 +118,8 @@ class HandRolledOrchestrator:
             and not cancel_reason
             and should_synthesize(outcomes)
         ):
-            synthesis = synthesize(case, tuple(outcomes), criteria, gateway, run_id)
+            with trace.span("synthesis"):
+                synthesis = synthesize(case, tuple(outcomes), criteria, gateway, run_id)
             if checkpoint is not None:
                 checkpoint.record_synthesis(synthesis)
 
@@ -125,6 +132,7 @@ class HandRolledOrchestrator:
             criteria=criteria,
             synthesis=synthesis,
             consumption=ledger.consumption(),
+            trace=trace.spans(),
             resumed_nodes=checkpoint.resumed if checkpoint is not None else (),
             breach=breach,
         )

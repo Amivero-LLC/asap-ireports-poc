@@ -317,6 +317,23 @@ def invoke(
     return _payload_from(result.stdout)
 
 
+def _timeline_rows(trace: list[dict[str, Any]]) -> list[str]:
+    """Render the run's node timings, reusing the package's own renderer.
+
+    Imported here rather than at module scope so this script keeps starting without the
+    orchestration package importable — it is a runner, and its job is to report what the Lambda
+    returned even when the local environment is half-configured.
+    """
+    from ireports_orchestration import NodeSpan, timeline
+
+    return timeline(
+        tuple(
+            NodeSpan(node_id=s["node_id"], started=float(s["started"]), ended=float(s["ended"]))
+            for s in trace
+        )
+    )
+
+
 def _report(payload: dict[str, Any], out_file: Path | None) -> None:
     candidate = payload["candidate"]
     tokens = payload.get("tokens", {})
@@ -348,6 +365,17 @@ def _report(payload: dict[str, Any], out_file: Path | None) -> None:
                 f"    {overlap['evidence_id']} carries findings under "
                 f"{len(overlap['criterion_ids'])} criteria: {overlap['criterion_ids']}"
             )
+
+    trace = payload.get("trace") or []
+    if trace:
+        # **The evidence, not a summary of it.** Everything else in this report is a count; this is
+        # the only part that shows the orchestration *shape* — three specialists starting together,
+        # then two, then synthesis waiting for all of them. A serial implementation would produce
+        # the same counts above and a visibly different picture here.
+        peak = payload.get("peak_concurrency", 0)
+        print(f"  timeline — peak {peak} node(s) at once:")
+        for row in _timeline_rows(trace):
+            print(row)
 
     for reason in payload.get("rejected", []):
         # Not an error log. Every line here is the deterministic shell refusing something the
