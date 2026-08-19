@@ -8,6 +8,13 @@ turning into "every caller knows about both frameworks."
 from __future__ import annotations
 
 from .case import EvidenceSpan, LoadedCase
+from .checkpoint import (
+    Checkpointing,
+    CheckpointStore,
+    InMemoryCheckpointStore,
+    PostgresCheckpointStore,
+    RunCheckpoint,
+)
 from .coercion import MAX_REJECTIONS, cap_rejections, normalize_array
 from .criteria import CATALOG, Criterion, NoApplicableCriteriaError, criteria_for
 from .port import MAX_PARALLEL, Orchestrator, RunResult, join_and_sort, should_synthesize
@@ -20,12 +27,17 @@ __all__ = [
     "MAX_PARALLEL",
     "MAX_REJECTIONS",
     "ORCHESTRATORS",
+    "CheckpointStore",
+    "Checkpointing",
     "Criterion",
     "EvidenceSpan",
+    "InMemoryCheckpointStore",
     "LoadedCase",
     "NoApplicableCriteriaError",
     "Orchestrator",
     "Overlap",
+    "PostgresCheckpointStore",
+    "RunCheckpoint",
     "RunResult",
     "SpecialistOutcome",
     "SpecialistStatus",

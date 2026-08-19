@@ -16,12 +16,16 @@ Read the IDs as a checklist, not a contract. If one turns out to be wrong, chang
 thing keeping this file honest, and it is the same one that failed for the file this replaced —
 so if you find a checkbox disagreeing with the code, believe the code and fix the checkbox.
 
-**Where things stand (2026-08-12).** The architecture-package requirements are closed. Of the
-orchestrator-spine set, retrieval (RETR-01, RETR-02), the refusal path (VAL-02) and the gateway
-port (QUAL-02) are done. ORCH-01 and SPEC-01 moved into `packages/orchestration/` and still are
-not checked off — each has one clause left, and both are named in the status lines below rather
-than rounded away. Idempotent crash/resume (ORCH-02) and the Lambda timeout proof (LAMB-01) are
-the untouched hard ones — and ORCH-02 is what closes the framework question in ADR-024.
+**Where things stand (2026-08-18).** The architecture-package requirements are closed. Of the
+orchestrator-spine set, retrieval (RETR-01, RETR-02), the refusal path (VAL-02), the gateway port
+(QUAL-02) and now **ORCH-01** are done — the last closed when node-level checkpointing gave
+`durability="sync"` and strict deserialization somewhere to be set. SPEC-01 is still unchecked with
+one clause left, and that clause is *vacuous* rather than unmet: a specialist has no tool surface to
+allowlist. ORCH-02 has both of its halves built — no duplicate paid calls, and no re-executed
+completed nodes — and stays unchecked against its own acceptance wording. **LAMB-01 is the
+untouched hard one**, and it, not ORCH-02, is now what closes the framework question in ADR-024:
+everything measured so far happens inside one process, and the constraint that motivated the whole
+question is an invocation boundary.
 
 ---
 
@@ -67,7 +71,7 @@ the untouched hard ones — and ORCH-02 is what closes the framework question in
 
 ### The orchestrator spine
 
-- [ ] **ORCH-01**: The orchestrator runs on LangGraph **behind this project's own orchestration
+- [x] **ORCH-01**: The orchestrator runs on LangGraph **behind this project's own orchestration
       port**, and no analysis node imports LangGraph.
       *Acceptance:* `packages/orchestration/` exposes the port; a test asserts no
       `from langgraph import ...` outside the adapter; `durability="sync"` and strict checkpoint
@@ -91,7 +95,7 @@ the untouched hard ones — and ORCH-02 is what closes the framework question in
     this process wrote. **Two honest limits.** The harness is 8 trials of a new harness, not the
     bake-off's original 24 — the shape of the measurement is reproduced, not the fixture. And a
     resumed run still *re-executes* completed nodes; it pays for nothing, but it spends wall clock,
-    which is the resource LAMB-01 is short of. Node-level checkpointing is what closes that
+    which is the resource LAMB-01 is short of. **Node-level checkpointing closed that half on 2026-08-18** (`checkpoint.py`, ADR-026): a resumed run restores completed nodes instead of re-executing them, proven across a real process boundary on both paths. The checkbox stays open for the acceptance's own reason — the harness is 8 trials, not the bake-off's 24 — and because LAMB-01 is where "resume" stops meaning "a second call to `run()`". One measured caveat, in `docs/LESSONS.md`: on the LangGraph path a crash can lose the checkpoint write for a call that already returned (8 of 24 trials, against 0 hand-rolled), which costs wall clock and not money
 - [ ] **LAMB-01**: A run that exhausts its wall-clock budget inside Lambda checkpoints, returns,
       and resumes in a *new invocation* without re-paying for an in-flight model call.
       *Acceptance:* under SAM local with a wall-clock budget set below the work required, the first
@@ -117,7 +121,7 @@ the untouched hard ones — and ORCH-02 is what closes the framework question in
       `api.smith.langchain.com` **and still succeeds**, because the failure is swallowed.
       *Traces:* `REQ-langsmith-egress-deny` · ADR-012: "any future entry point inherits this
       obligation."
-  - *Status:* **Address closed 2026-08-12, one clause open.** `packages/orchestration/port.py` exposes the port; both adapters sit behind it; the no-import test scans every module in the package rather than a hand-written list. **What is left is the checkpoint half** — `durability="sync"` and strict deserialization cannot be set until there is a checkpointer, which is ORCH-02. Unchecked on purpose: the acceptance is a conjunction, and rounding it up is how a requirements file starts lying
+  - *Status:* **Done 2026-08-18.** `packages/orchestration/port.py` exposes the port; both adapters sit behind it; the no-import test scans every module in the package rather than a hand-written list. The checkpoint clauses closed with node-level checkpointing: `DURABILITY = "sync"` and `strict_serde()` are named module-level values in `langgraph_adapter.py`, set **in code** rather than by environment variable, and `tests/orchestration/test_checkpoint.py` asserts both. A third test pins the reason the second one matters — under strict deserialization LangGraph returns a `dict` rather than refusing, silently, on the resume path only
   - *Status:* **Substantially done 2026-08-18.** `budget.py` enforces run-level wall-clock and token ceilings that **stop the run** — a crossed ceiling skips remaining criteria without a model call, the run reports which ceiling, and `SpecialistStatus.SKIPPED_BUDGET` keeps that distinct from a failure. `BudgetConsumption` is recorded. Fan-out width, bounded retry and bounded K were already enforced. **Two clauses remain:** no no-progress detector, and no cancellation — both belong with the multi-step specialist (item 6), which is the first node that can loop. `INCOMPLETE_DUE_TO_BUDGET` routes to packaging, not review: ADR-022 removed the in-run review gate, and the requirement's original wording predates it
   - *Status:* **Proven for the bake-off** (`spikes/langgraph/test_langsmith_egress.py`), never re-proven at the demo's entry points
 
@@ -330,8 +334,8 @@ originals below. Recorded **unordered and unscoped**.
 | ARCH-04 | Phase 1 | Complete |
 | CONT-01 | Phase 1 | Complete |
 | QUAL-01 | — | Done (2026-08-11) |
-| ORCH-01 | Phase 2 | Pending |
-| ORCH-02 | Phase 2 | Pending |
+| ORCH-01 | Phase 2 | Done (2026-08-18) |
+| ORCH-02 | Phase 2 | Substantially done (2026-08-18) |
 | LAMB-01 | Phase 2 | Pending |
 | ORCH-03 | Phase 2 | Substantially done (2026-08-18) |
 | ORCH-04 | Phase 2 | Pending |

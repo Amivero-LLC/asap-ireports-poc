@@ -170,7 +170,8 @@ the gap is covered in practice rather than by design; closing it is a contract c
 ADR.
 
 **Next up: item 7** — crash, resume, and idempotency. The wall-clock budget is what makes the
-Lambda half of it possible.
+Lambda half of it possible, and it is now what a run gets to checkpoint against: a criterion the
+ceiling skipped is deliberately *not* recorded, so it is the next invocation's work.
 
 ---
 
@@ -225,21 +226,48 @@ signal we will get.
 ## 7 · Crash, resume, and idempotency
 
 The hard one, the highest technical risk, and **the thing that decides the framework question.**
-By this point there is a real graph to checkpoint rather than three parallel calls.
 
-- Checkpoint after each node; resume in a *separate process* without re-running completed work
 - ~~**A crash mid-fan-out must not re-run an in-flight model call.**~~ ✅ **done 2026-08-18.**
   0 duplicate paid calls, both paths, every crash point — against the bake-off's 11 of 24 and 12 of
   24. It landed at the *gateway*, not the orchestrator, so both paths got it in identical
-  framework-free code and it discriminates between them not at all. **That reframes the rest of
-  this item:** a resumed run now re-executes everything and pays for nothing, so checkpointing buys
+  framework-free code and it discriminates between them not at all. **That reframed the rest of
+  this item:** a resumed run re-executes everything and pays for nothing, so checkpointing buys
   back wall clock rather than money. See `LESSONS.md`
-- On the LangGraph path set `durability="sync"` and strict checkpoint deserialization. Both defaults
-  are wrong here and invisible when reading the graph
-- Then prove it across a Lambda invocation boundary, where a timeout *is* the crash
+- ~~Checkpoint after each node; resume in a *separate process* without re-running completed work~~
+  ✅ **done 2026-08-18.** `checkpoint.py` for the hand-rolled path, `PostgresSaver` for LangGraph,
+  both proven across a real process boundary
+- ~~On the LangGraph path set `durability="sync"` and strict checkpoint deserialization~~
+  ✅ **done 2026-08-18**, in code with tests. **This closes ORCH-01**, whose last two clauses these
+  were
+- Then prove it across a Lambda invocation boundary, where a timeout *is* the crash — **LAMB-01,
+  the one thing left in this item**
 
-**When this works, make the framework call and close ADR-024.** Durable orchestration of paid
-sub-calls is not a real claim if resuming double-pays.
+**What it told us — the first result that runs against LangGraph, on the dimension it was chosen
+for.** Three findings, all measured, all in `LESSONS.md`:
+
+1. **A crash can lose the checkpoint write for a call already paid for.** The hand-rolled path
+   commits inside the worker before the node returns; LangGraph persists from the runner *after* it
+   returns, and a sibling's exception shuts the executor down in between. Over the bake-off's
+   24-trial shape: **hand-rolled 0 lost writes, LangGraph 8.** It costs wall clock rather than
+   money — idempotency covers the spend — which is precisely the resource this feature exists to
+   buy back. `durability="sync"` narrows that window and cannot close it.
+2. **Strict deserialization silently returns a `dict`.** Not an exception — a type downgrade, on
+   the resume path only. It hit the `Send` payload before it hit the state, so the fan-out died on
+   `criterion.question` after a crash and never before one. Both paths therefore share a
+   framework-free JSON codec: **`PostgresSaver` saves you the store, not the codec**, and the codec
+   is most of the code.
+3. **A budget stop needs two spellings on the LangGraph path and one on the other.** A returned
+   value is also what marks a task complete, so returning a skip would tell the checkpoint the
+   criterion is done and strand the invocation whose job was to finish it. The node has to raise —
+   but only when something will resume, because an un-checkpointed raise discards every other
+   specialist's paid-for work.
+
+**What is genuinely easier on LangGraph**, recorded rather than buried: `PostgresSaver.setup()`
+creates and migrates its own tables, and nothing in the adapter writes SQL. `checkpoint.py` had to
+write a schema, an upsert, and a read. That is real, and it is smaller than the three costs above.
+
+**ADR-024 is not closed here** — LAMB-01 is the last piece, and a framework decision made without
+the Lambda boundary would be made without the constraint that motivated it.
 
 ---
 

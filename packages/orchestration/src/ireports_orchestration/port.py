@@ -32,6 +32,7 @@ from ireports_retrieval import Retriever
 
 from .budget import DEFAULT_BUDGETS, BudgetBreach, BudgetLedger
 from .case import LoadedCase
+from .checkpoint import Checkpointing
 from .criteria import Criterion
 from .specialist import SpecialistOutcome
 from .synthesis import SynthesisOutcome
@@ -71,6 +72,14 @@ class RunResult:
     that returned, including calls whose findings were then dropped by validation. Money spent is
     spent whether or not the finding survived."""
 
+    resumed_nodes: tuple[str, ...] = ()
+    """Which nodes this run restored from a checkpoint instead of executing.
+
+    **The LAMB-01 measurement.** Idempotency already means a resumed run pays for nothing it
+    already bought, so what a checkpoint buys back is wall clock — and the only way to see that is
+    to count the nodes that did not run. Empty on a first run, and empty on a resumed run with no
+    checkpointing configured, which are different facts distinguishable from `Checkpointing`."""
+
     breach: BudgetBreach | None = None
     """Which ceiling stopped the run early, if one did.
 
@@ -104,6 +113,7 @@ class Orchestrator(Protocol):
         retriever: Retriever,
         run_id: str,
         budgets: Budgets | None = None,
+        checkpointing: Checkpointing | None = None,
     ) -> RunResult: ...
 
 

@@ -1080,3 +1080,58 @@ would be a heuristic dressed as determinism.
 - **`evals`' `classification_is_not_a_constant` stops failing** — but only once a corpus contains a
   record varied enough to warrant more than one value. It was the check that caught this, and it
   is worth keeping pointed at any enum a node chooses from.
+
+## ADR-026 — Checkpointing is per path; the port shares a connection string and nothing richer
+
+**Date:** 2026-08-18 · **Status:** Accepted
+
+**Context.** Node-level checkpointing is what ORCH-01's remaining clauses and LAMB-01 both need,
+and it is the feature ADR-012 chose LangGraph for. Building it meant deciding what, if anything,
+the two orchestration paths share — every other capability so far has been shared framework-free
+code both call, and idempotency (ORCH-02) turned out to belong at the gateway, where the paths
+cannot differ at all.
+
+That pattern does not extend here. The hand-rolled path needs a map of node id to result.
+LangGraph needs a `BaseCheckpointSaver`, which also owns the graph's superstep bookkeeping — which
+tasks are pending, which channel versions a checkpoint refers to, what a resume must re-dispatch.
+Those are not two implementations of one interface. And `packages/orchestration/` may not name a
+LangGraph type outside the adapter, which is enforced by a source scan.
+
+**Decision.**
+
+1. **`Checkpointing` carries one slot per path plus a shared `dsn`.** `store` is the hand-rolled
+   `CheckpointStore`; `saver` is LangGraph's checkpointer, typed `Any` so the no-import rule holds;
+   `dsn` is the only field both understand, and each adapter builds its own thing from it.
+2. **The codec is shared and framework-free.** `checkpoint.py` encodes a `SpecialistOutcome` and a
+   `SynthesisOutcome` to JSON and re-validates them through the ordinary contracts. Both paths use
+   it — the LangGraph one is *obliged* to, see the consequences.
+3. **Only work that happened is checkpointed.** `COMPLETED` and `REFUSED` are recorded; a refusal
+   was paid for and ADR-015 forbids re-asking it. `SKIPPED_BUDGET` and `FAILED` are not.
+4. **`durability="sync"` and strict deserialization are set in code**, as named module-level
+   values with tests, not as environment variables. Both LangGraph defaults are wrong here and
+   invisible when reading a graph.
+
+**Why not a single `CheckpointStore` both paths implement**, with a LangGraph adapter behind it:
+LangGraph's checkpointer is called by the framework's runner, not by our code, and it is handed
+superstep state we have no meaning for. An adapter would have had to either discard that state — 
+breaking resume — or invent a representation of it, which is writing a checkpointer to avoid using
+one. The asymmetry is real and the port should show it rather than hide it.
+
+**Why not skip the hand-rolled store and require LangGraph for durability:** that decides ADR-024
+by omission. The comparison is the deliverable, and it needs both.
+
+**Consequences.**
+
+- **The framework-free codec is not optional on the LangGraph path either.** Under strict
+  deserialization LangGraph does not refuse an unknown type — it returns a `dict`, on the resume
+  path only. State channels and `Send` payloads therefore carry JSON. `PostgresSaver` saves us the
+  *store*; it does not save us the codec, which is most of the interesting code.
+- **A budget stop needs two different spellings.** The hand-rolled path returns a skipped outcome;
+  the LangGraph node must *raise*, because there a returned value is what marks a task complete and
+  a completed task is never re-dispatched. `run()` reconstructs the skipped outcomes afterwards so
+  both paths report the same run.
+- **The `Criterion` is not stored.** It is re-derived from the case and the stored `criterion_id`
+  is checked against it, so a row cannot deliver one criterion's findings under another's authority.
+- **Row integrity is still unaddressed**, and is now the largest known gap on two tables rather than
+  one (`docs/handoff/checkpoint-threat-model.md`). Re-validating through the contracts catches a row
+  that no longer satisfies them; it catches nothing about a tampered row that still parses.

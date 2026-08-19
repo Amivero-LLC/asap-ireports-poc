@@ -263,11 +263,11 @@ flowchart TD
         STEP3A --> STEP3B --> STEP3C --> STEP3D
     end
 
-    SHELL{"4. Deterministic shell checks<br/>budgets, loop limits, and<br/>no-progress between steps<br/>NOT BUILT - ORCH-03"}
-    BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>still packaged and delivered, not failed<br/>NOT BUILT - ORCH-03"]
+    SHELL{"4. Deterministic shell checks<br/>wall clock and token ceilings - BUILT<br/>no-progress detector and cancellation<br/>NOT BUILT - ORCH-03"}
+    BUDGETSTOP["emits INCOMPLETE_DUE_TO_BUDGET<br/>still packaged and delivered, not failed<br/>BUILT"]
     AGG["Aggregate the SpecialistResults<br/>no aggregate score, ever (ADR-014)"]
     SYNTH["4b. Cross-criterion synthesis<br/>overlap computed, conflicts and gaps by model<br/>skipped when there is nothing to reason across<br/>BUILT"]
-    STEP5["5. Checkpoint durably,<br/>before the node returns<br/>NOT BUILT - ORCH-02"]
+    STEP5["5. Every completed node is checkpointed<br/>committed inside the node before it returns,<br/>so a crash mid-fan-out keeps what finished<br/>BUILT"]
     STEP6["6. Package the proposals"]
     STEP7B["7. Emit a validated ASAPEnvelope<br/>written to disk - run is DELIVERED"]
     ASAPREVIEW["Reviewed in ASAP by an authorized officer<br/>NOT OURS - outside this diagram (ADR-022)"]
@@ -284,19 +284,25 @@ flowchart TD
     STEP7B -. "handed off" .-> ASAPREVIEW
 ```
 
-**This diagram is the target shape, and three of its boxes do not exist yet** — they are marked
-`NOT BUILT` with the requirement that owns each. It is drawn whole because the shape is what a
+**This diagram is the target shape, and one clause of one box does not exist yet** — marked
+`NOT BUILT` with the requirement that owns it. It is drawn whole because the shape is what a
 government team is being asked to build; §4's build-state table is the authority on what resolves
 to real code today. A design diagram that quietly reads as a status diagram is the specific way a
 handoff overstates itself, so the two are separated on the page rather than in a reader's head.
 
 Two properties are drawn rather than described, because they are the reason the spine exists
 (ADR-020): the **fan-out** (`STEP2 -- per criterion --> SPECIALIST`, one instance per criterion)
-and the **loop the limits bound** (`SHELL -- criteria remain --> STEP2`). Note also that the
-budget-stop path rejoins before step 5 — **every** path to delivery checkpoints first, including
-the truncated one. A path that returned without checkpointing would contradict the durability
-property stated below, and would be the specific way a truncated analysis disappears instead of
-reaching ASAP.
+and the **loop the limits bound** (`SHELL -- criteria remain --> STEP2`).
+
+**Step 5 is drawn as a stage and is not one.** A node is checkpointed the moment it completes,
+inside the node, which is what lets a crash mid-fan-out keep the specialists that finished; a
+commit batched at the end of a stage would keep none of them. The box sits where it does because
+every path to delivery — including the truncated one — passes through having checkpointed.
+
+**A criterion the budget skipped is deliberately *not* checkpointed**, and that is the one place
+this diagram's ordering could mislead. A criterion nobody attempted is the work the next invocation
+exists to do; recording it as done would make the first invocation's ceiling permanent and report a
+truncated case as a finished one.
 
 The last node is deliberately drawn outside the flow and marked `NOT OURS`. Review is real and it
 matters, but it is not a step in this state machine — the run reaches `DELIVERED` and ends,
@@ -380,12 +386,13 @@ reason to move the code.
 
 | Component | Build state | Path | Notes |
 |---|---|---|---|
-| Orchestration port (our own interface) | `BUILT` | `packages/orchestration/src/ireports_orchestration/port.py` | ORCH-01, address closed 2026-08-12. `RunResult`, the `Orchestrator` protocol, and the routing policy both adapters share. ORCH-01's checkpoint clauses (`durability="sync"`, strict deserialization) belong to the row below it and are untouched |
+| Orchestration port (our own interface) | `BUILT` | `packages/orchestration/src/ireports_orchestration/port.py` | **ORCH-01 fully met 2026-08-18.** `RunResult`, the `Orchestrator` protocol, and the routing policy both adapters share. The checkpoint clauses (`durability="sync"`, strict deserialization) landed with the two rows below. The port shares only a connection string between the paths — a checkpointer is not a storage backend (ADR-026) |
 | Hand-rolled adapter behind the port | `BUILT` | `packages/orchestration/src/ireports_orchestration/handrolled.py` | ADR-024. A thread pool and a loop, running the same shared specialist as the LangGraph adapter and asserted to produce identical output. What ORCH-05 called a second adapter and cut |
 | LangGraph adapter behind the port | `BUILT` | `packages/orchestration/src/ireports_orchestration/langgraph_adapter.py` | ORCH-01. `Send`-based runtime fan-out, a `join` node, conditional routing. No analysis module imports LangGraph — enforced by a source scan over every module in the package, exempting this one and `registry.py` |
 | Criteria selection from the case manifest | `BUILT` | `packages/orchestration/src/ireports_orchestration/criteria.py` | Fan-out width is runtime data, derived from `requested_analyses` × `policy_pack_ids`. **A stub for authority routing (ROUT-01), not the router** — it intersects what was asked with what the catalog offers and cannot decline or add a criterion |
 | Cross-criterion synthesis | `BUILT` | `packages/orchestration/src/ireports_orchestration/synthesis.py` | Evidence overlap computed by set arithmetic; contradictions and information gaps by one model call. Emits `ProposedFinding`s only — no summary, no ranking, no aggregate (ADR-014) |
-| Checkpoint store (`PostgresSaver` over PostgreSQL) | `PLANNED` | `packages/orchestration/src/ireports_orchestration/checkpoint.py` | Phase 2, ORCH-01/ORCH-02; `durability="sync"` and strict deserialization set in code |
+| Node-level checkpointing (hand-rolled store) | `BUILT` | `packages/orchestration/src/ireports_orchestration/checkpoint.py` | ORCH-01/ORCH-02. One row per completed node, JSON re-validated through the contracts on read, committed inside the node. A budget-skipped criterion is deliberately not recorded — it is the next invocation's work. Row integrity is a known gap (checkpoint-threat-model.md) |
+| Node-level checkpointing (LangGraph `PostgresSaver`) | `BUILT` | `packages/orchestration/src/ireports_orchestration/langgraph_adapter.py` | ORCH-01. `durability="sync"` and strict deserialization set **in code**, both tested. Shares the row above's codec, because strict deserialization silently downgrades our types to `dict` — the first-party checkpointer saves you the store, not the codec |
 | Model-call idempotency | `BUILT` | `packages/orchestration/src/ireports_orchestration/idempotency.py` | ORCH-02. A gateway decorator, so both orchestration paths get it in identical framework-free code. Crash harness measures **0 duplicate paid calls** across both paths and every crash point; `PostgresCallStore` proven across a real process boundary. Row integrity is a known gap (checkpoint-threat-model.md) |
 | Deterministic budget/loop-limit shell | `BUILT` | `packages/orchestration/src/ireports_orchestration/budget.py` | ORCH-03. Run-level wall-clock and token ceilings that **stop the run**, not just record it — a crossed ceiling skips remaining criteria without a model call and the run reports which one. `Budgets` has no per-run model-call ceiling, only a per-node one; wall clock and tokens bound the run in practice |
 | LangSmith egress-deny at every entry point | `PLANNED` | `packages/orchestration/src/ireports_orchestration/egress.py` | Phase 2, ORCH-04; extends `spikes/langgraph/test_langsmith_egress.py`'s negative control |

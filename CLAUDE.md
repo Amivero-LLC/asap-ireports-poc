@@ -80,9 +80,12 @@ conditional routing, a type-checked tree, and budgets. Five results so far, in `
 | Conditional routing after fan-out | `if should_synthesize(...)` | Needs a `join` node; the naive version fires per dispatch on partial state **and fails silently** |
 | `mypy --strict` | No change | Four suppressions — the documented `Send` pattern matches no `add_node` overload |
 | Early termination on a budget | 3 lines | 3 lines — a null result, and marginally cheaper for the synthesis skip |
+| Node-level checkpointing | Ask, then tell — 4 lines | `PostgresSaver` writes no SQL, **and** costs a shared JSON codec, a raise-not-return budget stop, and 8 lost writes in 24 crash trials against 0 |
 
-None is decisive, and none yet touches what LangGraph was chosen for — durable checkpointing.
-**ORCH-02 is what closes this.**
+The last row is the first result that runs **against** LangGraph, on the dimension it was chosen
+for, and it is measured rather than argued (`docs/LESSONS.md`). It still does not decide ADR-024:
+everything above happens inside one process, and **LAMB-01 — the invocation boundary — is what
+closes it.**
 
 **No module that analyzes a case may import LangGraph.** A test enforces it by scanning every
 module in `packages/orchestration/`, exempting only `langgraph_adapter.py` and `registry.py`
@@ -94,7 +97,7 @@ one and hard in the other, that is a finding — write it into `docs/LESSONS.md`
 
 ## Current state
 
-**Last updated 2026-08-12.** If this disagrees with the code, the code is right — and fix this
+**Last updated 2026-08-18.** If this disagrees with the code, the code is right — and fix this
 section, because a stale "what exists" note is the most expensive thing in this file.
 
 | Area | State |
@@ -102,15 +105,15 @@ section, because a stale "what exists" note is the most expensive thing in this 
 | `packages/domain/` | 12 Pydantic v2 contracts + generated JSON Schema in `schemas/` |
 | `packages/gateway/` | `ModelGateway` port — `litellm` (proven live), `bedrock` (never run), `stub`. Plus an `EmbeddingGateway`, Titan via the proxy |
 | `packages/retrieval/` | OpenSearch hybrid vector + lexical, mandatory case filter, bounded K. **All field names in `mapping.py`** (Q-02) |
-| `packages/orchestration/` | Criteria routing, retrieval-backed specialists, synthesis, and both orchestrators behind `port.py`. Specialists return the published `SpecialistResult` |
+| `packages/orchestration/` | Criteria routing, retrieval-backed specialists, synthesis, budgets, gateway-level idempotency, node-level checkpointing, and both orchestrators behind `port.py` |
 | `spikes/lambda_demo/` | The runnable wrapper — case loading off disk, envelope packaging, Lambda handler, `run_case.py`, and the synthetic corpus |
 | `spikes/lambda_fit/` | Packaging and cold-start measurement under SAM local |
 | `cases/` in the demo | Three imported synthetic cases, ~35k tokens each, plus the original toy one |
 | `evals/` | Scores **saved run files** offline — nine invariants, each descending from a real incident, plus a corpus check no single run can make about itself. `uv run python -m evals.score_run` |
-| Tests | 262 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
+| Tests | 315 passing, 8 skipped (skips are live-model, opt-in via `IREPORTS_LIVE_SMOKE=1`) |
 
-**Not built:** crash/resume, model-call idempotency, authority routing
-from policy packs, ingestion, `apps/`, ground-truth agreement scoring (VAL-03/04).
+**Not built:** the Lambda invocation boundary (LAMB-01), authority routing from policy packs,
+ingestion, `apps/`, ground-truth agreement scoring (VAL-03/04).
 
 **Classification is the model's answer, not a constant (ADR-025).** The specialist picks from three
 of the contract's five values; `contradiction` and `information_gap` stay synthesis's. An
@@ -123,10 +126,15 @@ valid, so a wholly clean case produces **no envelope** and the run reports why.
 stays on the local `SpecialistOutcome` wrapper — ADR-021 §2 keeps completion status off the contract
 on purpose, and a test now asserts that rather than trusting prose.
 
-**What that did *not* close.** ORCH-01's acceptance also requires `durability="sync"` and strict
-checkpoint deserialization, which belong to ORCH-02 and do not exist. SPEC-01's tool-allowlist
-clause is *vacuous* rather than satisfied — a specialist has no tool surface to allowlist. Both are
-still unchecked in `docs/REQUIREMENTS.md`, deliberately.
+**Checkpointing landed 2026-08-18 (ADR-026).** A completed node is checkpointed inside the node,
+and a resume restores it instead of re-executing it — hand-rolled store in `checkpoint.py`,
+`PostgresSaver` on the LangGraph path, both proven across a real process boundary. **This closed
+ORCH-01**, whose last two clauses were `durability="sync"` and strict deserialization; both are now
+named module-level values in `langgraph_adapter.py` with tests. Only work that *happened* is
+recorded — a budget-skipped criterion is deliberately not, because it is the next invocation's job.
+
+**SPEC-01's tool-allowlist clause is *vacuous* rather than satisfied** — a specialist has no tool
+surface to allowlist — so it stays unchecked in `docs/REQUIREMENTS.md`, deliberately.
 
 **To run the demo you need Docker up** — OpenSearch holds the indexed cases:
 

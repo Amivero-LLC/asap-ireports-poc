@@ -209,7 +209,13 @@ specialist implementation; both produce the same shape of output.
 class Orchestrator(Protocol):
     name: str
     def run(
-        self, case: LoadedCase, gateway: ModelGateway, retriever: Retriever, run_id: str
+        self,
+        case: LoadedCase,
+        gateway: ModelGateway,
+        retriever: Retriever,
+        run_id: str,
+        budgets: Budgets | None = None,
+        checkpointing: Checkpointing | None = None,
     ) -> RunResult: ...
 ```
 
@@ -223,7 +229,7 @@ width:
 START ──▶ select criteria (from the case) ──▶ N specialists ──▶ synthesis ──▶ END
 ```
 
-Four comparison points so far, one of them a null result:
+Six comparison points so far, two of them null results:
 
 | Change | Hand-rolled | LangGraph |
 |---|---|---|
@@ -231,16 +237,23 @@ Four comparison points so far, one of them a null result:
 | **Fan-in barrier for stage two** | Free — exiting the `ThreadPoolExecutor` context | Free — supersteps; a node after a `Send` waits for every dispatch |
 | **Conditional routing after fan-out** | `if should_synthesize(outcomes):` | Needs a do-nothing `join` node. The naive version fires once per dispatch on partial state and **fails silently** |
 | **Passing `mypy --strict`** | No change | Four suppressions, because the documented `Send` pattern matches no `add_node` overload |
+| **Early termination on a budget** | 3 lines | 3 lines — and marginally cheaper for the synthesis skip, because the routing point already existed |
+| **Node-level checkpointing** | Ask the checkpoint, then tell it — 4 lines, plus a store, an upsert and a read | `PostgresSaver.setup()` writes the schema for you. **And** a shared JSON codec is mandatory, the budget stop must raise rather than return, and 8 of 24 crash trials lost the write for a call already paid for, against 0 |
 
-The second is a null result and counts as evidence: joining was expected to favour LangGraph and
-did not. The others are real asymmetries, all favouring the hand-rolled path on simplicity — though
-the first is not obviously a point *against* LangGraph, since its version keeps the graph shape
-constant while the work varies, which is what a checkpoint needs.
+Two are null results and count as evidence: joining and early termination were both expected to
+favour LangGraph and neither did.
 
-**None of the four touches durable checkpointing, which is what LangGraph was chosen for.** The
-decision is not close to made.
+**The last row is the first result that runs against LangGraph on the dimension it was chosen for.**
+Not decisively — `PostgresSaver` genuinely removes the storage layer, which is real work — but the
+three costs beside it are larger, and one of them (`durability="sync"` narrows the lost-write window
+and cannot close it, because the write happens outside the node) is a property of the design rather
+than a setting. All measured; all in `docs/LESSONS.md`.
 
-**Still to come before it:** multi-step specialists, and crash/resume.
+**The decision is still not made, and the reason is specific.** Everything above happens inside one
+process. What motivated the framework question is Lambda's 15-minute ceiling, where a timeout *is*
+the crash and the resume is a *new invocation* — LAMB-01. That is what closes ADR-024.
+
+**Still to come:** LAMB-01, then multi-step specialists.
 
 ### The same run, drawn twice
 

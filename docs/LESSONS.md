@@ -507,6 +507,86 @@ precisely what a resumed run is short of — re-executing four completed special
 fifth may not fit. So checkpointing still matters here; it matters for a different resource than
 the one the decision was framed around. That reframing is the finding.
 
+### A crash can lose the checkpoint write for a call you already paid for `[measured]`
+
+**The first result that runs against LangGraph on the dimension it was chosen for**, and it is a
+timing property rather than an API one.
+
+The hand-rolled path commits a node's result **inside the worker**, synchronously, before `analyze`
+returns. LangGraph persists a task's writes from the *runner*, after the task returns. When a
+sibling task raises, the executor shuts down, and a task that finished in that window can no longer
+submit its write — `RuntimeError: cannot schedule new futures after shutdown`, visible in the
+captured log of any trial that loses one.
+
+Measured over the bake-off's 24-trial shape, crashing at every point in a five-way fan-out:
+
+| | Trials | Paid calls with no checkpoint |
+|---|---|---|
+| Hand-rolled | 24 | **0** |
+| LangGraph | 24 | **8** |
+
+`durability="sync"` narrows the window and cannot close it, because the write still happens outside
+the node. **It costs wall clock, not money** — the gateway's call store replays the re-executed
+specialist rather than re-buying it — which is exactly the resource checkpointing exists to buy
+back. So the loss is small in dollars and lands precisely on the metric that matters under a Lambda
+ceiling.
+
+The general form, and it is not LangGraph-specific: *"the call returned" and "the checkpoint is
+durable" are two events, and everything between them is lost on a crash.* A framework that
+persists on your behalf decides how far apart they are, and it does not tell you.
+
+### Strict checkpoint deserialization silently returns a `dict` `[measured]`
+
+ORCH-01 requires strict deserialization — LangGraph's own source says the permissive default will
+"import and execute" any callable stored in checkpoint data. Turning it on has a consequence nobody
+documents: a type outside the allowlist is **not rejected**. It comes back as a plain `dict`, with a
+warning on stderr and no exception.
+
+```python
+serde = JsonPlusSerializer(pickle_fallback=False, allowed_msgpack_modules=None)
+serde.loads_typed(serde.dumps_typed(Thing(a="x")))   # -> {'a': 'x'}, not Thing
+```
+
+Pydantic models degrade the same way, nested enums included.
+
+**And it only happens on the resume path**, because a run that never crashes never deserializes. A
+`SpecialistOutcome` in a state channel works perfectly in every test, in every clean run, and in
+production until the first crash — then fails on `.findings`, at the moment you have least appetite
+for a new bug.
+
+**It applies to `Send` payloads too, which is the half that actually bit.** A `Send` payload is
+checkpointed as a pending write, so `Send("specialist", criterion)` resumes with a `dict` and the
+node dies on `criterion.question`. The payload is now a `node_id` and the criterion is looked up
+from the case.
+
+So the state channels and the dispatch payloads carry plain JSON, and `checkpoint.py`'s codec —
+written for the hand-rolled path — is imported by the LangGraph one. **The first-party checkpointer
+saves you the store, not the codec**, and the codec is most of the code.
+
+### A returned value is a completed task, and a budget stop needs those separated `[measured]`
+
+The hand-rolled budget stop is a `return`: the skipped outcome is a value, and a value is just a
+value. On the LangGraph path a returned value is also the thing that marks the task **complete**,
+and LangGraph never re-dispatches a completed task. So returning a budget skip tells the checkpoint
+the criterion is done, and the second Lambda invocation — whose entire job is to finish it — finds
+nothing outstanding and reports a truncated case as a finished one.
+
+The fix is to `raise` from the node, leaving the task pending, and reconstruct the skipped outcomes
+after `invoke` so both paths still report the same run. Which means the same behaviour is a `return`
+in one path and a `raise` plus a reconstruction in the other — **and which one is correct depends
+on whether anything is going to resume**, so the un-checkpointed LangGraph run still has to return,
+or a raise would discard every other specialist's paid-for work.
+
+One requirement, two spellings in one path, selected by a condition. That is the largest structural
+difference the two paths have shown.
+
+### Read `get_state`, not the checkpoint row, to see what survived a crash `[measured]`
+
+A LangGraph task that finished before its sibling died leaves a **pending write**, which is not yet
+folded into any checkpoint's `channel_values`. Reading the stored row directly reports that nothing
+completed, so a resume redoes everything — silently, correctly-looking, and only after a crash.
+`compiled.get_state(config)` applies pending writes, which is what the resume itself does.
+
 ### Put the attempt counter in the idempotency key `[measured]`
 
 `analyze` retries when a response comes back in an unusable *shape* (ADR-018). The two requests are
